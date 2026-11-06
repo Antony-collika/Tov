@@ -1,0 +1,202 @@
+package com.example.byokchat.ui
+
+import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.byokchat.AppContainer
+import com.example.byokchat.ai.ImageStore
+import com.example.byokchat.chat.ContextBuilder
+import com.example.byokchat.data.ContextLimits
+import com.example.byokchat.data.ConversationEntity
+import com.example.byokchat.data.DEFAULT_TITLE
+import com.example.byokchat.data.MessageEntity
+import com.example.byokchat.data.ProviderConfig
+import com.example.byokchat.data.encodeImages
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.UUID
+
+data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int)
+
+sealed interface ChatEvent {
+    data class Deleted(val backup: List<MessageEntity>) : ChatEvent
+    data class OpenConversation(val id: String) : ChatEvent
+    data class Error(val message: String) : ChatEvent
+}
+
+@OptIn(FlowPreview::class)
+class ChatViewModel(private val app: AppContainer, val conversationId: String) : ViewModel() {
+    private val db = app.db
+
+    val conversation: StateFlow<ConversationEntity?> =
+        db.conversations().observe(conversationId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    val messages: StateFlow<List<MessageEntity>> =
+        db.messages().observe(conversationId).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val generating: StateFlow<Boolean> =
+        app.engine.activeConversations.map { conversationId in it }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    val providers: StateFlow<List<ProviderConfig>> = app.settings.providers
+
+    /** Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi (luôn theo nội dung đã sửa). */
+    val tokenStats: StateFlow<TokenStats?> =
+        combine(conversation, messages, providers) { c, m, p -> Triple(c, m, p) }
+            .debounce(400)
+            .map { (c, m, p) ->
+                val cfg = p.firstOrNull { it.id == c?.providerId }
+                if (c == null || cfg == null) null
+                else {
+                    val budget = ContextBuilder.budget(cfg, c.model, c.systemPrompt, app.registry.estimateToolTokens())
+                    val plan = ContextBuilder.plan(m, budget, app.registry::nameForUid)
+                    TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, c.model), plan.droppedTurns)
+                }
+            }
+            .flowOn(Dispatchers.Default)
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val events: SharedFlow<ChatEvent> = _events
+
+    var draft by mutableStateOf("")
+    val pendingImages = mutableStateListOf<String>()
+
+    // ---------- Soạn và gửi ----------
+
+    fun addImages(uris: List<Uri>) {
+        viewModelScope.launch {
+            for (uri in uris) {
+                val path = withContext(Dispatchers.IO) { ImageStore.import(app.context, uri) }
+                if (path != null) pendingImages.add(path)
+            }
+        }
+    }
+
+    fun removePendingImage(path: String) {
+        pendingImages.remove(path)
+        File(path).delete()
+    }
+
+    fun send() {
+        val text = draft.trim()
+        val images = pendingImages.toList()
+        if ((text.isEmpty() && images.isEmpty()) || generating.value) return
+        draft = ""
+        pendingImages.clear()
+        viewModelScope.launch {
+            val turnId = UUID.randomUUID().toString()
+            val seq = (db.messages().maxSeq(conversationId) ?: 0) + 1
+            db.messages().upsert(
+                MessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversationId,
+                    turnId = turnId,
+                    seq = seq,
+                    role = "user",
+                    text = text,
+                    imagePaths = encodeImages(images),
+                    createdAt = System.currentTimeMillis(),
+                )
+            )
+            val conv = db.conversations().get(conversationId)
+            if (conv != null && conv.title == DEFAULT_TITLE) {
+                val title = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(40) ?: "Hình ảnh"
+                db.conversations().rename(conversationId, title)
+            }
+            app.engine.start(conversationId, turnId)
+        }
+    }
+
+    fun stop() = app.engine.stop(conversationId)
+
+    // ---------- Cài đặt cuộc trò chuyện ----------
+
+    fun setModel(providerId: String, model: String) {
+        viewModelScope.launch { db.conversations().setModel(conversationId, providerId, model) }
+    }
+
+    fun setSystemPrompt(prompt: String) {
+        viewModelScope.launch { db.conversations().setSystemPrompt(conversationId, prompt) }
+    }
+
+    fun rename(title: String) {
+        viewModelScope.launch { app.conversations.rename(conversationId, title) }
+    }
+
+    // ---------- Menu tin nhắn ----------
+
+    /** Edit message: chỉ lưu nội dung đã sửa, từ lần gửi sau dùng nội dung đó. */
+    fun saveEdit(messageId: String, text: String) {
+        if (generating.value) return
+        viewModelScope.launch { app.ops.editMessage(messageId, text) }
+    }
+
+    /** Delete: xóa cả lượt (cặp hỏi-đáp), có thể Hoàn tác. */
+    fun deleteTurn(turnId: String) {
+        if (generating.value) return
+        viewModelScope.launch {
+            val backup = app.ops.deleteTurn(conversationId, turnId)
+            _events.emit(ChatEvent.Deleted(backup))
+        }
+    }
+
+    fun undoDelete(backup: List<MessageEntity>) {
+        viewModelScope.launch { app.ops.restore(backup) }
+    }
+
+    suspend fun laterTurnCount(turnId: String): Int = app.ops.laterTurnCount(conversationId, turnId)
+
+    /** Tạo lại ngay trong cuộc hiện tại (các lượt phía sau, nếu có, bị xóa). */
+    fun regenerateHere(turnId: String, newUserText: String?) {
+        if (generating.value) return
+        viewModelScope.launch {
+            app.ops.prepareRegenerateHere(conversationId, turnId, newUserText)
+            app.engine.start(conversationId, turnId)
+        }
+    }
+
+    /** Tạo lại ở cuộc mới; cuộc gốc giữ nguyên. */
+    fun regenerateInBranch(turnId: String, newUserText: String?) {
+        if (generating.value) return
+        viewModelScope.launch {
+            try {
+                val r = app.ops.branchForRegenerate(conversationId, turnId, newUserText)
+                app.engine.start(r.conversationId, r.turnMap.getValue(turnId))
+                _events.emit(ChatEvent.OpenConversation(r.conversationId))
+            } catch (e: Exception) {
+                _events.emit(ChatEvent.Error(e.message ?: "Không tạo được nhánh."))
+            }
+        }
+    }
+
+    /** Branch: tạo cuộc mới, sao chép từ đầu đến tin nhắn được chọn. */
+    fun branchAt(messageId: String) {
+        if (generating.value) return
+        viewModelScope.launch {
+            try {
+                val r = app.ops.branchAt(conversationId, messageId)
+                _events.emit(ChatEvent.OpenConversation(r.conversationId))
+            } catch (e: Exception) {
+                _events.emit(ChatEvent.Error(e.message ?: "Không tạo được nhánh."))
+            }
+        }
+    }
+}
