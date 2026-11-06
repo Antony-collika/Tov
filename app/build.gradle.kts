@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -10,7 +12,7 @@ val signingKeyFile = rootProject.file("build/tov-development.p12")
 if (!signingKeyFile.exists()) {
     val encodedKey = rootProject.file("signing/tov-development.p12.base64").readText()
     signingKeyFile.parentFile.mkdirs()
-    signingKeyFile.writeBytes(java.util.Base64.getDecoder().decode(encodedKey))
+    signingKeyFile.writeBytes(Base64.getDecoder().decode(encodedKey))
 }
 
 android {
