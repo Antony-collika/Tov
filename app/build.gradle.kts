@@ -6,6 +6,17 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val stableKeystorePath = providers.environmentVariable("TOV_SIGNING_KEYSTORE").orNull
+val stableKeyAlias = providers.environmentVariable("TOV_SIGNING_KEY_ALIAS").orNull
+val stableStorePassword = providers.environmentVariable("TOV_SIGNING_STORE_PASSWORD").orNull
+val stableKeyPassword = providers.environmentVariable("TOV_SIGNING_KEY_PASSWORD").orNull
+val hasStableSigning = listOf(
+    stableKeystorePath,
+    stableKeyAlias,
+    stableStorePassword,
+    stableKeyPassword
+).all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.example.byokchat"
     compileSdk = 35
@@ -14,17 +25,42 @@ android {
         applicationId = "com.example.byokchat"
         minSdk = 26
         targetSdk = 35
+        // Keep the application identity/version stable for development installs.
+        // Do not auto-increment these values in CI.
         versionCode = 1
         versionName = "0.1"
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            // Ký bằng khóa debug để file APK release cài được ngay trên điện thoại
-            signingConfig = signingConfigs.getByName("debug")
+    signingConfigs {
+        if (hasStableSigning) {
+            create("stableDevelopment") {
+                storeFile = file(stableKeystorePath!!)
+                storePassword = stableStorePassword
+                keyAlias = stableKeyAlias
+                keyPassword = stableKeyPassword
+            }
         }
     }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+
+            // CI uses a persistent keystore supplied through GitHub Actions secrets.
+            // Local builds fall back to the machine's Android debug key.
+            signingConfig = if (hasStableSigning) {
+                signingConfigs.getByName("stableDevelopment")
+            } else {
+                signingConfigs.getByName("debug")
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
