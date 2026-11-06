@@ -3,7 +3,6 @@ package com.example.byokchat.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -102,11 +101,10 @@ class SettingsRepository(context: Context) {
     private companion object {
         fun createSecurePrefs(ctx: Context): SharedPreferences {
             fun build(): SharedPreferences {
-                val masterKey = MasterKey.Builder(ctx).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build()
                 return EncryptedSharedPreferences.create(
-                    ctx,
                     "secure_prefs",
-                    masterKey,
+                    "secure_prefs_master_key",
+                    ctx,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
                 )
