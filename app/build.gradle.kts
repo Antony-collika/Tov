@@ -6,16 +6,12 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val stableKeystorePath = providers.environmentVariable("TOV_SIGNING_KEYSTORE").orNull
-val stableKeyAlias = providers.environmentVariable("TOV_SIGNING_KEY_ALIAS").orNull
-val stableStorePassword = providers.environmentVariable("TOV_SIGNING_STORE_PASSWORD").orNull
-val stableKeyPassword = providers.environmentVariable("TOV_SIGNING_KEY_PASSWORD").orNull
-val hasStableSigning = listOf(
-    stableKeystorePath,
-    stableKeyAlias,
-    stableStorePassword,
-    stableKeyPassword
-).all { !it.isNullOrBlank() }
+val signingKeyFile = rootProject.file("build/tov-development.p12")
+if (!signingKeyFile.exists()) {
+    val encodedKey = rootProject.file("signing/tov-development.p12.base64").readText()
+    signingKeyFile.parentFile.mkdirs()
+    signingKeyFile.writeBytes(java.util.Base64.getDecoder().decode(encodedKey))
+}
 
 android {
     namespace = "com.example.byokchat"
@@ -25,20 +21,16 @@ android {
         applicationId = "com.example.byokchat"
         minSdk = 26
         targetSdk = 35
-        // Keep the application identity/version stable for development installs.
-        // Do not auto-increment these values in CI.
         versionCode = 1
         versionName = "0.1"
     }
 
     signingConfigs {
-        if (hasStableSigning) {
-            create("stableDevelopment") {
-                storeFile = file(stableKeystorePath!!)
-                storePassword = stableStorePassword
-                keyAlias = stableKeyAlias
-                keyPassword = stableKeyPassword
-            }
+        create("temporaryDevelopment") {
+            storeFile = signingKeyFile
+            storePassword = "tov-dev-temp-" + "2026"
+            keyAlias = "tov-development"
+            keyPassword = "tov-dev-temp-" + "2026"
         }
     }
 
@@ -50,14 +42,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-
-            // CI uses a persistent keystore supplied through GitHub Actions secrets.
-            // Local builds fall back to the machine's Android debug key.
-            signingConfig = if (hasStableSigning) {
-                signingConfigs.getByName("stableDevelopment")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            signingConfig = signingConfigs.getByName("temporaryDevelopment")
         }
     }
 
