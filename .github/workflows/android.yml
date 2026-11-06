@@ -40,30 +40,6 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      # A runner's default Android debug key is regenerated on a fresh runner.
-      # Use a persistent development keystore from repository Actions secrets
-      # for push/manual runs and same-repository PRs.
-      - name: Configure persistent development signing key
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          TOV_SIGNING_KEYSTORE_BASE64: ${{ secrets.TOV_SIGNING_KEYSTORE_BASE64 }}
-          TOV_SIGNING_KEY_ALIAS: ${{ secrets.TOV_SIGNING_KEY_ALIAS }}
-          TOV_SIGNING_STORE_PASSWORD: ${{ secrets.TOV_SIGNING_STORE_PASSWORD }}
-          TOV_SIGNING_KEY_PASSWORD: ${{ secrets.TOV_SIGNING_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [ -z "$TOV_SIGNING_KEYSTORE_BASE64" ] || [ -z "$TOV_SIGNING_KEY_ALIAS" ] || [ -z "$TOV_SIGNING_STORE_PASSWORD" ] || [ -z "$TOV_SIGNING_KEY_PASSWORD" ]; then
-            echo "::error::Missing signing secrets. Add TOV_SIGNING_KEYSTORE_BASE64, TOV_SIGNING_KEY_ALIAS, TOV_SIGNING_STORE_PASSWORD and TOV_SIGNING_KEY_PASSWORD in Settings > Secrets and variables > Actions."
-            exit 1
-          fi
-
-          KEYSTORE_PATH="$RUNNER_TEMP/tov-development.keystore"
-          echo "$TOV_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          echo "TOV_SIGNING_KEYSTORE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-          echo "TOV_SIGNING_KEY_ALIAS=$TOV_SIGNING_KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "TOV_SIGNING_STORE_PASSWORD=$TOV_SIGNING_STORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "TOV_SIGNING_KEY_PASSWORD=$TOV_SIGNING_KEY_PASSWORD" >> "$GITHUB_ENV"
-
       - name: Build optimized release APK
         run: gradle --no-daemon assembleRelease
 
