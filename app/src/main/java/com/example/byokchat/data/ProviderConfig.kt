@@ -23,6 +23,8 @@ data class ProviderConfig(
     /** 0 = tự đoán theo tên mô hình. */
     val contextTokens: Int = 0,
     val maxOutputTokens: Int = 8192,
+    /** Các mô hình người dùng ghim lên đầu danh sách chọn. Có giá trị mặc định nên dữ liệu cũ vẫn đọc được. */
+    val pinnedModels: List<String> = emptyList(),
 ) {
     fun effectiveBaseUrl(): String {
         if (baseUrl.isNotBlank()) return baseUrl.trim()

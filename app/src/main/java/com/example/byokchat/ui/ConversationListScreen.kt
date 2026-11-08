@@ -69,7 +69,7 @@ class ConversationListViewModel(private val app: AppContainer) : ViewModel() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConversationListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onSearch: () -> Unit) {
+fun ConversationListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onSearch: () -> Unit, onOnboarding: () -> Unit) {
     val container = LocalContext.current.container
     val vm: ConversationListViewModel = viewModel(factory = viewModelFactory {
         initializer { ConversationListViewModel(container) }
@@ -111,7 +111,7 @@ fun ConversationListScreen(onOpen: (String) -> Unit, onSettings: () -> Unit, onS
                                 "Để bắt đầu, hãy thêm một nhà cung cấp AI (Claude, OpenAI, Gemini...) và nhập API key của bạn.",
                                 modifier = Modifier.padding(vertical = 8.dp),
                             )
-                            Button(onClick = onSettings) { Text("Mở Cài đặt") }
+                            Button(onClick = onOnboarding) { Text("Kết nối AI") }
                         }
                     }
                 }

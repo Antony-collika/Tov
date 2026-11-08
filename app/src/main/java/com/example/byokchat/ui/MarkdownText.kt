@@ -4,6 +4,8 @@ import android.graphics.Color as AColor
 import android.text.Spannable
 import android.text.style.BackgroundColorSpan
 import android.widget.TextView
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -12,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.byokchat.util.TextUtil
 import io.noties.markwon.Markwon
@@ -64,4 +67,29 @@ fun MarkdownText(markdown: String, color: Color, modifier: Modifier = Modifier, 
             }
         },
     )
+}
+
+/**
+ * Hiển thị tin của AI. Khi đang tìm kiếm trong cuộc trò chuyện (highlight != null) dùng đường cũ: một khối Markdown duy nhất,
+ * để giữ cách đánh số chỗ khớp. Ngược lại, khối code được tách riêng để có nút Sao chép và cuộn ngang.
+ */
+@Composable
+fun MarkdownBody(text: String, color: Color, highlight: Highlight?, modifier: Modifier = Modifier) {
+    if (highlight != null) {
+        MarkdownText(text, color, modifier, highlight)
+        return
+    }
+    val segs = remember(text) { parseMarkdownSegments(text) }
+    if (segs.none { it is MdSegment.Code }) {
+        MarkdownText(text, color, modifier)
+        return
+    }
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        segs.forEach { seg ->
+            when (seg) {
+                is MdSegment.Text -> MarkdownText(seg.markdown, color)
+                is MdSegment.Code -> CodeBlock(seg.language, seg.code)
+            }
+        }
+    }
 }

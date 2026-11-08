@@ -7,13 +7,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.byokchat.data.images
@@ -30,19 +34,24 @@ internal fun InputBar(
     onStop: () -> Unit,
     onPickGallery: () -> Unit,
     onPickCamera: () -> Unit,
+    modelLabel: String,
+    modelMissing: Boolean,
+    onPickModel: () -> Unit,
+    inputFocus: FocusRequester,
 ) {
     var attachMenu by remember { mutableStateOf(false) }
+    var viewerIndex by remember { mutableStateOf<Int?>(null) }
     Surface(tonalElevation = 3.dp) {
         Column(Modifier.padding(8.dp)) {
             if (images.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    images.forEach { path ->
+                    images.forEachIndexed { idx, path ->
                         Box {
                             AsyncImage(
                                 model = File(path),
                                 contentDescription = "Ảnh chờ gửi",
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
+                                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)).clickable { viewerIndex = idx },
                             )
                             IconButton(
                                 onClick = { onRemoveImage(path) },
@@ -55,6 +64,23 @@ internal fun InputBar(
                     }
                 }
             }
+            Row(Modifier.padding(start = 8.dp, bottom = 4.dp)) {
+                AssistChip(
+                    onClick = onPickModel,
+                    label = { Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    colors = if (modelMissing) {
+                        AssistChipDefaults.assistChipColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer,
+                            labelColor = MaterialTheme.colorScheme.onErrorContainer,
+                            trailingIconContentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    } else {
+                        AssistChipDefaults.assistChipColors()
+                    },
+                    modifier = Modifier.widthIn(max = 240.dp),
+                )
+            }
             Row(verticalAlignment = Alignment.Bottom) {
                 Box {
                     IconButton(onClick = { attachMenu = true }) { Icon(Icons.Default.Add, contentDescription = "Đính kèm ảnh") }
@@ -66,7 +92,7 @@ internal fun InputBar(
                 OutlinedTextField(
                     value = draft,
                     onValueChange = onDraft,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).focusRequester(inputFocus),
                     placeholder = { Text("Nhắn tin cho AI...") },
                     maxLines = 6,
                     shape = RoundedCornerShape(24.dp),
@@ -85,4 +111,5 @@ internal fun InputBar(
             }
         }
     }
+    viewerIndex?.let { idx -> ImageViewerDialog(images, idx) { viewerIndex = null } }
 }

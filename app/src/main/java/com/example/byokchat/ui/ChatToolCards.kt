@@ -14,6 +14,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.container
+import com.example.byokchat.data.MessageEntity
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 

@@ -58,6 +58,22 @@ class SettingsRepository(context: Context) {
         secure.edit().putString("search_key", k).apply()
     }
 
+    private val _onboardingDone = MutableStateFlow(plain.getBoolean("onboarding_done", false))
+    val onboardingDone: StateFlow<Boolean> = _onboardingDone.asStateFlow()
+
+    fun setOnboardingDone(done: Boolean) {
+        _onboardingDone.value = done
+        plain.edit().putBoolean("onboarding_done", done).apply()
+    }
+
+    private val _notifPermissionAsked = MutableStateFlow(plain.getBoolean("notif_permission_asked", false))
+    val notifPermissionAsked: StateFlow<Boolean> = _notifPermissionAsked.asStateFlow()
+
+    fun setNotifPermissionAsked(asked: Boolean) {
+        _notifPermissionAsked.value = asked
+        plain.edit().putBoolean("notif_permission_asked", asked).apply()
+    }
+
     fun provider(id: String?): ProviderConfig? = _providers.value.firstOrNull { it.id == id }
 
     fun defaultProvider(): ProviderConfig? = provider(_activeProviderId.value) ?: _providers.value.firstOrNull()

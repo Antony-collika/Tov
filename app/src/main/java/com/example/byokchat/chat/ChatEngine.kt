@@ -35,6 +35,7 @@ class ChatEngine(
     private val db: AppDatabase,
     private val settings: SettingsRepository,
     private val tools: ToolRuntime,
+    private val notifier: ChatNotifier,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -145,7 +146,10 @@ class ChatEngine(
                 db.conversations().touch(conversationId, System.currentTimeMillis())
             }
             cancelled?.let { throw it }
-            if (error != null || calls.isEmpty()) return
+            if (error != null || calls.isEmpty()) {
+                notifyFinished(conversationId, conv.title, success = error == null && text.isNotEmpty(), answer = text.toString())
+                return
+            }
 
             // AI yêu cầu gọi công cụ: chạy rồi quay lại vòng lặp để AI đọc kết quả
             rounds++
@@ -160,6 +164,7 @@ class ChatEngine(
                         error = "Đã dừng vì AI gọi công cụ quá $MAX_TOOL_ROUNDS vòng liên tiếp.",
                     )
                 )
+                notifyFinished(conversationId, conv.title, success = false, answer = "")
                 return
             }
             for (call in calls) {
@@ -181,6 +186,13 @@ class ChatEngine(
                 )
             }
         }
+    }
+
+    /** Báo cho người dùng khi AI trả lời xong (hoặc lỗi) mà app không đang hiện. Không gọi khi người dùng bấm Dừng. */
+    private fun notifyFinished(conversationId: String, title: String, success: Boolean, answer: String) {
+        if (AppVisibility.inForeground) return
+        val preview = if (success) answer.trim().replace("\n", " ").take(100) else "Không trả lời được. Mở app để xem lỗi."
+        notifier.notifyAnswer(conversationId, title, preview)
     }
 
     companion object {

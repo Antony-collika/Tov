@@ -133,6 +133,13 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         viewModelScope.launch { db.conversations().setModel(conversationId, providerId, model) }
     }
 
+    /** Ghim / bỏ ghim một mô hình của nhà cung cấp (không đổi mô hình đang dùng). */
+    fun togglePin(providerId: String, model: String) {
+        val cfg = app.settings.provider(providerId) ?: return
+        val pinned = if (model in cfg.pinnedModels) cfg.pinnedModels - model else cfg.pinnedModels + model
+        app.settings.saveProvider(cfg.copy(pinnedModels = pinned))
+    }
+
     fun setSystemPrompt(prompt: String) {
         viewModelScope.launch { db.conversations().setSystemPrompt(conversationId, prompt) }
     }

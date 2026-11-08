@@ -4,10 +4,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -15,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,64 +78,37 @@ fun ConfirmDialog(
     )
 }
 
+/** Hộp chọn nhiều mô hình lấy từ máy chủ. Dòng đã có sẵn hiện tick và bị khóa. */
 @Composable
-fun ModelPickerDialog(
-    providers: List<ProviderConfig>,
-    providerId: String,
-    model: String,
-    onConfirm: (providerId: String, model: String) -> Unit,
+fun FetchedModelsDialog(
+    all: List<String>,
+    alreadyAdded: List<String>,
+    onAdd: (List<String>) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var pid by remember { mutableStateOf(providerId.ifBlank { providers.firstOrNull()?.id ?: "" }) }
-    var mdl by remember { mutableStateOf(model) }
+    var query by remember { mutableStateOf("") }
+    val picked = remember { mutableStateListOf<String>() }
+    val shown = all.filter { it.contains(query, ignoreCase = true) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Chọn mô hình") },
+        title = { Text("Chọn mô hình (${all.size})") },
         text = {
-            if (providers.isEmpty()) {
-                Text("Bạn chưa thêm nhà cung cấp AI nào. Hãy vào Cài đặt → Nhà cung cấp AI để thêm.")
-            } else {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("Nhà cung cấp", style = MaterialTheme.typography.labelLarge)
-                    providers.forEach { p ->
+            Column {
+                OutlinedTextField(query, { query = it }, label = { Text("Lọc") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                LazyColumn(Modifier.heightIn(max = 360.dp)) {
+                    items(shown, key = { it }) { m ->
                         Row(
-                            Modifier.fillMaxWidth().clickable {
-                                pid = p.id
-                                mdl = p.defaultModel.ifBlank { p.models.firstOrNull() ?: "" }
-                            },
+                            Modifier.fillMaxWidth().clickable { if (m in picked) picked.remove(m) else picked.add(m) },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(selected = pid == p.id, onClick = null, modifier = Modifier.padding(8.dp))
-                            Text(p.name)
+                            Checkbox(checked = m in picked || m in alreadyAdded, onCheckedChange = null, enabled = m !in alreadyAdded)
+                            Text(m, modifier = Modifier.padding(start = 8.dp))
                         }
                     }
-                    val current = providers.firstOrNull { it.id == pid }
-                    Text("Mô hình", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp))
-                    current?.models?.forEach { m ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable { mdl = m },
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(selected = mdl == m, onClick = null, modifier = Modifier.padding(8.dp))
-                            Text(m)
-                        }
-                    }
-                    OutlinedTextField(
-                        value = mdl,
-                        onValueChange = { mdl = it },
-                        label = { Text("Hoặc tự nhập tên mô hình") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    )
                 }
             }
         },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(pid, mdl.trim()) },
-                enabled = pid.isNotBlank() && mdl.isNotBlank(),
-            ) { Text("Chọn") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Hủy") } },
+        confirmButton = { TextButton(onClick = { onAdd(picked.toList()) }) { Text("Thêm đã chọn") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
     )
 }

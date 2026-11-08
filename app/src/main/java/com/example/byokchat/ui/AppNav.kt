@@ -2,21 +2,44 @@ package com.example.byokchat.ui
 
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.byokchat.container
 
 @Composable
 fun AppNav() {
     val nav = rememberNavController()
-    NavHost(navController = nav, startDestination = "list") {
+    val container = LocalContext.current.container
+    val settings = container.settings
+    // Chỉ tính một lần: người mới (chưa có nhà cung cấp, chưa xong/bỏ qua màn chào) bắt đầu ở màn chào.
+    val start = remember { if (settings.providers.value.isEmpty() && !settings.onboardingDone.value) "onboarding" else "list" }
+
+    // Rời màn chào: về danh sách (không để lại màn chào trong ngăn xếp), rồi mở cuộc trò chuyện nếu có.
+    fun leaveOnboarding(chatId: String?) {
+        if (!nav.popBackStack("list", inclusive = false)) {
+            nav.navigate("list") { popUpTo("onboarding") { inclusive = true } }
+        }
+        if (chatId != null) nav.navigate("chat/$chatId")
+    }
+
+    NavHost(navController = nav, startDestination = start) {
+        composable("onboarding") {
+            OnboardingScreen(onExit = { chatId -> leaveOnboarding(chatId) })
+        }
         composable("list") {
             ConversationListScreen(
                 onOpen = { id -> nav.navigate("chat/$id") },
                 onSettings = { nav.navigate("settings") },
                 onSearch = { nav.navigate("search") },
+                onOnboarding = { nav.navigate("onboarding") },
             )
         }
         composable(
@@ -34,6 +57,7 @@ fun AppNav() {
                 onBack = { nav.popBackStack() },
                 onOpenSettings = { nav.navigate("settings") },
                 onOpenConversation = { id -> nav.navigate("chat/$id") },
+                onOnboarding = { nav.navigate("onboarding") },
             )
         }
         composable("search") {
@@ -80,6 +104,16 @@ fun AppNav() {
                 onDone = { nav.popBackStack() },
             )
         }
+    }
+    // Mở cuộc trò chuyện từ thông báo (bỏ qua nếu cuộc đó không còn trong dữ liệu)
+    val pending by container.pendingConversation.collectAsState()
+    LaunchedEffect(pending) {
+        val id = pending ?: return@LaunchedEffect
+        container.pendingConversation.value = null
+        if (container.db.conversations().get(id) == null) return@LaunchedEffect
+        val cur = nav.currentBackStackEntry
+        val alreadyThere = cur?.destination?.route?.startsWith("chat/") == true && cur?.arguments?.getString("id") == id
+        if (!alreadyThere) nav.navigate("chat/$id")
     }
     ConfirmationHost()
 }

@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
@@ -15,6 +16,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
+import com.example.byokchat.chat.AppVisibility
+import com.example.byokchat.chat.ChatNotifier
 import com.example.byokchat.data.ThemeMode
 import com.example.byokchat.ui.AppNav
 import com.example.byokchat.ui.theme.ByokTheme
@@ -34,6 +37,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val settings = container.settings
+        handleNotificationIntent(intent)
 
         // Cho phép công cụ (lịch...) xin quyền Android khi cần
         container.permissions.requester = { perms ->
@@ -60,6 +64,29 @@ class MainActivity : ComponentActivity() {
                 Surface(Modifier.fillMaxSize()) { AppNav() }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        AppVisibility.inForeground = true
+    }
+
+    override fun onStop() {
+        AppVisibility.inForeground = false
+        super.onStop()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleNotificationIntent(intent)
+    }
+
+    /** Bấm vào thông báo "AI đã trả lời": nhờ AppNav mở đúng cuộc trò chuyện. */
+    private fun handleNotificationIntent(intent: Intent?) {
+        val id = intent?.getStringExtra(ChatNotifier.EXTRA_CONVERSATION_ID) ?: return
+        intent?.removeExtra(ChatNotifier.EXTRA_CONVERSATION_ID)
+        container.pendingConversation.value = id
     }
 
     override fun onResume() {

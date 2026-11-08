@@ -248,36 +248,15 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     }
 
     fetched?.let { all ->
-        var query by remember { mutableStateOf("") }
-        val picked = remember { mutableStateListOf<String>() }
-        val shown = all.filter { it.contains(query, ignoreCase = true) }
-        AlertDialog(
-            onDismissRequest = { fetched = null },
-            title = { Text("Chọn mô hình (${all.size})") },
-            text = {
-                Column {
-                    OutlinedTextField(query, { query = it }, label = { Text("Lọc") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    LazyColumn(Modifier.heightIn(max = 360.dp)) {
-                        items(shown, key = { it }) { m ->
-                            Row(
-                                Modifier.fillMaxWidth().clickable { if (m in picked) picked.remove(m) else picked.add(m) },
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Checkbox(checked = m in picked || m in models, onCheckedChange = null, enabled = m !in models)
-                                Text(m, modifier = Modifier.padding(start = 8.dp))
-                            }
-                        }
-                    }
-                }
+        FetchedModelsDialog(
+            all = all,
+            alreadyAdded = models.toList(),
+            onAdd = { picked ->
+                picked.forEach { if (it !in models) models.add(it) }
+                if (defaultModel.isBlank()) defaultModel = models.firstOrNull() ?: ""
+                fetched = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    picked.forEach { if (it !in models) models.add(it) }
-                    if (defaultModel.isBlank()) defaultModel = models.firstOrNull() ?: ""
-                    fetched = null
-                }) { Text("Thêm đã chọn") }
-            },
-            dismissButton = { TextButton(onClick = { fetched = null }) { Text("Đóng") } },
+            onDismiss = { fetched = null },
         )
     }
 

@@ -67,7 +67,7 @@ fun OkHttpClient.sseFlow(request: Request): Flow<SseEvent> = flow {
         }
     } catch (e: IOException) {
         if (currentCoroutineContext().isActive) {
-            throw AiException("Lỗi kết nối mạng: ${e.message ?: e.javaClass.simpleName}")
+            throw AiException(networkErrorMessage(e.message ?: e.javaClass.simpleName))
         } else {
             throw e
         }
@@ -85,7 +85,7 @@ suspend fun OkHttpClient.getJson(request: Request): JsonElement = withContext(Di
             Json.parseToJsonElement(body)
         }
     } catch (e: IOException) {
-        throw AiException("Lỗi kết nối mạng: ${e.message ?: e.javaClass.simpleName}")
+        throw AiException(networkErrorMessage(e.message ?: e.javaClass.simpleName))
     }
 }
 
@@ -99,8 +99,26 @@ fun errorMessage(code: Int, body: String): String {
             else -> root["message"]?.jsonPrimitive?.contentOrNull
         }
     }.getOrNull()
-    return "Lỗi $code: ${detail ?: body.take(300).ifBlank { "không rõ nguyên nhân" }}"
+    val raw = "Lỗi $code: ${detail ?: body.take(300).ifBlank { "không rõ nguyên nhân" }}"
+    return friendlyHttpMessage(code) + "\nChi tiết: " + raw
 }
+
+/** Câu giải thích dễ hiểu cho từng mã lỗi HTTP. */
+internal fun friendlyHttpMessage(code: Int): String = when (code) {
+    400 -> "Yêu cầu bị từ chối vì nội dung hoặc cài đặt chưa hợp lệ."
+    401 -> "API key không đúng hoặc đã bị thu hồi. Hãy kiểm tra lại key trong Cài đặt → Nhà cung cấp AI."
+    403 -> "Key này không có quyền dùng mô hình hoặc chức năng đang chọn, hoặc tài khoản bị hạn chế."
+    404 -> "Không tìm thấy mô hình hoặc địa chỉ máy chủ. Hãy kiểm tra tên mô hình và địa chỉ máy chủ."
+    408 -> "Máy chủ phản hồi quá lâu. Hãy thử lại."
+    413 -> "Nội dung gửi đi quá lớn (cuộc trò chuyện quá dài hoặc ảnh quá lớn)."
+    429 -> "Bạn gửi quá nhanh hoặc đã hết hạn mức của tài khoản. Hãy đợi một lúc rồi thử lại, hoặc kiểm tra hạn mức/số dư."
+    in 500..599 -> "Máy chủ của nhà cung cấp đang gặp sự cố hoặc quá tải. Hãy thử lại sau ít phút."
+    else -> "Nhà cung cấp trả về lỗi."
+}
+
+/** Lỗi mạng (mất kết nối, hết thời gian chờ...). */
+internal fun networkErrorMessage(detail: String): String =
+    "Không kết nối được mạng. Hãy kiểm tra Wi-Fi/4G rồi thử lại.\nChi tiết: $detail"
 
 fun errorText(el: JsonElement): String = when (el) {
     is JsonObject -> el["message"]?.jsonPrimitive?.contentOrNull ?: el.toString()

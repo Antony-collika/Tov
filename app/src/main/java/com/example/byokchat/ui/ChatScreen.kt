@@ -1,6 +1,9 @@
 package com.example.byokchat.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -12,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -31,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -55,6 +60,7 @@ fun ChatScreen(
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenConversation: (String) -> Unit,
+    onOnboarding: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -72,6 +78,8 @@ fun ChatScreen(
     val clipboard = LocalClipboardManager.current
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
+    // Chỉ số 0 là tin mới nhất (đáy màn hình); cuộn lên quá 1 mục thì hiện nút "xuống cuối".
+    val showScrollDown by remember { derivedStateOf { listState.firstVisibleItemIndex > 1 } }
     val pickFolder = rememberFolderPicker()
 
     var showModelPicker by remember { mutableStateOf(false) }
@@ -88,6 +96,7 @@ fun ChatScreen(
     var currentIdx by remember { mutableIntStateOf(0) }
     var focusApplied by remember { mutableStateOf(focusMessageId == null) }
     val searchFocus = remember { FocusRequester() }
+    val inputFocus = remember { FocusRequester() }
 
     val pickLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(5)) { uris ->
         if (uris.isNotEmpty()) vm.addImages(uris)
@@ -108,6 +117,18 @@ fun ChatScreen(
         } catch (e: Exception) {
             Toast.makeText(context, "Không mở được máy ảnh.", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    // Xin quyền thông báo đúng một lần, vào lần đầu người dùng gửi tin. Bị từ chối thì im lặng, không hỏi lại.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
+        // Dù được cấp hay bị từ chối đều không làm gì thêm (cờ "đã hỏi" đã được ghi nên sẽ không hỏi lại).
+    }
+    fun askNotificationPermissionOnce() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (container.settings.notifPermissionAsked.value) return
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        container.settings.setNotifPermissionAsked(true)
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     LaunchedEffect(Unit) {
@@ -150,6 +171,14 @@ fun ChatScreen(
         }
     }
     val visible = remember(chrono) { chrono.asReversed() }
+    // Chỉ tin trả lời cuối của mỗi lượt (có chữ, hoặc là tin lỗi) mới có hàng nút hành động.
+    val answerIds = remember(chrono) {
+        chrono.filter { it.role == "assistant" && (it.text.isNotEmpty() || it.status == "error") }
+            .groupBy { it.turnId }
+            .values
+            .mapNotNull { group -> group.maxByOrNull { it.seq }?.id }
+            .toSet()
+    }
     val toolResults = remember(messages) {
         messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! }
     }
@@ -174,12 +203,12 @@ fun ChatScreen(
     LaunchedEffect(searchOpen) { if (searchOpen) runCatching { searchFocus.requestFocus() } }
 
     val provider = providers.firstOrNull { it.id == conv?.providerId }
-    val modelLabel = buildString {
-        append(if (provider == null) "Chưa chọn nhà cung cấp" else provider.name + " · " + (conv?.model?.ifBlank { "chưa chọn mô hình" } ?: ""))
-        stats?.let {
-            append(" · ≈").append(formatTokens(it.used)).append("/").append(formatTokens(it.limit))
-            if (it.droppedTurns > 0) append(" (cắt ${it.droppedTurns} lượt cũ)")
-        }
+    val modelName = conv?.model.orEmpty()
+    val modelMissing = provider == null || modelName.isBlank()
+    val chipLabel = when {
+        provider == null || modelName.isBlank() -> "Chọn mô hình"
+        providers.size >= 2 -> provider.name + " · " + modelName
+        else -> modelName
     }
 
     Scaffold(
@@ -224,17 +253,14 @@ fun ChatScreen(
             } else {
                 TopAppBar(
                     title = {
-                        Column {
-                            Text(conv?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(modelLabel, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+                        Text(conv?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại") }
                     },
                     actions = {
+                        stats?.let { ContextRing(it.used, it.limit, it.droppedTurns) }
                         IconButton(onClick = { searchOpen = true }) { Icon(Icons.Default.Search, contentDescription = "Tìm kiếm") }
-                        IconButton(onClick = { showModelPicker = true }) { Icon(Icons.Default.Build, contentDescription = "Chọn mô hình") }
                         Box {
                             IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Thêm") }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -264,10 +290,13 @@ fun ChatScreen(
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (visible.isEmpty()) {
-                    Text(
-                        "Hãy nhập câu hỏi đầu tiên của bạn bên dưới.",
-                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ChatEmptyState(
+                        noProvider = providers.isEmpty(),
+                        noModel = providers.isNotEmpty() && conv != null && modelName.isBlank(),
+                        onSuggestion = { vm.draft = it; runCatching { inputFocus.requestFocus() } },
+                        onConnect = onOnboarding,
+                        onPickModel = { showModelPicker = true },
+                        modifier = Modifier.align(Alignment.Center),
                     )
                 }
                 LazyColumn(
@@ -294,11 +323,20 @@ fun ChatScreen(
                         } else {
                             AssistantMessage(
                                 m, generating, hl, edit, actions, toolResults,
+                                showActions = m.id in answerIds,
                                 onEditChange = { t -> editing = editing?.copy(text = t) },
                                 onEditSave = { st -> editing = null; vm.saveEdit(st.messageId, st.text) },
                                 onEditCancel = { editing = null },
                             )
                         }
+                    }
+                }
+                if (showScrollDown) {
+                    SmallFloatingActionButton(
+                        onClick = { scope.launch { listState.animateScrollToItem(0) } },
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
+                    ) {
+                        Icon(Icons.Default.ArrowDownward, contentDescription = "Xuống tin mới nhất")
                     }
                 }
             }
@@ -308,20 +346,26 @@ fun ChatScreen(
                 images = vm.pendingImages,
                 onRemoveImage = vm::removePendingImage,
                 generating = generating,
-                onSend = vm::send,
+                onSend = { askNotificationPermissionOnce(); vm.send() },
                 onStop = vm::stop,
                 onPickGallery = { pickLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 onPickCamera = { launchCamera() },
+                inputFocus = inputFocus,
+                modelLabel = chipLabel,
+                modelMissing = modelMissing,
+                onPickModel = { showModelPicker = true },
             )
         }
     }
 
     if (showModelPicker) {
-        ModelPickerDialog(
+        ModelPickerSheet(
             providers = providers,
             providerId = conv?.providerId ?: "",
             model = conv?.model ?: "",
-            onConfirm = { pid, model -> vm.setModel(pid, model); showModelPicker = false },
+            onSelect = { pid, model -> vm.setModel(pid, model); showModelPicker = false },
+            onTogglePin = { pid, model -> vm.togglePin(pid, model) },
+            onConnect = { showModelPicker = false; onOnboarding() },
             onDismiss = { showModelPicker = false },
         )
     }
@@ -365,7 +409,7 @@ fun ChatScreen(
     }
 }
 
-private fun formatTokens(n: Int): String = when {
+internal fun formatTokens(n: Int): String = when {
     n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", n / 1_000_000.0).replace(".0M", "M")
     n >= 1000 -> String.format(java.util.Locale.US, "%.1fk", n / 1000.0).replace(".0k", "k")
     else -> n.toString()
