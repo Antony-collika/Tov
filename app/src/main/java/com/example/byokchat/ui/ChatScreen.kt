@@ -10,12 +10,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -27,48 +23,28 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import coil.compose.AsyncImage
-import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.container
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
 import com.example.byokchat.util.TextUtil
 import kotlinx.coroutines.launch
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
 
-private data class EditState(val messageId: String, val turnId: String, val text: String, val regen: Boolean, val allowBlank: Boolean)
 private data class RegenPrompt(val turnId: String, val newText: String?, val later: Int)
 private data class Match(val messageId: String, val occurrence: Int)
-
-private class Actions(
-    val copy: (MessageEntity) -> Unit,
-    val edit: (MessageEntity) -> Unit,
-    val editRegen: (MessageEntity) -> Unit,
-    val regen: (MessageEntity) -> Unit,
-    val delete: (MessageEntity) -> Unit,
-    val branch: (MessageEntity) -> Unit,
-)
-
-private val callsSer = ListSerializer(AiToolCall.serializer())
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -393,323 +369,4 @@ private fun formatTokens(n: Int): String = when {
     n >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", n / 1_000_000.0).replace(".0M", "M")
     n >= 1000 -> String.format(java.util.Locale.US, "%.1fk", n / 1000.0).replace(".0k", "k")
     else -> n.toString()
-}
-
-// ============ Tin nhắn ============
-
-@Composable
-private fun MessageMenu(enabled: Boolean, items: List<Pair<String, () -> Unit>>) {
-    var open by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { open = true }, enabled = enabled, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.MoreVert, contentDescription = "Tùy chọn tin nhắn", modifier = Modifier.size(18.dp))
-        }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            items.forEach { (label, action) ->
-                DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() })
-            }
-        }
-    }
-}
-
-private fun highlighted(text: String, hl: Highlight?): AnnotatedString {
-    if (hl == null || hl.query.isEmpty()) return AnnotatedString(text)
-    val hits = TextUtil.findAll(text, hl.query)
-    return buildAnnotatedString {
-        append(text)
-        hits.forEachIndexed { i, s ->
-            val c = if (i == hl.currentOccurrence) Color(0xFFFF9800) else Color(0x99FFEB3B)
-            addStyle(SpanStyle(background = c, color = Color.Black), s, minOf(text.length, s + hl.query.length))
-        }
-    }
-}
-
-@Composable
-private fun UserMessage(
-    m: MessageEntity,
-    generating: Boolean,
-    hl: Highlight?,
-    edit: EditState?,
-    actions: Actions,
-    onEditChange: (String) -> Unit,
-    onEditSave: (EditState) -> Unit,
-    onEditCancel: () -> Unit,
-) {
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-        if (edit != null) {
-            MessageEditor(edit, if (edit.regen) "Lưu & tạo lại" else "Lưu", onEditChange, onEditSave, onEditCancel)
-        } else {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Top) {
-                MessageMenu(
-                    enabled = !generating,
-                    items = listOf(
-                        "Sao chép" to { actions.copy(m) },
-                        "Sửa tin nhắn" to { actions.edit(m) },
-                        "Sửa & tạo lại" to { actions.editRegen(m) },
-                        "Tạo lại" to { actions.regen(m) },
-                        "Xóa" to { actions.delete(m) },
-                    ),
-                )
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
-                    modifier = Modifier.widthIn(max = 300.dp),
-                ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val imgs = m.images()
-                        if (imgs.isNotEmpty()) {
-                            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                imgs.forEach { path ->
-                                    AsyncImage(
-                                        model = File(path),
-                                        contentDescription = "Ảnh đính kèm",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.size(96.dp).clip(RoundedCornerShape(10.dp)),
-                                    )
-                                }
-                            }
-                        }
-                        if (m.text.isNotEmpty()) {
-                            Text(highlighted(m.text, hl), color = MaterialTheme.colorScheme.onPrimaryContainer)
-                        }
-                    }
-                }
-            }
-            if (m.edited) EditedLabel()
-        }
-    }
-}
-
-@Composable
-private fun EditedLabel() {
-    Text("đã chỉnh sửa", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-}
-
-@Composable
-private fun AssistantMessage(
-    m: MessageEntity,
-    generating: Boolean,
-    hl: Highlight?,
-    edit: EditState?,
-    actions: Actions,
-    toolResults: Map<String, MessageEntity>,
-    onEditChange: (String) -> Unit,
-    onEditSave: (EditState) -> Unit,
-    onEditCancel: () -> Unit,
-) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (edit != null) {
-            MessageEditor(edit, "Lưu", onEditChange, onEditSave, onEditCancel)
-            return@Column
-        }
-        if (m.text.isNotEmpty()) {
-            MarkdownText(m.text, color = MaterialTheme.colorScheme.onSurface, highlight = hl)
-        } else if (m.status == "streaming") {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        }
-        if (m.toolCallsJson != null) ToolCards(m, toolResults, generating)
-        if (m.status == "error") {
-            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
-                Text(
-                    m.error ?: "Đã xảy ra lỗi.",
-                    modifier = Modifier.padding(12.dp),
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-        }
-        if (m.status != "streaming") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (m.edited) EditedLabel()
-                Spacer(Modifier.weight(1f))
-                val items = when {
-                    m.status == "error" -> buildList {
-                        if (m.text.isNotBlank()) add("Sao chép" to { actions.copy(m) })
-                        add("Tạo lại" to { actions.regen(m) })
-                        add("Xóa" to { actions.delete(m) })
-                    }
-                    else -> buildList {
-                        if (m.text.isNotBlank()) add("Sao chép" to { actions.copy(m) })
-                        if (m.text.isNotBlank()) add("Sửa tin nhắn" to { actions.edit(m) })
-                        add("Branch (tạo cuộc mới từ đây)" to { actions.branch(m) })
-                        add("Xóa" to { actions.delete(m) })
-                    }
-                }
-                MessageMenu(enabled = !generating, items = items)
-            }
-        }
-    }
-}
-
-@Composable
-private fun ToolCards(m: MessageEntity, results: Map<String, MessageEntity>, generating: Boolean) {
-    val container = LocalContext.current.container
-    val calls = remember(m.toolCallsJson) {
-        runCatching { Json.decodeFromString(callsSer, m.toolCallsJson ?: "[]") }.getOrDefault(emptyList())
-    }
-    calls.forEach { c ->
-        val res = results[c.id]
-        var expanded by remember(c.id) { mutableStateOf(false) }
-        val name = c.uid?.let { container.registry.nameForUid(it) } ?: c.name
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(12.dp),
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-        ) {
-            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Text(name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 6.dp).weight(1f))
-                    val (label, color) = when {
-                        res == null && generating -> "đang chạy / chờ bạn xác nhận…" to MaterialTheme.colorScheme.onSurfaceVariant
-                        res == null -> "chưa có kết quả" to MaterialTheme.colorScheme.onSurfaceVariant
-                        res.toolIsError -> "lỗi / bị từ chối" to MaterialTheme.colorScheme.error
-                        else -> "xong" to MaterialTheme.colorScheme.primary
-                    }
-                    Text(label, style = MaterialTheme.typography.labelSmall, color = color)
-                }
-                if (!expanded) {
-                    Text(
-                        c.argsJson.replace("\n", " ").take(140),
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (res != null) {
-                        Text(
-                            res.text.replace("\n", " ").take(160),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                } else {
-                    Text("Tham số:", style = MaterialTheme.typography.labelSmall)
-                    Text(c.argsJson.take(3000), style = MaterialTheme.typography.bodySmall)
-                    if (res != null) {
-                        Text("Kết quả:", style = MaterialTheme.typography.labelSmall)
-                        Text(res.text.take(4000), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ============ Soạn tin ============
-
-@Composable
-private fun MessageEditor(
-    state: EditState,
-    saveLabel: String,
-    onChange: (String) -> Unit,
-    onSave: (EditState) -> Unit,
-    onCancel: () -> Unit,
-) {
-    var full by remember { mutableStateOf(false) }
-    val canSave = state.text.isNotBlank() || state.allowBlank
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        OutlinedTextField(
-            value = state.text,
-            onValueChange = onChange,
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 12,
-            label = { Text("Sửa tin nhắn (chỉ phần chữ; ảnh giữ nguyên)") },
-        )
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = { full = true }) { Text("Phóng to") }
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick = onCancel) { Text("Hủy") }
-            Button(onClick = { onSave(state) }, enabled = canSave) { Text(saveLabel) }
-        }
-    }
-    if (full) {
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { full = false },
-            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-        ) {
-            Surface(Modifier.fillMaxSize()) {
-                Column(Modifier.systemBarsPadding().imePadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Sửa tin nhắn", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        TextButton(onClick = { full = false }) { Text("Thu nhỏ") }
-                    }
-                    OutlinedTextField(value = state.text, onValueChange = onChange, modifier = Modifier.weight(1f).fillMaxWidth())
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.align(Alignment.End)) {
-                        TextButton(onClick = { full = false; onCancel() }) { Text("Hủy") }
-                        Button(onClick = { full = false; onSave(state) }, enabled = canSave) { Text(saveLabel) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun InputBar(
-    draft: String,
-    onDraft: (String) -> Unit,
-    images: List<String>,
-    onRemoveImage: (String) -> Unit,
-    generating: Boolean,
-    onSend: () -> Unit,
-    onStop: () -> Unit,
-    onPickGallery: () -> Unit,
-    onPickCamera: () -> Unit,
-) {
-    var attachMenu by remember { mutableStateOf(false) }
-    Surface(tonalElevation = 3.dp) {
-        Column(Modifier.padding(8.dp)) {
-            if (images.isNotEmpty()) {
-                Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    images.forEach { path ->
-                        Box {
-                            AsyncImage(
-                                model = File(path),
-                                contentDescription = "Ảnh chờ gửi",
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(64.dp).clip(RoundedCornerShape(10.dp)),
-                            )
-                            IconButton(
-                                onClick = { onRemoveImage(path) },
-                                modifier = Modifier.align(Alignment.TopEnd).size(22.dp)
-                                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f), CircleShape),
-                            ) {
-                                Icon(Icons.Default.Close, contentDescription = "Bỏ ảnh", tint = MaterialTheme.colorScheme.surface, modifier = Modifier.size(14.dp))
-                            }
-                        }
-                    }
-                }
-            }
-            Row(verticalAlignment = Alignment.Bottom) {
-                Box {
-                    IconButton(onClick = { attachMenu = true }) { Icon(Icons.Default.Add, contentDescription = "Đính kèm ảnh") }
-                    DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
-                        DropdownMenuItem(text = { Text("Chọn từ thư viện") }, onClick = { attachMenu = false; onPickGallery() })
-                        DropdownMenuItem(text = { Text("Chụp ảnh") }, onClick = { attachMenu = false; onPickCamera() })
-                    }
-                }
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = onDraft,
-                    modifier = Modifier.weight(1f),
-                    placeholder = { Text("Nhắn tin cho AI...") },
-                    maxLines = 6,
-                    shape = RoundedCornerShape(24.dp),
-                )
-                Box(Modifier.padding(start = 6.dp, bottom = 4.dp)) {
-                    if (generating) {
-                        FilledIconButton(onClick = onStop) {
-                            Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp)))
-                        }
-                    } else {
-                        FilledIconButton(onClick = onSend, enabled = draft.isNotBlank() || images.isNotEmpty()) {
-                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Gửi")
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

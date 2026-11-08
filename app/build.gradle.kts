@@ -62,6 +62,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.icons.core)
+    implementation(libs.compose.icons.extended)
     implementation(libs.material)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -86,4 +87,6 @@ dependencies {
     implementation(libs.markwon.tables)
     implementation(libs.markwon.tasklist)
     implementation(libs.markwon.linkify)
+
+    testImplementation(libs.junit)
 }

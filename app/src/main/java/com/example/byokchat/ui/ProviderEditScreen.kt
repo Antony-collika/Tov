@@ -96,6 +96,9 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
         )
     }
 
+    // Cảnh báo (không chặn lưu): API key sắp được gửi qua địa chỉ http không mã hóa.
+    val insecureHttp = baseUrl.trim().startsWith("http://", ignoreCase = true) && apiKey.isNotBlank()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -145,6 +148,14 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 label = { Text(if (type == ProviderType.CUSTOM) "Địa chỉ máy chủ (bắt buộc)" else "Địa chỉ máy chủ (không bắt buộc)") },
                 placeholder = { Text(if (type == ProviderType.CUSTOM) "https://ten-may-chu/v1" else existing?.effectiveBaseUrl() ?: ProviderConfig("", type, "").effectiveBaseUrl()) },
                 singleLine = true,
+                supportingText = if (insecureHttp) {
+                    {
+                        Text(
+                            "Địa chỉ này dùng http (không mã hóa). API key sẽ bị gửi đi dạng thô, người khác trong cùng mạng có thể đọc được. Chỉ dùng khi đây là máy chủ trong mạng nhà bạn.",
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                } else null,
                 modifier = Modifier.fillMaxWidth(),
             )
 
