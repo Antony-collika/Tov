@@ -11,6 +11,14 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations ORDER BY updatedAt DESC")
     fun observeAll(): Flow<List<ConversationEntity>>
 
+    /** Conversations that have at least one message (empty drafts are never listed). */
+    @Query("SELECT * FROM conversations WHERE id IN (SELECT DISTINCT conversationId FROM messages) ORDER BY pinned DESC, updatedAt DESC")
+    fun observeNonEmpty(): Flow<List<ConversationEntity>>
+
+    /** Removes conversations that never received a message. */
+    @Query("DELETE FROM conversations WHERE id NOT IN (SELECT DISTINCT conversationId FROM messages)")
+    suspend fun deleteEmpty()
+
     @Query("SELECT * FROM conversations WHERE id = :id")
     fun observe(id: String): Flow<ConversationEntity?>
 

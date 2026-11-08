@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Yêu cầu người dùng xác nhận trước khi công cụ chạy. */
 class ConfirmRequest(
@@ -17,23 +18,43 @@ class ConfirmRequest(
     val detail: String,
 ) {
     val result = CompletableDeferred<Boolean>()
+    val id: Int = nextId.incrementAndGet()
+
+    private companion object {
+        val nextId = AtomicInteger(0)
+    }
 }
 
 class ConfirmationBroker {
     private val _pending = MutableStateFlow<List<ConfirmRequest>>(emptyList())
     val pending: StateFlow<List<ConfirmRequest>> = _pending.asStateFlow()
 
+    /** Called when a request starts waiting (used to post a notification if the app is in the background). */
+    @Volatile
+    var onRequested: ((ConfirmRequest) -> Unit)? = null
+
+    /** Called when a request has been answered or cancelled (used to remove its notification). */
+    @Volatile
+    var onFinished: ((ConfirmRequest) -> Unit)? = null
+
     suspend fun ask(req: ConfirmRequest): Boolean {
         _pending.update { it + req }
+        onRequested?.invoke(req)
         try {
             return req.result.await()
         } finally {
             _pending.update { it - req }
+            onFinished?.invoke(req)
         }
     }
 
     fun resolve(req: ConfirmRequest, allowed: Boolean) {
         req.result.complete(allowed)
+    }
+
+    /** Used by the notification buttons. Does nothing if the request is already gone. */
+    fun resolveById(id: Int, allowed: Boolean) {
+        _pending.value.firstOrNull { it.id == id }?.let { resolve(it, allowed) }
     }
 }
 

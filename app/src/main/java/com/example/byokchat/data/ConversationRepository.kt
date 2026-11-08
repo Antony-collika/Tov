@@ -8,6 +8,8 @@ class ConversationRepository(
 ) {
     /** Tạo cuộc trò chuyện mới với nhà cung cấp / mô hình / prompt mặc định. */
     suspend fun create(): String {
+        // Never let empty drafts pile up: drop any conversation that has no messages first.
+        db.conversations().deleteEmpty()
         val p = settings.defaultProvider()
         val model = p?.defaultModel?.takeIf { it.isNotBlank() } ?: p?.models?.firstOrNull() ?: ""
         val id = UUID.randomUUID().toString()

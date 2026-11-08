@@ -42,7 +42,8 @@ internal fun InputBar(
     var attachMenu by remember { mutableStateOf(false) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
     Surface(tonalElevation = 3.dp) {
-        Column(Modifier.padding(8.dp)) {
+        // As a Scaffold bottomBar it must handle the navigation bar and the keyboard itself (order matters).
+        Column(Modifier.navigationBarsPadding().imePadding().padding(8.dp)) {
             if (images.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     images.forEachIndexed { idx, path ->

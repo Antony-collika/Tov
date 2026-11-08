@@ -1,5 +1,6 @@
 package com.example.byokchat.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -19,6 +20,10 @@ data class ConversationEntity(
     val systemPrompt: String,
     val createdAt: Long,
     val updatedAt: Long,
+    /** Id of the conversation this one was branched from (null if it is not a branch). */
+    val parentId: String? = null,
+    /** Pinned conversations are listed first. */
+    @ColumnInfo(defaultValue = "0") val pinned: Boolean = false,
 )
 
 /**

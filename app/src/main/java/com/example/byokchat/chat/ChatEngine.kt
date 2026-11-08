@@ -42,6 +42,12 @@ class ChatEngine(
     private val _active = MutableStateFlow<Set<String>>(emptySet())
     val activeConversations: StateFlow<Set<String>> = _active.asStateFlow()
 
+    // Text of the answers being streamed right now (messageId -> text so far). Kept in memory so the UI can
+    // update just the streaming message without waiting for the database; the DB is only written every
+    // DB_FLUSH_MS and when the answer is finished.
+    private val _live = MutableStateFlow<Map<String, String>>(emptyMap())
+    val liveText: StateFlow<Map<String, String>> = _live.asStateFlow()
+
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
 
@@ -107,13 +113,18 @@ class ChatEngine(
                     .messages
                 val request = AiRequest(conv.model, conv.systemPrompt, history, toolDefs, cfg.maxOutputTokens)
 
-                var lastFlush = 0L
+                var lastFlush = System.currentTimeMillis()
+                var lastLive = 0L
                 ProviderFactory.create(cfg).stream(request).collect { ev ->
                     when (ev) {
                         is AiEvent.Text -> {
                             text.append(ev.delta)
                             val now = System.currentTimeMillis()
-                            if (now - lastFlush > 120) {
+                            if (now - lastLive >= LIVE_INTERVAL_MS) {
+                                _live.update { it + (assistantId to text.toString()) }
+                                lastLive = now
+                            }
+                            if (now - lastFlush > DB_FLUSH_MS) {
                                 msgDao.upsert(base.copy(text = text.toString()))
                                 lastFlush = now
                             }
@@ -130,6 +141,8 @@ class ChatEngine(
             calls = calls.map { it.copy(uid = tools.uidForName(it.name)) }
 
             withContext(NonCancellable) {
+                // Show the complete text right away, then persist it and drop the in-memory copy.
+                if (text.isNotEmpty()) _live.update { it + (assistantId to text.toString()) }
                 when {
                     error != null -> msgDao.upsert(base.copy(text = text.toString(), status = "error", error = error))
                     text.isEmpty() && calls.isEmpty() ->
@@ -144,6 +157,7 @@ class ChatEngine(
                     )
                 }
                 db.conversations().touch(conversationId, System.currentTimeMillis())
+                _live.update { it - assistantId }
             }
             cancelled?.let { throw it }
             if (error != null || calls.isEmpty()) {
@@ -197,5 +211,7 @@ class ChatEngine(
 
     companion object {
         const val MAX_TOOL_ROUNDS = 12
+        private const val LIVE_INTERVAL_MS = 80L
+        private const val DB_FLUSH_MS = 1000L
     }
 }

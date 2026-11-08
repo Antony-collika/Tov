@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.core.content.ContextCompat
+import com.example.byokchat.chat.AppVisibility
 import com.example.byokchat.chat.ChatEngine
 import com.example.byokchat.chat.ChatNotifier
 import com.example.byokchat.chat.GenerationService
@@ -89,6 +90,12 @@ class AppContainer(val context: Context) {
     val foregroundServiceError = MutableStateFlow<String?>(null)
     val conversations = ConversationRepository(db, settings)
     val ops = ChatOps(db)
+
+    init {
+        // A tool is waiting for confirmation: if the app is not on screen, tell the user with a notification.
+        confirmations.onRequested = { req -> if (!AppVisibility.inForeground) notifier.notifyConfirmation(req) }
+        confirmations.onFinished = { req -> notifier.cancelConfirmation(req.id) }
+    }
 }
 
 val Context.container: AppContainer get() = (applicationContext as App).container

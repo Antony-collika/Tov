@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
+import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -26,17 +28,21 @@ import io.noties.markwon.linkify.LinkifyPlugin
 /** Thông tin tô sáng kết quả tìm kiếm. currentOccurrence = chỗ khớp đang chọn trong tin nhắn này (-1 nếu không có). */
 data class Highlight(val query: String, val currentOccurrence: Int = -1)
 
+/** One Markwon instance shared by every message (building one per message was slow). Provided in AppNav. */
+val LocalMarkwon = staticCompositionLocalOf<Markwon?> { null }
+
+fun createMarkwon(context: Context): Markwon =
+    Markwon.builder(context)
+        .usePlugin(StrikethroughPlugin.create())
+        .usePlugin(TablePlugin.create(context))
+        .usePlugin(TaskListPlugin.create(context))
+        .usePlugin(LinkifyPlugin.create())
+        .build()
+
 @Composable
 fun MarkdownText(markdown: String, color: Color, modifier: Modifier = Modifier, highlight: Highlight? = null) {
     val context = LocalContext.current
-    val markwon = remember(context) {
-        Markwon.builder(context)
-            .usePlugin(StrikethroughPlugin.create())
-            .usePlugin(TablePlugin.create(context))
-            .usePlugin(TaskListPlugin.create(context))
-            .usePlugin(LinkifyPlugin.create())
-            .build()
-    }
+    val markwon = LocalMarkwon.current ?: remember(context) { createMarkwon(context) }
     val linkColor = MaterialTheme.colorScheme.primary.toArgb()
     val textColor = color.toArgb()
     val key = markdown + "\u0000" + (highlight?.query ?: "") + "\u0000" + (highlight?.currentOccurrence ?: -1)

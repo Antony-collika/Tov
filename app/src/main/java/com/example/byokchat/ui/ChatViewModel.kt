@@ -37,7 +37,8 @@ data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int)
 
 sealed interface ChatEvent {
     data class Deleted(val backup: List<MessageEntity>) : ChatEvent
-    data class OpenConversation(val id: String) : ChatEvent
+    /** A branch was created; the screen should switch to it (and offer a way back to the original). */
+    data class OpenBranch(val id: String) : ChatEvent
     data class Error(val message: String) : ChatEvent
 }
 
@@ -187,7 +188,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             try {
                 val r = app.ops.branchForRegenerate(conversationId, turnId, newUserText)
                 app.engine.start(r.conversationId, r.turnMap.getValue(turnId))
-                _events.emit(ChatEvent.OpenConversation(r.conversationId))
+                _events.emit(ChatEvent.OpenBranch(r.conversationId))
             } catch (e: Exception) {
                 _events.emit(ChatEvent.Error(e.message ?: "Không tạo được nhánh."))
             }
@@ -200,7 +201,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         viewModelScope.launch {
             try {
                 val r = app.ops.branchAt(conversationId, messageId)
-                _events.emit(ChatEvent.OpenConversation(r.conversationId))
+                _events.emit(ChatEvent.OpenBranch(r.conversationId))
             } catch (e: Exception) {
                 _events.emit(ChatEvent.Error(e.message ?: "Không tạo được nhánh."))
             }

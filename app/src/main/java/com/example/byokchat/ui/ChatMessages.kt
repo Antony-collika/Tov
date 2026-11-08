@@ -189,15 +189,18 @@ internal fun AssistantMessage(
     onEditChange: (String) -> Unit,
     onEditSave: (EditState) -> Unit,
     onEditCancel: () -> Unit,
+    liveText: String? = null,
 ) {
     var selectOpen by remember { mutableStateOf(false) }
+    // While streaming, the in-memory text is newer than what is in the database.
+    val shownText = if (liveText != null && liveText.length >= m.text.length) liveText else m.text
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (edit != null) {
             MessageEditor(edit, "Lưu", onEditChange, onEditSave, onEditCancel)
             return@Column
         }
-        if (m.text.isNotEmpty()) {
-            MarkdownBody(m.text, color = MaterialTheme.colorScheme.onSurface, highlight = hl)
+        if (shownText.isNotEmpty()) {
+            MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl)
         } else if (m.status == "streaming") {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }

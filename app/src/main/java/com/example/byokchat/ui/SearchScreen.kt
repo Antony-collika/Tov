@@ -71,13 +71,16 @@ fun SearchScreen(onBack: () -> Unit, onOpen: (conversationId: String, messageId:
         searching = true
         results = withContext(Dispatchers.Default) {
             val convs = db.conversations().observeAllOnce().associateBy { it.id }
+            val allMessages = db.messages().allChatMessages()
+            // Empty drafts (no messages) are not real conversations: never offer them
+            val nonEmpty = allMessages.map { it.conversationId }.toSet()
             val out = mutableListOf<SearchHit>()
             // khớp theo tên cuộc trò chuyện
-            convs.values.sortedByDescending { it.updatedAt }.forEach { c ->
+            convs.values.filter { it.id in nonEmpty }.sortedByDescending { it.updatedAt }.forEach { c ->
                 if (TextUtil.findAll(c.title, query).isNotEmpty()) out.add(SearchHit(c.id, c.title, null, "title", snippetOf(c.title, query)))
             }
             // khớp theo nội dung hiện tại của tin nhắn (gồm cả chỗ đã sửa tay)
-            db.messages().allChatMessages()
+            allMessages
                 .sortedByDescending { it.createdAt }
                 .forEach { m ->
                     val c = convs[m.conversationId] ?: return@forEach

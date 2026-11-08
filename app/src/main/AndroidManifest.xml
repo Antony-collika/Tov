@@ -30,6 +30,10 @@
             </intent-filter>
         </activity>
 
+        <receiver
+            android:name=".chat.ConfirmReceiver"
+            android:exported="false" />
+
         <service
             android:name=".chat.GenerationService"
             android:exported="false"

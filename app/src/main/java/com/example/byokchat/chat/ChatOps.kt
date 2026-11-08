@@ -54,7 +54,10 @@ class ChatOps(private val db: AppDatabase) {
         val rows = db.messages().getAll(conversationId).filter { it.seq <= lastSeq }
         val newId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
-        db.conversations().insert(conv.copy(id = newId, title = conv.title + " (nhánh)", createdAt = now, updatedAt = now))
+        val baseTitle = conv.title.removeSuffix(" (branch)").removeSuffix(" (nhánh)")
+        db.conversations().insert(
+            conv.copy(id = newId, title = "$baseTitle (branch)", createdAt = now, updatedAt = now, parentId = conv.id, pinned = false)
+        )
         val turnMap = rows.map { it.turnId }.distinct().associateWith { UUID.randomUUID().toString() }
         val copied = rows.map { r ->
             var m = r.copy(id = UUID.randomUUID().toString(), conversationId = newId, turnId = turnMap.getValue(r.turnId))

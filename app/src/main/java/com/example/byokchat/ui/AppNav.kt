@@ -1,11 +1,19 @@
 package com.example.byokchat.ui
 
 import android.net.Uri
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -13,107 +21,134 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.byokchat.container
+import kotlinx.coroutines.launch
 
 @Composable
 fun AppNav() {
     val nav = rememberNavController()
-    val container = LocalContext.current.container
+    val context = LocalContext.current
+    val container = context.container
     val settings = container.settings
-    // Chỉ tính một lần: người mới (chưa có nhà cung cấp, chưa xong/bỏ qua màn chào) bắt đầu ở màn chào.
-    val start = remember { if (settings.providers.value.isEmpty() && !settings.onboardingDone.value) "onboarding" else "list" }
+    val scope = rememberCoroutineScope()
+    // One Markwon for the whole app (building one per message was slow)
+    val markwon = remember { createMarkwon(context) }
+    // New users (no provider yet, welcome screen not finished/skipped) start at the welcome screen.
+    val start = remember { if (settings.providers.value.isEmpty() && !settings.onboardingDone.value) "onboarding" else "chat" }
 
-    // Rời màn chào: về danh sách (không để lại màn chào trong ngăn xếp), rồi mở cuộc trò chuyện nếu có.
-    fun leaveOnboarding(chatId: String?) {
-        if (!nav.popBackStack("list", inclusive = false)) {
-            nav.navigate("list") { popUpTo("onboarding") { inclusive = true } }
-        }
-        if (chatId != null) nav.navigate("chat/$chatId")
+    // Which conversation the chat screen shows. Saved so it survives rotation / process restart.
+    var chatId by rememberSaveable { mutableStateOf<String?>(null) }
+    var focusMsg by rememberSaveable { mutableStateOf<String?>(null) }
+    var initialQuery by rememberSaveable { mutableStateOf<String?>(null) }
+    var branchFrom by rememberSaveable { mutableStateOf<String?>(null) }
+
+    fun openChat(id: String, msg: String? = null, q: String? = null, from: String? = null) {
+        chatId = id
+        focusMsg = msg
+        initialQuery = q
+        branchFrom = from
     }
 
-    NavHost(navController = nav, startDestination = start) {
-        composable("onboarding") {
-            OnboardingScreen(onExit = { chatId -> leaveOnboarding(chatId) })
-        }
-        composable("list") {
-            ConversationListScreen(
-                onOpen = { id -> nav.navigate("chat/$id") },
-                onSettings = { nav.navigate("settings") },
-                onSearch = { nav.navigate("search") },
-                onOnboarding = { nav.navigate("onboarding") },
-            )
-        }
-        composable(
-            "chat/{id}?msg={msg}&q={q}",
-            arguments = listOf(
-                navArgument("id") { type = NavType.StringType },
-                navArgument("msg") { type = NavType.StringType; nullable = true; defaultValue = null },
-                navArgument("q") { type = NavType.StringType; nullable = true; defaultValue = null },
-            ),
-        ) { entry ->
-            ChatScreen(
-                conversationId = entry.arguments?.getString("id") ?: "",
-                focusMessageId = entry.arguments?.getString("msg"),
-                initialQuery = entry.arguments?.getString("q"),
-                onBack = { nav.popBackStack() },
-                onOpenSettings = { nav.navigate("settings") },
-                onOpenConversation = { id -> nav.navigate("chat/$id") },
-                onOnboarding = { nav.navigate("onboarding") },
-            )
-        }
-        composable("search") {
-            SearchScreen(
-                onBack = { nav.popBackStack() },
-                onOpen = { cid, mid, q ->
-                    val msg = if (mid != null) "&msg=" + Uri.encode(mid) else ""
-                    nav.navigate("chat/$cid?q=" + Uri.encode(q) + msg)
-                },
-            )
-        }
-        composable("settings") {
-            SettingsScreen(
-                onBack = { nav.popBackStack() },
-                onProviders = { nav.navigate("providers") },
-                onTools = { nav.navigate("tools") },
-                onNotes = { nav.navigate("notes") },
-            )
-        }
-        composable("tools") {
-            ToolsScreen(onBack = { nav.popBackStack() }, onOpen = { uid -> nav.navigate("tool/" + Uri.encode(uid)) })
-        }
-        composable("tool/{uid}", arguments = listOf(navArgument("uid") { type = NavType.StringType })) { entry ->
-            ToolDetailScreen(uid = entry.arguments?.getString("uid") ?: "", onBack = { nav.popBackStack() })
-        }
-        composable("notes") { NotesScreen(onBack = { nav.popBackStack() }) }
-        composable("providers") {
-            ProvidersScreen(
-                onBack = { nav.popBackStack() },
-                onAdd = { type -> nav.navigate("provider?type=${type.name}") },
-                onEdit = { id -> nav.navigate("provider?id=$id") },
-            )
-        }
-        composable(
-            "provider?id={id}&type={type}",
-            arguments = listOf(
-                navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null },
-                navArgument("type") { type = NavType.StringType; nullable = true; defaultValue = null },
-            ),
-        ) { entry ->
-            ProviderEditScreen(
-                providerId = entry.arguments?.getString("id"),
-                newType = entry.arguments?.getString("type"),
-                onDone = { nav.popBackStack() },
-            )
+    fun newChat() {
+        scope.launch { openChat(container.conversations.create()) }
+    }
+
+    // The app opens straight into a (new) chat.
+    LaunchedEffect(Unit) {
+        val cur = chatId
+        if (cur == null || container.db.conversations().get(cur) == null) {
+            val fresh = container.conversations.create()
+            // Do not overwrite a conversation that was opened in the meantime (e.g. from a notification)
+            if (chatId == null || chatId == cur) openChat(fresh)
         }
     }
-    // Mở cuộc trò chuyện từ thông báo (bỏ qua nếu cuộc đó không còn trong dữ liệu)
+
+    // Leave the welcome screen: back to the chat (no welcome screen left on the stack), optionally on the new conversation.
+    fun leaveOnboarding(id: String?) {
+        if (id != null) openChat(id)
+        if (!nav.popBackStack("chat", inclusive = false)) {
+            nav.navigate("chat") { popUpTo("onboarding") { inclusive = true } }
+        }
+    }
+
+    CompositionLocalProvider(LocalMarkwon provides markwon) {
+        NavHost(navController = nav, startDestination = start) {
+            composable("onboarding") {
+                OnboardingScreen(onExit = { id -> leaveOnboarding(id) })
+            }
+            composable("chat") {
+                val id = chatId
+                if (id == null) {
+                    Box(Modifier.fillMaxSize())
+                } else {
+                    ChatHost(
+                        conversationId = id,
+                        focusMessageId = focusMsg,
+                        initialQuery = initialQuery,
+                        branchFrom = branchFrom,
+                        onOpenChat = { newId, from -> openChat(newId, from = from) },
+                        onNewChat = { newChat() },
+                        onBranchNoticeShown = { branchFrom = null },
+                        onSettings = { nav.navigate("settings") },
+                        onSearch = { nav.navigate("search") },
+                        onOnboarding = { nav.navigate("onboarding") },
+                    )
+                }
+            }
+            composable("search") {
+                SearchScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpen = { cid, mid, q ->
+                        openChat(cid, msg = mid, q = q)
+                        nav.popBackStack("chat", inclusive = false)
+                    },
+                )
+            }
+            composable("settings") {
+                SettingsScreen(
+                    onBack = { nav.popBackStack() },
+                    onProviders = { nav.navigate("providers") },
+                    onTools = { nav.navigate("tools") },
+                    onNotes = { nav.navigate("notes") },
+                )
+            }
+            composable("tools") {
+                ToolsScreen(onBack = { nav.popBackStack() }, onOpen = { uid -> nav.navigate("tool/" + Uri.encode(uid)) })
+            }
+            composable("tool/{uid}", arguments = listOf(navArgument("uid") { type = NavType.StringType })) { entry ->
+                ToolDetailScreen(uid = entry.arguments?.getString("uid") ?: "", onBack = { nav.popBackStack() })
+            }
+            composable("notes") { NotesScreen(onBack = { nav.popBackStack() }) }
+            composable("providers") {
+                ProvidersScreen(
+                    onBack = { nav.popBackStack() },
+                    onAdd = { type -> nav.navigate("provider?type=${type.name}") },
+                    onEdit = { id -> nav.navigate("provider?id=$id") },
+                )
+            }
+            composable(
+                "provider?id={id}&type={type}",
+                arguments = listOf(
+                    navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("type") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { entry ->
+                ProviderEditScreen(
+                    providerId = entry.arguments?.getString("id"),
+                    newType = entry.arguments?.getString("type"),
+                    onDone = { nav.popBackStack() },
+                )
+            }
+        }
+    }
+
+    // Open a conversation from a notification (ignored if it no longer exists)
     val pending by container.pendingConversation.collectAsState()
     LaunchedEffect(pending) {
         val id = pending ?: return@LaunchedEffect
         container.pendingConversation.value = null
         if (container.db.conversations().get(id) == null) return@LaunchedEffect
-        val cur = nav.currentBackStackEntry
-        val alreadyThere = cur?.destination?.route?.startsWith("chat/") == true && cur?.arguments?.getString("id") == id
-        if (!alreadyThere) nav.navigate("chat/$id")
+        openChat(id)
+        nav.popBackStack("chat", inclusive = false)
     }
     ConfirmationHost()
 }

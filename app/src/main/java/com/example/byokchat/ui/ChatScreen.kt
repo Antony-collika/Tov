@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,12 +15,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
@@ -57,15 +58,19 @@ fun ChatScreen(
     conversationId: String,
     focusMessageId: String? = null,
     initialQuery: String? = null,
-    onBack: () -> Unit,
+    /** Set when this conversation was just created as a branch of another one. */
+    branchFrom: String? = null,
+    onOpenDrawer: () -> Unit,
     onOpenSettings: () -> Unit,
-    onOpenConversation: (String) -> Unit,
+    onOpenBranch: (String) -> Unit,
+    onOpenOriginal: (String) -> Unit,
+    onBranchNoticeShown: () -> Unit,
     onOnboarding: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
     val scope = rememberCoroutineScope()
-    val vm: ChatViewModel = viewModel(factory = viewModelFactory {
+    val vm: ChatViewModel = viewModel(key = conversationId, factory = viewModelFactory {
         initializer { ChatViewModel(container, conversationId) }
     })
     val conv by vm.conversation.collectAsState()
@@ -75,6 +80,9 @@ fun ChatScreen(
     val stats by vm.tokenStats.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()
     val toolPrefs by container.toolPrefs.prefs.collectAsState()
+    // Text of the answer being streamed. Deliberately NOT read here (no `by`): only the streaming message reads it,
+    // so only that message recomposes while the AI is typing.
+    val liveText = container.engine.liveText.collectAsState()
     val clipboard = LocalClipboardManager.current
     val snackbar = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -138,11 +146,23 @@ fun ChatScreen(
                     val r = snackbar.showSnackbar("Đã xóa lượt hội thoại", actionLabel = "Hoàn tác", duration = SnackbarDuration.Short)
                     if (r == SnackbarResult.ActionPerformed) vm.undoDelete(ev.backup)
                 }
-                is ChatEvent.OpenConversation -> onOpenConversation(ev.id)
+                is ChatEvent.OpenBranch -> onOpenBranch(ev.id)
                 is ChatEvent.Error -> Toast.makeText(context, ev.message, Toast.LENGTH_LONG).show()
             }
         }
     }
+
+    // Just arrived from "Branch": tell the user what happened and offer a way back to the original chat.
+    val noticeFrom = remember { branchFrom }
+    LaunchedEffect(Unit) {
+        val from = noticeFrom ?: return@LaunchedEffect
+        onBranchNoticeShown()
+        val r = snackbar.showSnackbar("Branch created", actionLabel = "Original chat", duration = SnackbarDuration.Long)
+        if (r == SnackbarResult.ActionPerformed) onOpenOriginal(from)
+    }
+
+    // Back closes the in-chat search first (otherwise the host opens the drawer)
+    BackHandler(enabled = searchOpen) { searchOpen = false; query = "" }
 
     fun requestRegen(turnId: String, newText: String?) {
         scope.launch {
@@ -213,6 +233,24 @@ fun ChatScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
+        // The input bar lives in bottomBar so snackbars (e.g. "Undo") appear above it instead of covering it.
+        bottomBar = {
+            InputBar(
+                draft = vm.draft,
+                onDraft = { vm.draft = it },
+                images = vm.pendingImages,
+                onRemoveImage = vm::removePendingImage,
+                generating = generating,
+                onSend = { askNotificationPermissionOnce(); vm.send() },
+                onStop = vm::stop,
+                onPickGallery = { pickLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onPickCamera = { launchCamera() },
+                inputFocus = inputFocus,
+                modelLabel = chipLabel,
+                modelMissing = modelMissing,
+                onPickModel = { showModelPicker = true },
+            )
+        },
         topBar = {
             if (searchOpen) {
                 TopAppBar(
@@ -256,7 +294,7 @@ fun ChatScreen(
                         Text(conv?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     navigationIcon = {
-                        IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại") }
+                        IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, contentDescription = "Conversations") }
                     },
                     actions = {
                         stats?.let { ContextRing(it.used, it.limit, it.droppedTurns) }
@@ -274,7 +312,7 @@ fun ChatScreen(
             }
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        Column(Modifier.fillMaxSize().padding(padding)) {
             val showBanner = remember(toolPrefs) { container.registry.hasEnabledWorkspaceTools() } && !workspaceOk
             if (showBanner) {
                 Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
@@ -324,6 +362,7 @@ fun ChatScreen(
                             AssistantMessage(
                                 m, generating, hl, edit, actions, toolResults,
                                 showActions = m.id in answerIds,
+                                liveText = if (m.status == "streaming") liveText.value[m.id] else null,
                                 onEditChange = { t -> editing = editing?.copy(text = t) },
                                 onEditSave = { st -> editing = null; vm.saveEdit(st.messageId, st.text) },
                                 onEditCancel = { editing = null },
@@ -340,21 +379,6 @@ fun ChatScreen(
                     }
                 }
             }
-            InputBar(
-                draft = vm.draft,
-                onDraft = { vm.draft = it },
-                images = vm.pendingImages,
-                onRemoveImage = vm::removePendingImage,
-                generating = generating,
-                onSend = { askNotificationPermissionOnce(); vm.send() },
-                onStop = vm::stop,
-                onPickGallery = { pickLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                onPickCamera = { launchCamera() },
-                inputFocus = inputFocus,
-                modelLabel = chipLabel,
-                modelMissing = modelMissing,
-                onPickModel = { showModelPicker = true },
-            )
         }
     }
 
