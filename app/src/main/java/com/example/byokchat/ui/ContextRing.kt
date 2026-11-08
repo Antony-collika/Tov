@@ -15,14 +15,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/** Vòng tròn nhỏ cho biết cuộc trò chuyện đã dùng bao nhiêu phần "trí nhớ" của AI. Bấm để đọc giải thích. */
+/**
+ * A small ring showing how much of the AI's "memory" this chat has used. Tap it to read an explanation.
+ * Above 90% the explanation offers [onNewChat] ("New chat": an empty chat; it is NOT a branch).
+ */
 @Composable
-fun ContextRing(used: Int, limit: Int, dropped: Int) {
+fun ContextRing(used: Int, limit: Int, dropped: Int, onNewChat: () -> Unit) {
     if (limit <= 0) return
     var open by remember { mutableStateOf(false) }
     val fraction = (used.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
+    val nearlyFull = fraction > 0.9f
     val color = when {
-        fraction > 0.9f -> MaterialTheme.colorScheme.error
+        nearlyFull -> MaterialTheme.colorScheme.error
         fraction >= 0.7f -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
@@ -37,16 +41,26 @@ fun ContextRing(used: Int, limit: Int, dropped: Int) {
     }
     if (open) {
         val message = buildString {
-            append("AI nhớ được khoảng ${formatTokens(limit)} đơn vị chữ (token) trong một cuộc trò chuyện. ")
-            append("Hiện đã dùng khoảng ${formatTokens(used)}.")
-            if (dropped > 0) append("\n\n$dropped lượt cũ nhất không còn được gửi cho AI để vừa giới hạn.")
-            append("\n\nĐây là số ước lượng.")
+            append("The AI can remember about ${formatTokens(limit)} tokens (pieces of text) in one chat. ")
+            append("About ${formatTokens(used)} are used so far.")
+            if (dropped > 0) append("\n\nThe $dropped oldest turn(s) are no longer sent to the AI so the chat fits the limit.")
+            if (nearlyFull) append("\n\nThis chat is almost full. A new chat will give the AI a clean memory.")
+            append("\n\nThis is an estimate.")
         }
         AlertDialog(
             onDismissRequest = { open = false },
-            title = { Text("Bộ nhớ của cuộc trò chuyện") },
+            title = { Text("Chat memory") },
             text = { Text(message) },
-            confirmButton = { TextButton(onClick = { open = false }) { Text("Đóng") } },
+            confirmButton = {
+                if (nearlyFull) {
+                    TextButton(onClick = { open = false; onNewChat() }) { Text("New chat") }
+                } else {
+                    TextButton(onClick = { open = false }) { Text("Close") }
+                }
+            },
+            dismissButton = if (nearlyFull) {
+                { TextButton(onClick = { open = false }) { Text("Close") } }
+            } else null,
         )
     }
 }

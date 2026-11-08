@@ -93,7 +93,9 @@ class ToolRegistry(
         all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
             .sumOf { TokenEstimator.text(effectiveName(it) + effectiveDescription(it) + it.schema.toString()) }
 
-    override suspend fun execute(call: AiToolCall): ToolOutcome {
+    override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
+
+    override suspend fun execute(call: AiToolCall, turnId: String): ToolOutcome {
         val tool = all.firstOrNull { effectiveName(it) == call.name && mode(it) != ToolMode.OFF && isAvailable(it) }
             ?: return ToolOutcome("", "Không có công cụ tên '${call.name}' hoặc công cụ này đang tắt.", true)
         val displayName = effectiveName(tool)
@@ -112,7 +114,7 @@ class ToolRegistry(
             } catch (e: Exception) {
                 "(Không tạo được bản xem trước: ${e.message})\n" + args.toString().take(500)
             }
-            val allowed = confirmations.ask(ConfirmRequest(displayName, tool.uid, tool.risk, detail))
+            val allowed = confirmations.ask(ConfirmRequest(displayName, tool.uid, tool.risk, detail, turnId))
             if (!allowed) return ToolOutcome(tool.uid, "Người dùng đã từ chối thao tác này. Đừng thử lại trừ khi họ yêu cầu.", true)
         }
 

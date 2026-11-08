@@ -119,7 +119,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             )
             val conv = db.conversations().get(conversationId)
             if (conv != null && conv.title == DEFAULT_TITLE) {
-                val title = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(40) ?: "Hình ảnh"
+                val title = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(40) ?: "Image"
                 db.conversations().rename(conversationId, title)
             }
             app.engine.start(conversationId, turnId)
@@ -190,7 +190,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 app.engine.start(r.conversationId, r.turnMap.getValue(turnId))
                 _events.emit(ChatEvent.OpenBranch(r.conversationId))
             } catch (e: Exception) {
-                _events.emit(ChatEvent.Error(e.message ?: "Không tạo được nhánh."))
+                _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
             }
         }
     }
@@ -203,7 +203,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 val r = app.ops.branchAt(conversationId, messageId)
                 _events.emit(ChatEvent.OpenBranch(r.conversationId))
             } catch (e: Exception) {
-                _events.emit(ChatEvent.Error(e.message ?: "Không tạo được nhánh."))
+                _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
             }
         }
     }

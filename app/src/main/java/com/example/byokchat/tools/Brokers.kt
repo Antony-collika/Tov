@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Yêu cầu người dùng xác nhận trước khi công cụ chạy. */
@@ -16,6 +17,8 @@ class ConfirmRequest(
     val uid: String,
     val risk: Risk,
     val detail: String,
+    /** The user turn (question + answer) this request belongs to; used by "Allow all in this turn". */
+    val turnId: String = "",
 ) {
     val result = CompletableDeferred<Boolean>()
     val id: Int = nextId.incrementAndGet()
@@ -37,7 +40,11 @@ class ConfirmationBroker {
     @Volatile
     var onFinished: ((ConfirmRequest) -> Unit)? = null
 
+    // Turns for which the user chose "Allow all in this turn". Never applies to Risk.DELETE.
+    private val turnAllowed: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
     suspend fun ask(req: ConfirmRequest): Boolean {
+        if (req.risk != Risk.DELETE && req.turnId.isNotEmpty() && req.turnId in turnAllowed) return true
         _pending.update { it + req }
         onRequested?.invoke(req)
         try {
@@ -50,6 +57,25 @@ class ConfirmationBroker {
 
     fun resolve(req: ConfirmRequest, allowed: Boolean) {
         req.result.complete(allowed)
+    }
+
+    /**
+     * "Allow all in this turn": allow this request and every later (or already waiting) non-delete request of the
+     * same turn. Deleting is never covered: a delete request is just allowed once.
+     */
+    fun allowAllInTurn(req: ConfirmRequest) {
+        if (req.risk == Risk.DELETE || req.turnId.isEmpty()) {
+            resolve(req, true)
+            return
+        }
+        turnAllowed.add(req.turnId)
+        resolve(req, true)
+        _pending.value.filter { it.turnId == req.turnId && it.risk != Risk.DELETE }.forEach { resolve(it, true) }
+    }
+
+    /** Called by the chat engine when a turn's run is over, so "Allow all in this turn" does not outlive it. */
+    fun endTurn(turnId: String) {
+        turnAllowed.remove(turnId)
     }
 
     /** Used by the notification buttons. Does nothing if the request is already gone. */

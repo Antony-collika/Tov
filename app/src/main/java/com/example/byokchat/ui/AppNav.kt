@@ -91,6 +91,7 @@ fun AppNav() {
                         onSettings = { nav.navigate("settings") },
                         onSearch = { nav.navigate("search") },
                         onOnboarding = { nav.navigate("onboarding") },
+                        onProvider = { pid -> nav.navigate(if (pid == null) "providers" else "provider?id=$pid") },
                     )
                 }
             }

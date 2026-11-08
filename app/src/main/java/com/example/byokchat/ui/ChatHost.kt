@@ -40,6 +40,7 @@ fun ChatHost(
     onSettings: () -> Unit,
     onSearch: () -> Unit,
     onOnboarding: () -> Unit,
+    onProvider: (String?) -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -109,6 +110,8 @@ fun ChatHost(
                 onOpenOriginal = { id -> onOpenChat(id, null) },
                 onBranchNoticeShown = onBranchNoticeShown,
                 onOnboarding = onOnboarding,
+                onOpenProvider = onProvider,
+                onNewChat = onNewChat,
             )
         }
     }

@@ -28,8 +28,8 @@ fun SelectTextSheet(text: String, onCopyAll: () -> Unit, onDismiss: () -> Unit) 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).padding(horizontal = 16.dp).navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Chọn chữ", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Button(onClick = { onCopyAll(); onDismiss() }) { Text("Sao chép tất cả") }
+                Text("Select text", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Button(onClick = { onCopyAll(); onDismiss() }) { Text("Copy all") }
             }
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())) {
                 SelectionContainer {

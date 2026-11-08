@@ -57,6 +57,7 @@ class ChatEngine(
             try {
                 run(conversationId, turnId)
             } finally {
+                tools.endTurn(turnId)
                 jobs.remove(conversationId)
                 _active.update { it - conversationId }
             }
@@ -182,7 +183,7 @@ class ChatEngine(
                 return
             }
             for (call in calls) {
-                val outcome = tools.execute(call)
+                val outcome = tools.execute(call, turnId)
                 msgDao.upsert(
                     MessageEntity(
                         id = UUID.randomUUID().toString(),

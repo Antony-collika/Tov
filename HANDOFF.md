@@ -1,15 +1,15 @@
 # HANDOFF / PROGRESS – Tov (app chat AI BYOK, Android, Kotlin + Compose)
 
 > File này để người (hoặc phiên Claude khác) đọc lại là nắm được: đã làm gì, quyết định gì, còn gì, test gì.
-> Cập nhật lần cuối: sau **Đợt 1**.
+> Cập nhật lần cuối: sau **Đợt 2**.
 
 ## 1. Nguồn yêu cầu và thứ tự ưu tiên
 - `specs` (có từ trước dự án): chỉ để tham khảo, cái gì là *feature* chứ không phải lỗi. Vẫn phải dựa vào code.
 - **Khảo sát cải thiện UI/UX = nhu cầu hiện tại (sau khi có MVP) → ƯU TIÊN KHẢO SÁT** khi hai bên lệch nhau.
 - Chỗ lệch specs đã xử lý theo khảo sát:
-  - Menu tin nhắn của bạn: bỏ "Regenerate" riêng (chỉ còn Copy / Edit message / Edit & regenerate / Delete).
-  - Bỏ nút ⋮ ở tin nhắn, chỉ nhấn giữ (long press) để mở menu (làm ở Đợt 2).
-  - Placeholder ô nhập "Ask anything", màn trống chỉ "Hi, Welcome" (Đợt 2).
+  - Menu tin nhắn của bạn: bỏ "Regenerate" riêng (chỉ còn Copy / Edit message / Edit & regenerate / Delete). **Ngoại lệ (Đợt 2):** lượt *chưa có câu trả lời nào* của AI (bị hủy/ngắt) vẫn hiện "Regenerate" trong menu để còn thử lại được, đúng specs mục 9.
+  - Bỏ nút ⋮ ở tin nhắn, chỉ nhấn giữ (long press) để mở menu → **đã làm ở Đợt 2**.
+  - Placeholder ô nhập "Ask anything", màn trống chỉ "Hi, Welcome" → **đã làm ở Đợt 2**.
 
 ## 2. Quy ước đã chốt với người dùng
 - Giao **từng đợt (1→4)**; người dùng build, báo lỗi, rồi làm đợt tiếp.
@@ -19,7 +19,7 @@
 
 ## 3. Tiến độ
 - [x] **Đợt 1 – Cấu trúc & P0** (xem mục 4)
-- [ ] Đợt 2 – P1 màn chat (mục 6)
+- [x] **Đợt 2 – P1 màn chat** (mục 6, checklist test ở mục 6.5)
 - [ ] Đợt 3 – P1 danh sách / cài đặt / công cụ + Anh hóa toàn app (mục 7)
 - [ ] Đợt 4 – P2 làm đẹp (mục 8)
 
@@ -79,25 +79,69 @@ Sửa: `AndroidManifest.xml`, `App.kt`, `chat/ChatEngine.kt`, `chat/ChatNotifier
 7. Cập nhật từ bản cũ: dữ liệu hội thoại cũ vẫn còn (migration v1→v2).
 8. Xoay màn hình khi đang ở một cuộc trò chuyện: vẫn ở đúng cuộc đó.
 
-## 6. Kế hoạch Đợt 2 – P1 màn chat (CHƯA LÀM)
-- **InputBar mới**: "+" (dropdown giữ nguyên), tên mô hình (chuỗi ID thô, không đổi sang tên đẹp), nút gửi – cùng một khối/hàng *bên dưới* khung nhập. Placeholder chỉ "Ask anything".
-- **Menu tin nhắn = Bottom sheet mở bằng long press, bỏ nút ⋮**:
-  - User: Copy | Edit message | Edit & regenerate | Delete.
-  - Assistant: Copy | Edit message | Branch in new chat | Regenerate | Delete.
-  - (Giữ thêm "Select text" vì khảo sát nói Chọn chữ phải luôn dùng được – xác nhận lại với người dùng nếu cần.)
-- Hàng nút dưới câu trả lời **chỉ hiện ở câu trả lời cuối cùng** (Copy, Regenerate, Branch); lượt cũ dùng long press.
-- **Copy / Chọn chữ không bị khóa khi AI đang trả lời** (chỉ khóa sửa/xóa/tạo lại, đúng specs).
-- Gửi tin → `animateScrollToItem(0)`.
-- Top bar: dấu hiệu khi cuộc có system prompt tùy chỉnh; vòng ngữ cảnh >90% gợi ý "Start a new chat from here".
-- Tìm trong cuộc: Enter nhảy sang kết quả kế tiếp. Nút X xóa ảnh chờ gửi: vùng chạm 48dp.
-- Toast "Copied" chỉ hiện trên Android < 13.
-- Lỗi từ AI: nút đúng ngữ cảnh ("Open provider settings") bên cạnh "Retry".
-- Màn trống: chỉ "Hi, Welcome" (bỏ các gợi ý); vẫn giữ thẻ "chưa có AI / chưa chọn mô hình".
-- Thẻ công cụ: câu dễ đọc ("Read file notes/todo.md"), JSON trong phần mở rộng, trạng thái đang chạy rõ.
-- Hộp xác nhận: thêm "Allow all in this turn" và "Always allow this tool" (không áp dụng cho Delete).
+## 6. Đợt 2 – đã làm gì (P1 màn chat)
 
-## 7. Kế hoạch Đợt 3 – danh sách / cài đặt / công cụ + Anh hóa (CHƯA LÀM)
-- **Anh hóa toàn app** (UI + mô tả công cụ + kết quả/lỗi công cụ + thông báo + tên kênh thông báo + `ThemeMode.label`, `ToolMode.label`, `ToolGroup.label`...). Các file còn tiếng Việt nhiều: `OnboardingScreen`, `ProviderEditScreen`, `ProvidersScreen`, `SettingsScreen`, `ToolsScreen`, `NotesScreen`, `ModelPickerSheet`, `ChatMessages`, `ChatScreen`, `ChatToolCards`, `ConfirmationHost`, `Dialogs`, `ContextRing`, `SearchScreen`, `SelectTextSheet`, `ImageViewerDialog`, `CodeBlock`, `ChatEmptyState`, `tools/*Tools.kt`, `tools/ToolRegistry.kt`, `tools/WorkspaceFs.kt`, `ai/*Provider.kt`, `ai/Http.kt`, `chat/ChatEngine.kt`, `chat/GenerationService.kt`, `data/*`, `util/Text.kt`. Lưu ý các test (`HttpErrorTest`, `TextUtilTest`, `MarkdownSegmentsTest`) có thể chứa chuỗi tiếng Việt cần cập nhật theo.
+### 6.1 InputBar mới (`ui/ChatInputBar.kt`, viết lại)
+- Một khối bo tròn: khung nhập ở trên; **hàng bên dưới** gồm "+" (dropdown giữ nguyên: Choose from gallery / Take photo), **tên mô hình**, nút gửi/dừng.
+- Placeholder chỉ "Ask anything". Tên mô hình là chuỗi ID thô; khi có **từ 2 nhà cung cấp trở lên** vẫn giữ tiền tố `Tên nhà cung cấp · ` như cũ (xem mục 6.6 – cần người dùng xác nhận).
+- Nút X xóa ảnh chờ gửi: vùng chạm **48dp** (hình tròn vẽ 22dp nằm trong IconButton 48dp; ô ảnh cao 76dp để không bị cắt).
+
+### 6.2 Menu tin nhắn = bottom sheet mở bằng nhấn giữ (`ui/MessageMenu.kt` mới, `ui/ChatMessages.kt` viết lại)
+- **Đã bỏ hoàn toàn nút ⋮** (cả tin của bạn lẫn tin AI). Nhấn giữ bong bóng (tin bạn) hoặc bất kỳ chỗ nào của tin AI → bottom sheet, có rung nhẹ.
+- Tin của bạn: Copy | Select text | Edit message | Edit & regenerate | Delete (+ Regenerate chỉ khi lượt đó chưa có câu trả lời nào, tham số `canRegen`).
+- Tin AI: Copy | Select text | Edit message | Branch in new chat | Regenerate | Delete. Tin lỗi: Copy/Select (nếu có chữ) | Regenerate | Delete (không có Edit/Branch).
+- **Khóa khi AI đang trả lời:** chỉ Edit / Edit & regenerate / Branch / Regenerate / Delete bị mờ (kèm dòng giải thích trong sheet). **Copy và Select text luôn dùng được.** Copy tin đang stream lấy **text đang hiện** (live), không phải bản DB cũ tới 1 giây. "Select text" chụp snapshot lúc mở nên không đổi nội dung dưới tay khi AI còn viết.
+- `Actions.copy` giờ nhận `String` (không phải `MessageEntity`).
+
+### 6.3 Hàng nút dưới câu trả lời chỉ ở **câu trả lời cuối cùng của cả cuộc**
+- Gồm Copy | Regenerate | Branch (không còn ⋮). Điều kiện: tin cuối cùng đang hiển thị là tin AI, có chữ, `status == "done"` (`lastAnswerId` trong `ChatScreen`). Lượt cũ dùng nhấn giữ.
+- Copy luôn bật; Regenerate/Branch khóa khi `generating`.
+
+### 6.4 Các mục khác
+- **Cuộn khi gửi:** `followNewest` trong `ChatScreen`. Gửi tin → khi tin mới (và tin placeholder của AI) xuất hiện thì `animateScrollToItem(0)`. Tự tắt khi người dùng kéo list (`DragInteraction.Start`) hoặc khi AI xong. (Lý do dùng cờ thay vì cuộn ngay: lúc bấm gửi tin chưa có trong list.)
+- **Top bar:** chấm nhỏ (Badge) trên nút ⋮ + dấu ✓ cạnh "System prompt" khi cuộc có system prompt (`systemPrompt.isNotBlank()`; lưu ý cuộc mới được sao chép prompt mặc định từ Settings nên nếu Settings có prompt thì mọi cuộc đều có chấm).
+- **Vòng ngữ cảnh > 90%:** bấm vào vòng → hộp thoại có thêm nút **"New chat"** (gọi `onNewChat`, tạo cuộc **trống** mới; KHÔNG phải Branch, không mang theo tin nào). Chỉ ở trong hộp thoại, không có snackbar tự bật (tránh phiền mỗi lần mở cuộc dài).
+- **Tìm trong cuộc:** phím Enter/Search trên bàn phím = kết quả kế tiếp (giữ bàn phím mở).
+- **Toast "Copied"** chỉ hiện khi Android < 13.
+- **Lỗi AI (`ui/ErrorHints.kt`, có test):** thẻ lỗi có "Retry" + nút ngữ cảnh. Quy tắc: chưa có nhà cung cấp / thiếu API key (trừ loại Custom) / địa chỉ không bắt đầu bằng http → **"Open provider settings"**; chưa chọn mô hình → **"Select model"** (mở bảng chọn mô hình); mã HTTP 401/403/404/429 → "Open provider settings". Các lỗi thiết lập quyết định theo **trạng thái hiện tại** (sửa xong thì nút biến mất). Mã HTTP đọc từ dòng chi tiết (`... 401: ...`, ở dòng thứ hai) bằng regex `\d{3}:` nên **không phụ thuộc ngôn ngữ** khi Đợt 3 Anh hóa `Http.kt`. "Open provider settings" mở màn sửa nhà cung cấp của cuộc (hoặc danh sách nhà cung cấp nếu chưa có).
+- **Màn trống:** chỉ "Hi, Welcome" (đã bỏ 4 gợi ý). Vẫn giữ 2 thẻ "No AI connected yet" / "Choose a model".
+- **Thẻ công cụ (`ui/ChatToolCards.kt`, `ui/ToolSummary.kt` mới, có test):** hiện câu dễ đọc theo UID (ví dụ "Read file notes/todo.md (lines 3–10)"), trạng thái rõ: *Running…* (vòng xoay) / *Waiting for your approval…* / *Done* / *Failed or denied*. Bấm để mở: tên công cụ, **JSON tham số được thụt dòng** và kết quả. UID lạ → hiện tên công cụ. Khi thêm công cụ mới ở sau, **thêm 1 dòng vào `toolSummary()`**.
+- **Hộp xác nhận (`ui/ConfirmationHost.kt`):** Allow | **Allow all in this turn** | **Always allow this tool** | Deny. Với thao tác **xóa** chỉ còn Delete | Deny (không có lối tắt, đúng specs "xóa luôn hỏi").
+  - "Allow all in this turn": `ConfirmRequest.turnId` (mới) + `ConfirmationBroker.allowAllInTurn()` / `endTurn()`. Duyệt luôn các yêu cầu đang chờ cùng lượt và các yêu cầu sau trong lượt đó (không bao giờ gồm Delete). `ChatEngine.start` gọi `tools.endTurn(turnId)` ở `finally` nên quyền hết hiệu lực khi AI xong/bị dừng.
+  - "Always allow this tool": `registry.setMode(tool, ToolMode.AUTO)` → thành mặc định, hoàn tác được trong Cài đặt → Công cụ. Không hiện cho thao tác xóa.
+  - `ToolRuntime.execute(call, turnId)` và `ToolRuntime.endTurn(turnId)` là chữ ký mới.
+
+### 6.4b Anh hóa đã làm kèm (chỉ trong các file đã đụng vào)
+`ChatScreen`, `ChatMessages`, `ChatInputBar`, `ChatToolCards`, `ConfirmationHost`, `ChatEmptyState`, `ContextRing`, `SelectTextSheet`, `Dialogs` (dùng chung nên đổi luôn: Save/Cancel/OK/Filter/Add selected/Close), cùng 2 chuỗi trong `ChatViewModel` ("Image", "Couldn't create the branch."). Phần còn lại vẫn tiếng Việt (xem mục 7).
+
+### 6.5 Checklist test Đợt 2 (người dùng chạy thử)
+> Lưu ý quan trọng: **chưa build thử** (xem mục 2). Nếu build lỗi, dán log để sửa.
+1. **Nhấn giữ** vào tin của bạn *và* vào tin AI (kể cả giữa đoạn văn có chữ) → hiện bottom sheet. *(Kiểm tra đầu tiên: tin AI hiển thị bằng TextView của Markwon; nếu nhấn giữ trên chữ không mở được menu thì báo lại – có phương án dự phòng.)*
+2. Không còn nút ⋮ ở tin nào. Menu đúng danh sách ở 6.2.
+3. Khi AI đang trả lời: nhấn giữ vào tin → Copy và Select text dùng được, các mục còn lại mờ + có dòng giải thích. Copy tin đang viết ra đúng phần chữ đang hiện.
+4. Chỉ **câu trả lời cuối cùng** có hàng Copy / Regenerate / Branch; các câu cũ không có hàng nút.
+5. Cuộn lên đọc tin cũ → gõ và gửi → danh sách tự xuống tin mới và bám theo câu trả lời; đang bám mà vuốt tay lên thì ngừng bám.
+6. Ô nhập: placeholder "Ask anything"; "+", tên mô hình, nút gửi cùng một hàng dưới khung nhập. Thêm ảnh → nút X bấm dễ (vùng chạm to).
+7. Android 13+: copy không hiện toast "Copied" (hệ thống tự báo); Android thấp hơn có toast.
+8. Tìm trong cuộc: gõ từ khóa, bấm Enter trên bàn phím → nhảy kết quả kế tiếp.
+9. Cuộc có system prompt → chấm trên nút ⋮ + dấu ✓ ở mục "System prompt". Cuộc dùng >90% bộ nhớ → bấm vòng thấy nút "New chat".
+10. Gây lỗi: xóa API key rồi gửi → thẻ lỗi có "Retry" + "Open provider settings"; bỏ chọn mô hình → "Select model".
+11. Màn trống chỉ có "Hi, Welcome".
+12. Bật "Hỏi trước" cho công cụ ghi file, nhờ AI sửa nhiều file: thẻ công cụ hiện câu dễ đọc + "Waiting for your approval…"; bấm **Allow all in this turn** → các file còn lại không hỏi nữa; sang câu hỏi mới thì hỏi lại. **Always allow this tool** → công cụ đó chuyển sang Tự động (xem trong màn Công cụ). Thử công cụ xóa: chỉ có Delete / Deny.
+
+### 6.6 Điều cần người dùng xác nhận (đang giả định)
+- Tên mô hình trong ô nhập: giữ tiền tố nhà cung cấp khi có ≥ 2 nhà cung cấp (khảo sát chỉ nói "giữ chuỗi ID thô"). Muốn chỉ ID thuần thì sửa `chipLabel` trong `ChatScreen.kt`.
+- Giữ mục "Select text" trong menu (khảo sát: Chọn chữ phải luôn dùng được).
+- Nút "New chat" trong hộp thoại vòng ngữ cảnh = mở chat **trống**. (Đã đổi nhãn từ "Start a new chat from here" vì "from here" dễ bị hiểu là Branch.) Nếu muốn nút này mang theo một phần ngữ cảnh (ví dụ tóm tắt) thì cần bàn thêm.
+- Quy ước Branch (người dùng đã xác nhận, code `ChatOps.branchAt` đang đúng): Branch ở lượt N → cuộc mới giữ lượt 1..N, bỏ các lượt sau; cuộc gốc giữ nguyên.
+
+### 6.7 Danh sách file thay đổi trong Đợt 2
+Mới: `ui/MessageMenu.kt`, `ui/ErrorHints.kt`, `ui/ToolSummary.kt`, test `ErrorHintsTest`, `ToolSummaryTest` (thư mục `ui`), `ConfirmationBrokerTest` (thư mục `tools`).
+Viết lại: `ui/ChatInputBar.kt`, `ui/ChatMessages.kt`, `ui/ChatToolCards.kt`, `ui/ConfirmationHost.kt`, `ui/ChatEmptyState.kt`, `ui/ContextRing.kt`.
+Sửa: `ui/ChatScreen.kt` (tham số mới `onOpenProvider`, `onNewChat`), `ui/ChatHost.kt`, `ui/AppNav.kt`, `ui/ChatViewModel.kt`, `ui/Dialogs.kt`, `ui/SelectTextSheet.kt`, `tools/Brokers.kt`, `tools/ToolRegistry.kt`, `chat/ToolRuntime.kt`, `chat/ChatEngine.kt`.
+
+## 7. Kế hoạch Đợt 3 – danh sách / cài đặt / công cụ + Anh hóa (CHƯA LÀM; các file màn chat đã Anh hóa ở Đợt 2)
+- **Anh hóa toàn app** (UI + mô tả công cụ + kết quả/lỗi công cụ + thông báo + tên kênh thông báo + `ThemeMode.label`, `ToolMode.label`, `ToolGroup.label`...). Các file còn tiếng Việt nhiều: `OnboardingScreen`, `ProviderEditScreen`, `ProvidersScreen`, `SettingsScreen`, `ToolsScreen`, `NotesScreen`, `ModelPickerSheet`, `SearchScreen`, `ImageViewerDialog`, `CodeBlock`, `ConversationDrawer`, `tools/*Tools.kt`, `tools/ToolRegistry.kt`, `tools/WorkspaceFs.kt`, `ai/*Provider.kt`, `ai/Http.kt`, `chat/ChatEngine.kt`, `chat/GenerationService.kt`, `data/*`, `util/Text.kt`. Lưu ý các test (`HttpErrorTest`, `TextUtilTest`, `MarkdownSegmentsTest`) có thể chứa chuỗi tiếng Việt cần cập nhật theo.
   - Cần chú ý `DEFAULT_TITLE = "Cuộc trò chuyện mới"`: đổi sang "New chat" nhưng vẫn nhận ra tiêu đề cũ để đặt tên tự động.
 - Drawer: dòng phụ = xem trước tin cuối; nhóm Today / Yesterday / Previous 7 days / Older; vuốt để xóa + Undo; nhấn giữ đổi tên/xóa; **ghim** (cột `pinned` đã có); **chọn nhiều để xóa hàng loạt**; thanh tìm ngay trong danh sách và gom kết quả theo cuộc.
 - Cài đặt: chia nhóm AI / Tools / Data & workspace / Appearance; theme dùng nút chọn ngang 3 lựa chọn; workspace hiện tên thư mục dạng tương đối (`./homework`); đổi nút "Kiểm tra" → "Check read/write access".
@@ -113,3 +157,6 @@ Sửa: `AndroidManifest.xml`, `App.kt`, `chat/ChatEngine.kt`, `chat/ChatNotifier
 - `ConversationRepository.create()` luôn dọn cuộc rỗng; đừng gọi nó "dự phòng" khi người dùng đang đứng trong một cuộc rỗng khác.
 - `ChatScreen` được bọc `key(conversationId)` trong `ChatHost` và `viewModel(key = conversationId)` – mỗi cuộc có ViewModel riêng.
 - Nếu lỗi build ở Đợt 1, các chỗ dễ sai nhất: `ChatHost.kt` (API Drawer của Material3 1.3.x), `ChatNotifier.kt` (import `Risk`, `ConfirmRequest`), `ConversationDrawer.kt` (`ListItemDefaults.colors`), `ChatScreen.kt` (tham số mới), `AppDatabase.kt` (migration).
+- (Đợt 2) `ToolRuntime.execute(call, turnId)` + `endTurn(turnId)`; `ConfirmRequest` có thêm `turnId`. Nếu thêm nơi nào gọi `execute`, phải truyền `turnId` (nếu không, "Allow all in this turn" không hoạt động cho lời gọi đó).
+- (Đợt 2) `ErrorHints.kt` đọc mã HTTP ở **dòng thứ hai** của chuỗi lỗi (định dạng "câu thân thiện\nChi tiết: Lỗi 401: ..."). Khi Đợt 3 Anh hóa `Http.kt`, giữ cấu trúc hai dòng và dạng `<nhãn> <mã>:`; cập nhật `HttpErrorTest` cho khớp. `ErrorHintsTest` đã dùng chuỗi tiếng Anh nên không bị ảnh hưởng.
+- (Đợt 2) Nếu lỗi build ở Đợt 2, các chỗ dễ sai nhất: `ChatMessages.kt` (hai overload `combinedClickable`: có/không `interactionSource` + `indication`), `ChatInputBar.kt` (`surfaceContainerHigh`, Material3 1.3.x), `ContextRing.kt` (`dismissButton = if (...) { { ... } } else null`), `ChatScreen.kt` (`BadgedBox`, `listState.interactionSource`), `ConfirmationBrokerTest.kt` (`runBlocking`).

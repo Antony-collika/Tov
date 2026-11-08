@@ -10,6 +10,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,6 +20,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -34,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -66,6 +71,10 @@ fun ChatScreen(
     onOpenOriginal: (String) -> Unit,
     onBranchNoticeShown: () -> Unit,
     onOnboarding: () -> Unit,
+    /** Opens the settings of a provider (null = the list of providers). */
+    onOpenProvider: (String?) -> Unit,
+    /** Starts a fresh chat (used by the "context almost full" hint). */
+    onNewChat: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -123,7 +132,7 @@ fun ChatScreen(
             cameraUri = uri
             cameraLauncher.launch(uri)
         } catch (e: Exception) {
-            Toast.makeText(context, "Không mở được máy ảnh.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "Couldn't open the camera.", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -143,7 +152,7 @@ fun ChatScreen(
         vm.events.collect { ev ->
             when (ev) {
                 is ChatEvent.Deleted -> scope.launch {
-                    val r = snackbar.showSnackbar("Đã xóa lượt hội thoại", actionLabel = "Hoàn tác", duration = SnackbarDuration.Short)
+                    val r = snackbar.showSnackbar("Turn deleted", actionLabel = "Undo", duration = SnackbarDuration.Short)
                     if (r == SnackbarResult.ActionPerformed) vm.undoDelete(ev.backup)
                 }
                 is ChatEvent.OpenBranch -> onOpenBranch(ev.id)
@@ -173,9 +182,10 @@ fun ChatScreen(
 
     val actions = remember {
         Actions(
-            copy = { m ->
-                clipboard.setText(AnnotatedString(m.text))
-                Toast.makeText(context, "Đã sao chép", Toast.LENGTH_SHORT).show()
+            copy = { text ->
+                clipboard.setText(AnnotatedString(text))
+                // Android 13+ already shows its own "copied" confirmation, so only older versions need a toast.
+                if (Build.VERSION.SDK_INT < 33) Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
             },
             edit = { m -> editing = EditState(m.id, m.turnId, m.text, regen = false, allowBlank = m.role == "user" && m.images().isNotEmpty()) },
             editRegen = { m -> editing = EditState(m.id, m.turnId, m.text, regen = true, allowBlank = m.images().isNotEmpty()) },
@@ -191,14 +201,12 @@ fun ChatScreen(
         }
     }
     val visible = remember(chrono) { chrono.asReversed() }
-    // Chỉ tin trả lời cuối của mỗi lượt (có chữ, hoặc là tin lỗi) mới có hàng nút hành động.
-    val answerIds = remember(chrono) {
-        chrono.filter { it.role == "assistant" && (it.text.isNotEmpty() || it.status == "error") }
-            .groupBy { it.turnId }
-            .values
-            .mapNotNull { group -> group.maxByOrNull { it.seq }?.id }
-            .toSet()
+    // Only the very last answer of the chat gets the Copy / Regenerate / Branch row; older answers use press-and-hold.
+    val lastAnswerId = remember(chrono) {
+        chrono.lastOrNull()?.takeIf { it.role == "assistant" && it.text.isNotEmpty() && it.status == "done" }?.id
     }
+    // Turns that have an AI message on screen. A turn without one gets "Regenerate" in your message's menu.
+    val turnsWithAnswer = remember(chrono) { chrono.filter { it.role == "assistant" }.map { it.turnId }.toSet() }
     val toolResults = remember(messages) {
         messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! }
     }
@@ -222,11 +230,24 @@ fun ChatScreen(
     }
     LaunchedEffect(searchOpen) { if (searchOpen) runCatching { searchFocus.requestFocus() } }
 
+    fun nextMatch() { if (matches.isNotEmpty()) currentIdx = if (currentIdx >= matches.size - 1) 0 else currentIdx + 1 }
+    fun prevMatch() { if (matches.isNotEmpty()) currentIdx = if (currentIdx <= 0) matches.size - 1 else currentIdx - 1 }
+
+    // After you send, jump to the newest message even if you had scrolled up, and keep following the reply until
+    // you drag the list yourself or the AI is done.
+    var followNewest by remember { mutableStateOf(false) }
+    val newestId = visible.firstOrNull()?.id
+    LaunchedEffect(newestId) { if (followNewest && newestId != null) listState.animateScrollToItem(0) }
+    LaunchedEffect(generating) { if (!generating) followNewest = false }
+    LaunchedEffect(listState) {
+        listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) followNewest = false }
+    }
+
     val provider = providers.firstOrNull { it.id == conv?.providerId }
     val modelName = conv?.model.orEmpty()
     val modelMissing = provider == null || modelName.isBlank()
     val chipLabel = when {
-        provider == null || modelName.isBlank() -> "Chọn mô hình"
+        provider == null || modelName.isBlank() -> "Select model"
         providers.size >= 2 -> provider.name + " · " + modelName
         else -> modelName
     }
@@ -241,7 +262,11 @@ fun ChatScreen(
                 images = vm.pendingImages,
                 onRemoveImage = vm::removePendingImage,
                 generating = generating,
-                onSend = { askNotificationPermissionOnce(); vm.send() },
+                onSend = {
+                    if (!generating && (vm.draft.isNotBlank() || vm.pendingImages.isNotEmpty())) followNewest = true
+                    askNotificationPermissionOnce()
+                    vm.send()
+                },
                 onStop = vm::stop,
                 onPickGallery = { pickLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
                 onPickCamera = { launchCamera() },
@@ -256,7 +281,7 @@ fun ChatScreen(
                 TopAppBar(
                     navigationIcon = {
                         IconButton(onClick = { searchOpen = false; query = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Đóng tìm kiếm")
+                            Icon(Icons.Default.Close, contentDescription = "Close search")
                         }
                     },
                     title = {
@@ -264,7 +289,10 @@ fun ChatScreen(
                             value = query,
                             onValueChange = { query = it },
                             singleLine = true,
-                            placeholder = { Text("Tìm trong cuộc trò chuyện") },
+                            placeholder = { Text("Search in this chat") },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            // Enter jumps to the next match (and keeps the keyboard open)
+                            keyboardActions = KeyboardActions(onSearch = { nextMatch() }),
                             colors = TextFieldDefaults.colors(
                                 focusedContainerColor = Color.Transparent,
                                 unfocusedContainerColor = Color.Transparent,
@@ -280,12 +308,12 @@ fun ChatScreen(
                         }
                         IconButton(
                             enabled = matches.isNotEmpty(),
-                            onClick = { currentIdx = if (currentIdx <= 0) matches.size - 1 else currentIdx - 1 },
-                        ) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Kết quả trước") }
+                            onClick = { prevMatch() },
+                        ) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Previous result") }
                         IconButton(
                             enabled = matches.isNotEmpty(),
-                            onClick = { currentIdx = if (currentIdx >= matches.size - 1) 0 else currentIdx + 1 },
-                        ) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Kết quả sau") }
+                            onClick = { nextMatch() },
+                        ) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Next result") }
                     },
                 )
             } else {
@@ -297,14 +325,26 @@ fun ChatScreen(
                         IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, contentDescription = "Conversations") }
                     },
                     actions = {
-                        stats?.let { ContextRing(it.used, it.limit, it.droppedTurns) }
-                        IconButton(onClick = { searchOpen = true }) { Icon(Icons.Default.Search, contentDescription = "Tìm kiếm") }
+                        stats?.let { ContextRing(it.used, it.limit, it.droppedTurns, onNewChat) }
+                        IconButton(onClick = { searchOpen = true }) { Icon(Icons.Default.Search, contentDescription = "Search") }
+                        val hasPrompt = conv?.systemPrompt?.isNotBlank() == true
                         Box {
-                            IconButton(onClick = { showMenu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Thêm") }
+                            IconButton(onClick = { showMenu = true }) {
+                                // A small dot on the menu button tells you this chat has a system prompt.
+                                BadgedBox(badge = { if (hasPrompt) Badge() }) {
+                                    Icon(Icons.Default.MoreVert, contentDescription = if (hasPrompt) "More (this chat has a system prompt)" else "More")
+                                }
+                            }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("Đổi tên") }, onClick = { showMenu = false; showRename = true })
-                                DropdownMenuItem(text = { Text("Prompt hệ thống") }, onClick = { showMenu = false; showPrompt = true })
-                                DropdownMenuItem(text = { Text("Cài đặt") }, onClick = { showMenu = false; onOpenSettings() })
+                                DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; showRename = true })
+                                DropdownMenuItem(
+                                    text = { Text("System prompt") },
+                                    trailingIcon = if (hasPrompt) {
+                                        { Icon(Icons.Default.Check, contentDescription = "Has a system prompt", modifier = Modifier.size(18.dp)) }
+                                    } else null,
+                                    onClick = { showMenu = false; showPrompt = true },
+                                )
+                                DropdownMenuItem(text = { Text("Settings") }, onClick = { showMenu = false; onOpenSettings() })
                             }
                         }
                     },
@@ -318,11 +358,11 @@ fun ChatScreen(
                 Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "Chưa chọn thư mục làm việc (hoặc đã mất quyền truy cập), nên các công cụ tệp đang bị chặn. Các công cụ khác vẫn dùng bình thường.",
+                            "No workspace folder is chosen (or access was lost), so file tools are blocked. Other tools still work.",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = pickFolder) { Text("Chọn thư mục") }
+                        TextButton(onClick = pickFolder) { Text("Choose folder") }
                     }
                 }
             }
@@ -331,7 +371,6 @@ fun ChatScreen(
                     ChatEmptyState(
                         noProvider = providers.isEmpty(),
                         noModel = providers.isNotEmpty() && conv != null && modelName.isBlank(),
-                        onSuggestion = { vm.draft = it; runCatching { inputFocus.requestFocus() } },
                         onConnect = onOnboarding,
                         onPickModel = { showModelPicker = true },
                         modifier = Modifier.align(Alignment.Center),
@@ -351,6 +390,7 @@ fun ChatScreen(
                         if (m.role == "user") {
                             UserMessage(
                                 m, generating, hl, edit, actions,
+                                canRegen = m.turnId !in turnsWithAnswer,
                                 onEditChange = { t -> editing = editing?.copy(text = t) },
                                 onEditSave = { st ->
                                     editing = null
@@ -359,9 +399,17 @@ fun ChatScreen(
                                 onEditCancel = { editing = null },
                             )
                         } else {
+                            val fix = if (m.status == "error") errorFix(m.error, provider, modelName) else null
                             AssistantMessage(
                                 m, generating, hl, edit, actions, toolResults,
-                                showActions = m.id in answerIds,
+                                showActions = m.id == lastAnswerId,
+                                errorFix = fix,
+                                onErrorFix = { f ->
+                                    when (f) {
+                                        ErrorFix.PROVIDER_SETTINGS -> onOpenProvider(provider?.id)
+                                        ErrorFix.PICK_MODEL -> showModelPicker = true
+                                    }
+                                },
                                 liveText = if (m.status == "streaming") liveText.value[m.id] else null,
                                 onEditChange = { t -> editing = editing?.copy(text = t) },
                                 onEditSave = { st -> editing = null; vm.saveEdit(st.messageId, st.text) },
@@ -375,7 +423,7 @@ fun ChatScreen(
                         onClick = { scope.launch { listState.animateScrollToItem(0) } },
                         modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
                     ) {
-                        Icon(Icons.Default.ArrowDownward, contentDescription = "Xuống tin mới nhất")
+                        Icon(Icons.Default.ArrowDownward, contentDescription = "Scroll to latest")
                     }
                 }
             }
@@ -395,17 +443,17 @@ fun ChatScreen(
     }
     if (showPrompt) {
         TextEditDialog(
-            title = "Prompt hệ thống",
+            title = "System prompt",
             initial = conv?.systemPrompt ?: "",
             multiline = true,
-            hint = "Hướng dẫn cố định cho AI trong cuộc trò chuyện này (ví dụ: vai trò, giọng điệu, ngôn ngữ trả lời).",
+            hint = "Fixed instructions for the AI in this chat (for example: role, tone, language of the replies).",
             onConfirm = { vm.setSystemPrompt(it); showPrompt = false },
             onDismiss = { showPrompt = false },
         )
     }
     if (showRename) {
         TextEditDialog(
-            title = "Đổi tên cuộc trò chuyện",
+            title = "Rename chat",
             initial = conv?.title ?: "",
             onConfirm = { vm.rename(it); showRename = false },
             onDismiss = { showRename = false },
@@ -414,19 +462,19 @@ fun ChatScreen(
     regenPrompt?.let { rp ->
         AlertDialog(
             onDismissRequest = { regenPrompt = null },
-            title = { Text("Tạo nhánh khác?") },
+            title = { Text("Create another branch?") },
             text = {
                 Text(
-                    "Phía sau lượt này còn ${rp.later} lượt khác.\n\n" +
-                        "• Có: tạo cuộc trò chuyện mới và tạo lại câu trả lời ở đó. Cuộc hiện tại giữ nguyên.\n" +
-                        "• Không: tạo lại ngay tại đây, các lượt phía sau sẽ bị xóa."
+                    "There are ${rp.later} more turn(s) after this one.\n\n" +
+                        "\u2022 Yes: start a new chat and regenerate the answer there. This chat stays as it is.\n" +
+                        "\u2022 No: regenerate right here; the turns after this one will be deleted."
                 )
             },
             confirmButton = {
                 Row {
-                    TextButton(onClick = { regenPrompt = null }) { Text("Hủy") }
-                    TextButton(onClick = { regenPrompt = null; vm.regenerateHere(rp.turnId, rp.newText) }) { Text("Không") }
-                    TextButton(onClick = { regenPrompt = null; vm.regenerateInBranch(rp.turnId, rp.newText) }) { Text("Có") }
+                    TextButton(onClick = { regenPrompt = null }) { Text("Cancel") }
+                    TextButton(onClick = { regenPrompt = null; vm.regenerateHere(rp.turnId, rp.newText) }) { Text("No") }
+                    TextButton(onClick = { regenPrompt = null; vm.regenerateInBranch(rp.turnId, rp.newText) }) { Text("Yes") }
                 }
             },
         )

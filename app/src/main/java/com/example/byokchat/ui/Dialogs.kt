@@ -56,8 +56,8 @@ fun TextEditDialog(
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { onConfirm(value) }) { Text("Lưu") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Hủy") } },
+        confirmButton = { TextButton(onClick = { onConfirm(value) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -65,7 +65,7 @@ fun TextEditDialog(
 fun ConfirmDialog(
     title: String,
     message: String,
-    confirmLabel: String = "Đồng ý",
+    confirmLabel: String = "OK",
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -74,7 +74,7 @@ fun ConfirmDialog(
         title = { Text(title) },
         text = { Text(message) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Hủy") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
 
@@ -91,10 +91,10 @@ fun FetchedModelsDialog(
     val shown = all.filter { it.contains(query, ignoreCase = true) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Chọn mô hình (${all.size})") },
+        title = { Text("Choose models (${all.size})") },
         text = {
             Column {
-                OutlinedTextField(query, { query = it }, label = { Text("Lọc") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(query, { query = it }, label = { Text("Filter") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 LazyColumn(Modifier.heightIn(max = 360.dp)) {
                     items(shown, key = { it }) { m ->
                         Row(
@@ -108,7 +108,7 @@ fun FetchedModelsDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onAdd(picked.toList()) }) { Text("Thêm đã chọn") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Đóng") } },
+        confirmButton = { TextButton(onClick = { onAdd(picked.toList()) }) { Text("Add selected") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
 }
