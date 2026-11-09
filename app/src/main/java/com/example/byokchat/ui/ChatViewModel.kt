@@ -44,8 +44,8 @@ private data class StatsInput(
     val messages: List<MessageEntity>,
     val providers: List<ProviderConfig>,
     val systemPrompt: String,
-    val currentProviderId: String?,
-    val currentModel: String?,
+    val currentProviderId: String? = null,
+    val currentModel: String? = null,
 )
 
 sealed interface ChatEvent {
@@ -77,9 +77,13 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi (luôn theo nội dung đã sửa). */
     val tokenStats: StateFlow<TokenStats?> =
-        combine(conversation, messages, providers, app.settings.defaultSystemPrompt, app.settings.currentModelProviderId, app.settings.currentModel) { c: ConversationEntity?, m: List<MessageEntity>, p: List<ProviderConfig>, prompt: String, providerId: String?, model: String? ->
-            StatsInput(c, m, p, prompt, providerId, model)
+        combine(conversation, messages, providers, app.settings.defaultSystemPrompt) { c, m, p, prompt ->
+            StatsInput(c, m, p, prompt)
         }
+            // Lựa chọn mô hình toàn cục gộp sau bằng combine 2 luồng (combine 6 luồng không biên dịch được ở đây):
+            // đổi model ở chat nào thì số liệu token của mọi chat đang mở cũng cập nhật theo.
+            .combine(app.settings.currentModelProviderId) { input, providerId -> input.copy(currentProviderId = providerId) }
+            .combine(app.settings.currentModel) { input, model -> input.copy(currentModel = model) }
             .debounce(400)
             .map { (c, m, p, prompt, providerId, model) ->
                 val cfg = p.firstOrNull { it.id == providerId }
