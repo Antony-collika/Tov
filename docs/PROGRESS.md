@@ -63,3 +63,38 @@ Hồi quy đã rà bằng cách đọc code sau T0.3 (không đổi hành vi, ch
 - File kế hoạch nhận được **kết thúc ở P2b**; không có P3–P6, T4.x, Phụ lục B (bảng màu đầy đủ). Các phần đó được nhắc tới ở nhiều chỗ (T4.1, T4.7, T4.8, T6.6, Phụ lục B) nhưng chưa có nội dung.
 - Quy trình CI (`.github/workflows/android.yml`) chỉ chạy `assembleRelease`, không chạy `testDebugUnitTest`, nên test mới sẽ không tự chạy.
 - `signing/tov-development.p12.base64` và mật khẩu khóa nằm trong kho mã (đã nêu ở T0.6).
+
+---
+
+## Đợt tối ưu hiệu năng (theo «Hướng dẫn thực thi tối ưu hóa Tov app», ngày 09/11/2026)
+
+Xem chi tiết và cách kiểm tra ở `docs/handoff.md`. Mức xác minh vẫn là **[ĐÃ ĐỌC]**: môi trường không có Gradle/Android SDK/mạng nên **chưa build, chưa chạy test**.
+
+| Task | File đã đổi | Mức xác minh | Ghi chú |
+|---|---|---|---|
+| A1 | `ui/ChatViewModel.kt`, `ui/ChatScreen.kt` | [ĐÃ ĐỌC] | Bỏ luồng `tokenStats` chạy liên tục; `computeTokenStats()` chỉ chạy khi mở «Chat memory». |
+| A2 | `chat/ChatEngine.kt`, `data/Daos.kt` | [ĐÃ ĐỌC] | Ghi nháp 3000 ms, cập nhật live 150 ms; thêm `updateText`. |
+| A3 | `ui/ChatToolCards.kt`, `ui/ChatMessages.kt`, `ui/ChatScreen.kt` | [ĐÃ ĐỌC] | `ToolResults` (@Immutable); nhớ kết quả giải mã ảnh và chữ tô sáng; `contentType` cho danh sách. |
+| A4 | `util/Text.kt`, `ui/ChatScreen.kt`, `ui/ConversationSearch.kt`, `ui/ConversationDrawer.kt`, `data/Daos.kt`, test | [ĐÃ ĐỌC] (test: [CHƯA KIỂM CHỨNG]) | Bảng tra bỏ dấu tiếng Việt; tìm kiếm toàn bộ đọc từng cuộc (`searchAllChats`). |
+| A5 | `data/Daos.kt`, `chat/ChatOps.kt`, `data/ConversationRepository.kt`, `data/Entities.kt` | [ĐÃ ĐỌC] | Truy vấn gọn hơn; xóa ảnh không còn đọc toàn bộ tin của mọi cuộc. |
+| A6 | `ai/Http.kt`, `tools/DailyTools.kt` | [ĐÃ ĐỌC] | Client riêng cho `fetch_url`; regex dựng sẵn; trang >600 000 ký tự được cắt trước khi xử lý. |
+| A7 | `tools/WorkspaceFs.kt`, `tools/ToolRegistry.kt`, `ui/ChatViewModel.kt`, `App.kt` | [ĐÃ ĐỌC] | Kiểm tra quyền thư mục tối đa 10 giây một lần; danh sách mô hình 5 phút. |
+| B1 | `ui/MarkdownText.kt` (viết lại), `ui/MarkdownSegments.kt`, `ui/ChatMessages.kt`, test | [ĐÃ ĐỌC] (test: [CHƯA KIỂM CHỨNG]) | Đường nền khi stream (≥1500 ký tự), cache kết quả Markdown, khóa `RenderKey`. |
+| B2 | `data/SettingsRepository.kt`, `ui/AppNav.kt` | [ĐÃ ĐỌC] | Kho mã hóa đọc ở luồng nền; `ready` chặn việc vẽ màn hình. |
+| C1 | `tools/WorkspaceFs.kt`, `tools/FsTools.kt`, `tools/TextTools.kt`, `tools/ToolRegistry.kt` | [ĐÃ ĐỌC] | Bộ nhớ đệm metadata; liệt kê bằng một truy vấn; `ensureDir` có bộ đệm; Dừng được. |
+| C2 | `ai/ImageStore.kt`, `ai/ClaudeProvider.kt`, `ai/OpenAiProvider.kt`, `ai/GeminiProvider.kt` | [ĐÃ ĐỌC] | Cache base64 ảnh (16 triệu ký tự); `flowOn(IO)`; giải phóng bitmap. |
+| C3 | `ai/ClaudeProvider.kt` | [ĐÃ ĐỌC] | Prompt caching chỉ khi `baseUrl` rỗng hoặc chứa `anthropic.com`. |
+| Sửa lỗi có sẵn | `ui/ConversationSearchTest.kt`, `ui/ConversationGroupsTest.kt` | [ĐÃ ĐỌC] | Hai file test còn truyền trường `providerId`, `model`, `systemPrompt` đã bị xóa khỏi `ConversationEntity` từ bản DB v4, nên không biên dịch được. Đã bỏ các tham số đó. |
+
+### Quyết định đã đưa ra (không hỏi lại)
+- B1: tin đang stream **không** đưa vào cache Markdown (mỗi lần chữ đổi là một khóa mới, làm đầy cache vô ích). Chỉ đoạn chữ cuối của tin được phân tích nền.
+- B1: khi chữ đang stream nhưng chưa có kết quả phân tích nền đầu tiên, dùng đường đồng bộ một lần để không hiện khoảng trống.
+- A7: dùng `System.currentTimeMillis()` cho mốc danh sách mô hình (giá trị ban đầu 0 nên luôn làm mới lần đầu); `SystemClock.elapsedRealtime()` cho quyền thư mục (có giá trị -1 đánh dấu «chưa kiểm tra»).
+- C1: `fs.grep` chỉ đếm «đã quét» cho tệp văn bản đọc được; tệp nhị phân có byte rỗng sau 2000 byte đầu nay không còn được đếm (trước đây được đếm rồi bị bỏ).
+- A6: trang dài hơn 600 000 ký tự được cắt trước khi xử lý, nên số ký tự ghi trong thông báo «…[truncated, N more characters]» có thể khác bản cũ đối với trang cực dài.
+
+### Cách chạy test (không có trong CI)
+`gradle --no-daemon testDebugUnitTest` (CI chỉ chạy `assembleRelease`). Test mới: `TextUtilTest` (so với bản tham chiếu cho mọi ký tự U+0000..U+FFFF), `ConversationSearchTest.searchAllChatsGivesTheSameResultAsBuildSearchGroups`, `MarkdownSegmentsTest` (5 ca mới).
+
+### Không làm trong đợt này (theo mục 5 của hướng dẫn)
+Baseline Profile; tạo cuộc chat lười; chỉ mục Room / đổi schema (DB vẫn version 4, không migration mới); viết lại `ContextBuilder.plan`; cache CSV; chia Markdown theo đoạn; thay `TextView`; sửa `proguard-rules.pro`, khóa ký, `fallbackToDestructiveMigration`.

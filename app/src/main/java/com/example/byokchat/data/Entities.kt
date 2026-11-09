@@ -86,7 +86,10 @@ data class TodoEntity(
 
 private val listSer = ListSerializer(String.serializer())
 
-fun MessageEntity.images(): List<String> =
-    runCatching { Json.decodeFromString(listSer, imagePaths) }.getOrDefault(emptyList())
+/** Giải mã danh sách đường dẫn ảnh (dạng JSON) thành List; lỗi thì trả về rỗng. */
+fun decodeImages(json: String): List<String> =
+    runCatching { Json.decodeFromString(listSer, json) }.getOrDefault(emptyList())
+
+fun MessageEntity.images(): List<String> = decodeImages(imagePaths)
 
 fun encodeImages(paths: List<String>): String = Json.encodeToString(listSer, paths)

@@ -1,5 +1,6 @@
 package com.example.byokchat.chat
 
+import androidx.room.withTransaction
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.MessageEntity
 import java.util.UUID
@@ -18,7 +19,7 @@ class ChatOps(private val db: AppDatabase) {
 
     /** Xóa cả lượt; trả về các dòng đã xóa để có thể Hoàn tác. */
     suspend fun deleteTurn(conversationId: String, turnId: String): List<MessageEntity> {
-        val rows = db.messages().getAll(conversationId).filter { it.turnId == turnId }
+        val rows = db.messages().getTurn(conversationId, turnId)
         db.messages().deleteTurn(turnId)
         return rows
     }
@@ -29,20 +30,21 @@ class ChatOps(private val db: AppDatabase) {
 
     /** Số lượt nằm phía sau lượt này. */
     suspend fun laterTurnCount(conversationId: String, turnId: String): Int {
-        val all = db.messages().getAll(conversationId)
-        val turnMax = all.filter { it.turnId == turnId }.maxOfOrNull { it.seq } ?: return 0
-        return all.filter { it.seq > turnMax }.map { it.turnId }.distinct().size
+        val turnMax = db.messages().maxSeqOfTurn(conversationId, turnId) ?: return 0
+        return db.messages().countTurnsAfter(conversationId, turnMax)
     }
 
     /** Chuẩn bị tạo lại ngay trong cuộc hiện tại: xóa mọi thứ sau tin nhắn của bạn (câu trả lời cũ + các lượt sau). */
     suspend fun prepareRegenerateHere(conversationId: String, turnId: String, newUserText: String?) {
-        val all = db.messages().getAll(conversationId)
-        val user = all.firstOrNull { it.turnId == turnId && it.role == "user" } ?: return
-        all.filter { it.seq > user.seq }.forEach { db.messages().deleteById(it.id) }
-        if (newUserText != null && newUserText != user.text) {
-            db.messages().upsert(user.copy(text = newUserText, edited = true))
+        db.withTransaction {
+            val user = db.messages().getTurn(conversationId, turnId).firstOrNull { it.role == "user" }
+                ?: return@withTransaction
+            db.messages().deleteAfter(conversationId, user.seq)
+            if (newUserText != null && newUserText != user.text) {
+                db.messages().upsert(user.copy(text = newUserText, edited = true))
+            }
+            db.conversations().touch(conversationId, System.currentTimeMillis())
         }
-        db.conversations().touch(conversationId, System.currentTimeMillis())
     }
 
     /**

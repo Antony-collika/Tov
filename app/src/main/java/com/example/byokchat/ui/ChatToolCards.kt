@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,18 +41,25 @@ import kotlinx.serialization.json.Json
 private val callsSer = ListSerializer(AiToolCall.serializer())
 
 /**
+ * The tool results of a chat, keyed by tool-call id. Wrapped in a stable class so that a message whose
+ * content did not change is not redrawn just because some other message in the chat changed.
+ */
+@Immutable
+data class ToolResults(val byCallId: Map<String, MessageEntity>)
+
+/**
  * One card per tool call: a readable sentence ("Read file notes/todo.md") with a clear state
  * (running / waiting for your approval / done / failed). Tap to see the technical details (JSON and result).
  */
 @Composable
-internal fun ToolCards(m: MessageEntity, results: Map<String, MessageEntity>, generating: Boolean) {
+internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boolean) {
     val container = LocalContext.current.container
     val pending by container.confirmations.pending.collectAsState()
     val calls = remember(m.toolCallsJson) {
         runCatching { Json.decodeFromString(callsSer, m.toolCallsJson ?: "[]") }.getOrDefault(emptyList())
     }
     calls.forEach { c ->
-        val res = results[c.id]
+        val res = results.byCallId[c.id]
         var expanded by remember(c.id) { mutableStateOf(false) }
         val toolName = c.uid?.let { container.registry.nameForUid(it) } ?: c.name
         val summary = remember(c.uid, c.argsJson, toolName) { toolSummary(c.uid, toolName, c.argsJson) }

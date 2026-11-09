@@ -2,6 +2,7 @@ package com.example.byokchat.util
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import java.text.Normalizer
 
 /**
  * Kiểm tra TextUtil.findAll (tìm không phân biệt hoa/thường và dấu tiếng Việt).
@@ -54,5 +55,27 @@ class TextUtilTest {
     @Test
     fun matchesDoNotOverlap() {
         assertEquals(listOf(0, 2), TextUtil.findAll("aaaa", "aa"))
+    }
+
+    /** Bản tham chiếu: đúng logic bỏ dấu cũ (chậm, từng ký tự một). */
+    private fun referenceFold(c: Char): Char {
+        if (c == 'đ' || c == 'Đ') return 'd'
+        if (c.code < 128) return c.lowercaseChar()
+        val d = Normalizer.normalize(c.toString(), Normalizer.Form.NFD)
+        return if (d.isEmpty()) c else d[0].lowercaseChar()
+    }
+
+    @Test
+    fun fastFoldMatchesReferenceForEveryCharacter() {
+        for (code in 0..0xFFFF) {
+            val ch = code.toChar()
+            assertEquals("code U+%04X".format(code), referenceFold(ch).toString(), TextUtil.fold(ch.toString()))
+        }
+    }
+
+    @Test
+    fun vietnameseWithAccentsFoldsToPlainLetters() {
+        // "Ắn Đồ" -> "an do"
+        assertEquals("an do", TextUtil.fold("\u1EAEn \u0110\u1ED3"))
     }
 }

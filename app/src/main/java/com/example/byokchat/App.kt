@@ -86,6 +86,9 @@ class AppContainer(val context: Context) {
     /** Mở cuộc trò chuyện được yêu cầu từ thông báo (MainActivity ghi vào, AppNav đọc rồi xóa). */
     val pendingConversation = MutableStateFlow<String?>(null)
 
+    /** Lúc (ms, giờ hệ thống) danh sách mô hình được làm mới thành công lần gần nhất; 0 = chưa. */
+    @Volatile var modelsRefreshedAt = 0L
+
     /** Lý do hệ thống từ chối bật dịch vụ nền (nếu có), để tra cứu khi báo cáo. */
     val foregroundServiceError = MutableStateFlow<String?>(null)
     val conversations = ConversationRepository(db)

@@ -10,6 +10,8 @@ sealed interface MdSegment {
 
 private val OPEN_FENCE = Regex("^\\s*(`{3,})([^`]*)$")
 private val CLOSE_FENCE = Regex("^\\s*(`{3,})\\s*$")
+private val WHITESPACE = Regex("\\s+")
+private const val FENCE_MARK = "```"
 
 /**
  * Tách Markdown thành các đoạn chữ và khối code (```).
@@ -32,7 +34,8 @@ fun parseMarkdownSegments(src: String): List<MdSegment> {
 
     var i = 0
     while (i < lines.size) {
-        val open = OPEN_FENCE.matchEntire(lines[i])
+        // Dòng không có ``` thì chắc chắn không phải hàng rào: bỏ qua biểu thức chính quy cho nhanh.
+        val open = if (lines[i].contains(FENCE_MARK)) OPEN_FENCE.matchEntire(lines[i]) else null
         if (open == null) {
             text.add(lines[i])
             i++
@@ -40,13 +43,13 @@ fun parseMarkdownSegments(src: String): List<MdSegment> {
         }
         flushText()
         val fenceLen = open.groupValues[1].length
-        val language = open.groupValues[2].trim().split(Regex("\\s+")).firstOrNull().orEmpty().lowercase()
+        val language = open.groupValues[2].trim().split(WHITESPACE).firstOrNull().orEmpty().lowercase()
         val body = ArrayList<String>()
         var closed = false
         i++
         while (i < lines.size) {
             val line = lines[i]
-            val close = CLOSE_FENCE.matchEntire(line)
+            val close = if (line.contains(FENCE_MARK)) CLOSE_FENCE.matchEntire(line) else null
             i++
             if (close != null && close.groupValues[1].length >= fenceLen) {
                 closed = true

@@ -2,13 +2,14 @@ package com.example.byokchat.ui
 
 import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.MessageEntity
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationSearchTest {
     private fun conv(id: String, title: String, updatedAt: Long) = ConversationEntity(
-        id = id, title = title, providerId = "", model = "", systemPrompt = "", createdAt = 0, updatedAt = updatedAt,
+        id = id, title = title, createdAt = 0, updatedAt = updatedAt,
     )
 
     private fun msg(id: String, cid: String, text: String, createdAt: Long, role: String = "user") = MessageEntity(
@@ -40,6 +41,18 @@ class ConversationSearchTest {
         val g = buildSearchGroups(listOf(conv("c1", "T", 1)), msgs, "word", maxHitsPerGroup = 3)
         assertEquals(3, g[0].hits.size)
         assertEquals(5, g[0].totalHits)
+    }
+
+    @Test fun searchAllChatsGivesTheSameResultAsBuildSearchGroups() = runBlocking {
+        val convs = listOf(conv("c1", "Old", 1), conv("c2", "New", 2), conv("c3", "Empty", 3))
+        val msgs = listOf(
+            msg("m1", "c1", "hello world", 1),
+            msg("m2", "c2", "say hello", 2),
+            msg("m3", "c2", "HELLO again", 3, role = "assistant"),
+        )
+        val byConv = msgs.groupBy { it.conversationId }
+        val fast = searchAllChats(convs, { byConv[it].orEmpty() }, "hello")
+        assertEquals(buildSearchGroups(convs, msgs, "hello"), fast)
     }
 
     @Test fun snippetHighlightsTheMatch() {

@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.util.Base64
+import android.util.LruCache
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
 import java.util.UUID
@@ -45,6 +46,9 @@ object ImageStore {
             val dir = File(ctx.filesDir, "images").apply { mkdirs() }
             val file = File(dir, "${UUID.randomUUID()}.jpg")
             file.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 85, it) }
+            // Giải phóng bitmap ngay, không đợi bộ thu gom rác (chúng có thể chiếm nhiều bộ nhớ).
+            bmp.recycle()
+            if (decoded !== bmp) decoded.recycle()
             file.absolutePath
         } catch (e: Exception) {
             null
@@ -52,5 +56,17 @@ object ImageStore {
     }
 }
 
-fun imageBase64(path: String): String? =
-    runCatching { Base64.encodeToString(File(path).readBytes(), Base64.NO_WRAP) }.getOrNull()
+/** Ảnh đã mã hóa base64, nhớ lại để lượt gửi sau không phải đọc và mã hóa lại. Tối đa khoảng 16 triệu ký tự. */
+private val base64Cache = object : LruCache<String, String>(16_000_000) {
+    override fun sizeOf(key: String, value: String): Int = value.length.coerceAtLeast(1)
+}
+
+fun imageBase64(path: String): String? {
+    val file = File(path)
+    // Khóa gồm đường dẫn + kích thước + ngày sửa: nếu tệp đổi thì không dùng nhầm bản cũ.
+    val key = "$path|${file.length()}|${file.lastModified()}"
+    base64Cache.get(key)?.let { return it }
+    val encoded = runCatching { Base64.encodeToString(file.readBytes(), Base64.NO_WRAP) }.getOrNull() ?: return null
+    base64Cache.put(key, encoded)
+    return encoded
+}

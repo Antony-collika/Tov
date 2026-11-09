@@ -131,7 +131,7 @@ class ChatEngine(
                                 lastLive = now
                             }
                             if (now - lastFlush > DB_FLUSH_MS) {
-                                msgDao.upsert(base.copy(text = text.toString()))
+                                msgDao.updateText(assistantId, text.toString())
                                 lastFlush = now
                             }
                         }
@@ -217,7 +217,7 @@ class ChatEngine(
 
     companion object {
         const val MAX_TOOL_ROUNDS = 12
-        private const val LIVE_INTERVAL_MS = 80L
-        private const val DB_FLUSH_MS = 1000L
+        private const val LIVE_INTERVAL_MS = 150L
+        private const val DB_FLUSH_MS = 3000L
     }
 }

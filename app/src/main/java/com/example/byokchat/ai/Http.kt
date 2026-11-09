@@ -29,6 +29,14 @@ object Http {
             .writeTimeout(60, TimeUnit.SECONDS)
             .build()
     }
+
+    /** Client chỉ dành cho công cụ đọc trang web (fetch_url): chờ ngắn hơn client của chat. */
+    val fetchClient: OkHttpClient by lazy {
+        client.newBuilder()
+            .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(45, TimeUnit.SECONDS)
+            .build()
+    }
     val JSON = "application/json; charset=utf-8".toMediaType()
 }
 

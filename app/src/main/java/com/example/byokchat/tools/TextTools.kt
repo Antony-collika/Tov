@@ -98,7 +98,7 @@ object TextTools {
             preview = { env, a ->
                 val p = a.reqStr("path")
                 val existing = env.fs.find(p)
-                val head = if (existing != null && !existing.isDirectory) {
+                val head = if (existing != null && !env.fs.isDir(existing)) {
                     val old = runCatching { TextDoc.parse(env.fs.readText(p)).lines.size }.getOrNull()
                     "OVERWRITE '${env.fs.display(p)}'" + (old?.let { " (currently $it lines)" } ?: "")
                 } else "Create file '${env.fs.display(p)}'"
@@ -289,7 +289,8 @@ object TextTools {
             val fileRx = a.str("file_pattern")?.takeIf { it.isNotBlank() }?.let { globToRegex(it) }
             val base = env.fs.segments(dirPath).joinToString("/")
             env.fs.walk(env.fs.requireDir(dirPath), base, Int.MAX_VALUE) { d, p, _ ->
-                if (!d.isDirectory && (fileRx == null || fileRx.matches(d.name ?: "")) && env.fs.isTextFile(d)) targets.add(p)
+                env.fs.stopIfCancelled()
+                if (!env.fs.isDir(d) && (fileRx == null || fileRx.matches(env.fs.nameOf(d))) && env.fs.isTextFile(d)) targets.add(p)
                 targets.size < 2000
             }
         }

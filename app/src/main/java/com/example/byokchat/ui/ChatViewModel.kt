@@ -26,9 +26,6 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -38,15 +35,8 @@ import java.util.UUID
 
 data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int)
 
-/** Input gộp cho tokenStats: thêm system prompt mặc định để đổi prompt trong Settings thì số liệu cập nhật theo, và lựa chọn mô hình toàn cục để đổi model ở chat nào thì số liệu cũng cập nhật theo. */
-private data class StatsInput(
-    val conversation: ConversationEntity?,
-    val messages: List<MessageEntity>,
-    val providers: List<ProviderConfig>,
-    val systemPrompt: String,
-    val currentProviderId: String? = null,
-    val currentModel: String? = null,
-)
+/** Danh sách mô hình chỉ làm mới lại sau 5 phút kể từ lần thành công trước. */
+private const val MODELS_TTL_MS = 5 * 60 * 1000L
 
 sealed interface ChatEvent {
     data class Deleted(val backup: List<MessageEntity>) : ChatEvent
@@ -75,28 +65,22 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     val currentModelProviderId: StateFlow<String?> = app.settings.currentModelProviderId
     val currentModel: StateFlow<String?> = app.settings.currentModel
 
-    /** Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi (luôn theo nội dung đã sửa). */
-    val tokenStats: StateFlow<TokenStats?> =
-        combine(conversation, messages, providers, app.settings.defaultSystemPrompt) { c, m, p, prompt ->
-            StatsInput(c, m, p, prompt)
+    /**
+     * Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi. Chỉ gọi khi người dùng mở hộp «Chat memory»
+     * (trước đây chạy liên tục nên mỗi lần AI viết thêm chữ lại duyệt cả lịch sử).
+     */
+    suspend fun computeTokenStats(): TokenStats? = withContext(Dispatchers.Default) {
+        val c = conversation.value
+        val cfg = providers.value.firstOrNull { it.id == currentModelProviderId.value }
+        if (c == null || cfg == null) null
+        else {
+            val modelName = currentModel.value.orEmpty()
+            val prompt = app.settings.defaultSystemPrompt.value
+            val budget = ContextBuilder.budget(cfg, modelName, prompt, app.registry.estimateToolTokens())
+            val plan = ContextBuilder.plan(messages.value, budget, app.registry::nameForUid)
+            TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, modelName), plan.droppedTurns)
         }
-            // Lựa chọn mô hình toàn cục gộp sau bằng combine 2 luồng (combine 6 luồng không biên dịch được ở đây):
-            // đổi model ở chat nào thì số liệu token của mọi chat đang mở cũng cập nhật theo.
-            .combine(app.settings.currentModelProviderId) { input, providerId -> input.copy(currentProviderId = providerId) }
-            .combine(app.settings.currentModel) { input, model -> input.copy(currentModel = model) }
-            .debounce(400)
-            .map { (c, m, p, prompt, providerId, model) ->
-                val cfg = p.firstOrNull { it.id == providerId }
-                if (c == null || cfg == null) null
-                else {
-                    val modelName = model.orEmpty()
-                    val budget = ContextBuilder.budget(cfg, modelName, prompt, app.registry.estimateToolTokens())
-                    val plan = ContextBuilder.plan(m, budget, app.registry::nameForUid)
-                    TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, modelName), plan.droppedTurns)
-                }
-            }
-            .flowOn(Dispatchers.Default)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    }
 
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val events: SharedFlow<ChatEvent> = _events
@@ -179,6 +163,11 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun refreshModels() {
         if (_modelsRefreshing.value) return
         viewModelScope.launch {
+            // Bỏ qua nếu vừa làm mới thành công (trong 5 phút), trừ khi có nhà cung cấp đã có key mà chưa có mô hình nào.
+            val fresh = System.currentTimeMillis() - app.modelsRefreshedAt < MODELS_TTL_MS
+            val needsFill = providers.value.any { it.apiKey.isNotBlank() && it.models.isEmpty() }
+            if (fresh && !needsFill) return@launch
+
             _modelsRefreshing.value = true
             try {
                 val failed = mutableListOf<String>()
@@ -187,13 +176,16 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                     if (cfg.apiKey.isBlank() || cfg.effectiveBaseUrl().isBlank()) continue
                     try {
                         val models = ProviderFactory.create(cfg).listModels()
-                        app.settings.saveProvider(cfg.copy(models = models))
+                        // Chỉ ghi vào kho khi danh sách thực sự khác.
+                        if (models != cfg.models) app.settings.saveProvider(cfg.copy(models = models))
                     } catch (e: Exception) {
                         failed += cfg.name
                     }
                 }
                 if (failed.isNotEmpty()) {
                     _events.emit(ChatEvent.Error("Couldn't fetch the model list for ${failed.joinToString(", ")}. Showing the saved list."))
+                } else {
+                    app.modelsRefreshedAt = System.currentTimeMillis()
                 }
             } finally {
                 _modelsRefreshing.value = false

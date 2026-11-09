@@ -36,8 +36,9 @@ object FsTools {
             else {
                 val sb = StringBuilder("Folder '${env.fs.display(path)}': ${items.size} items\n")
                 items.take(500).forEach { d ->
-                    if (d.isDirectory) sb.append("📁 ${d.name}/\n")
-                    else sb.append("📄 ${d.name}  (${humanSize(d.length())}, ${fmtTime(d.lastModified())})\n")
+                    val name = env.fs.nameOf(d)
+                    if (env.fs.isDir(d)) sb.append("📁 $name/\n")
+                    else sb.append("📄 $name  (${humanSize(env.fs.sizeOf(d))}, ${fmtTime(env.fs.modifiedOf(d))})\n")
                 }
                 if (items.size > 500) sb.append("… ${items.size - 500} more items\n")
                 sb.toString().trimEnd()
@@ -59,7 +60,7 @@ object FsTools {
             var count = 0
             var truncated = false
             env.fs.walk(dir, "", depth) { d, _, level ->
-                sb.append("  ".repeat(level + 1)).append(d.name).append(if (d.isDirectory) "/" else "").append('\n')
+                sb.append("  ".repeat(level + 1)).append(env.fs.nameOf(d)).append(if (env.fs.isDir(d)) "/" else "").append('\n')
                 count++
                 if (count >= 800) truncated = true
                 count < 800
@@ -77,13 +78,13 @@ object FsTools {
             val d = env.fs.require(path)
             val sb = StringBuilder()
             sb.append("Path: ${env.fs.display(path)}\n")
-            sb.append("Type: ${if (d.isDirectory) "folder" else "file"}\n")
-            sb.append("Last modified: ${fmtTime(d.lastModified())}\n")
-            if (d.isDirectory) {
+            sb.append("Type: ${if (env.fs.isDir(d)) "folder" else "file"}\n")
+            sb.append("Last modified: ${fmtTime(env.fs.modifiedOf(d))}\n")
+            if (env.fs.isDir(d)) {
                 val kids = env.fs.children(d)
-                sb.append("Contains: ${kids.count { it.isDirectory }} folders, ${kids.count { !it.isDirectory }} files")
+                sb.append("Contains: ${kids.count { env.fs.isDir(it) }} folders, ${kids.count { !env.fs.isDir(it) }} files")
             } else {
-                sb.append("Size: ${humanSize(d.length())} (${d.length()} bytes)\n")
+                sb.append("Size: ${humanSize(env.fs.sizeOf(d))} (${env.fs.sizeOf(d)} bytes)\n")
                 sb.append("MIME type: ${d.type ?: "unknown"}")
                 if (env.fs.isTextFile(d)) {
                     val text = env.fs.readDocText(d, path)
@@ -167,8 +168,8 @@ object FsTools {
             preview = { env, a ->
                 val path = a.reqStr("path")
                 val d = env.fs.require(path)
-                if (d.isDirectory) "DELETE folder '${env.fs.display(path)}' and the ${env.fs.countItems(d)} items inside it."
-                else "DELETE file '${env.fs.display(path)}' (${humanSize(d.length())})."
+                if (env.fs.isDir(d)) "DELETE folder '${env.fs.display(path)}' and the ${env.fs.countItems(d)} items inside it."
+                else "DELETE file '${env.fs.display(path)}' (${humanSize(env.fs.sizeOf(d))})."
             },
         ) { env, a ->
             val path = a.reqStr("path")
@@ -199,9 +200,9 @@ object FsTools {
             val base = env.fs.segments(path).joinToString("/")
             env.fs.walk(dir, base, Int.MAX_VALUE) { d, p, _ ->
                 visited++
-                val n = d.name ?: ""
+                val n = env.fs.nameOf(d)
                 val hit = if (rx != null) rx.matches(n) else TextUtil.fold(n).contains(needle)
-                if (hit) found.add(if (d.isDirectory) "📁 $p/" else "📄 $p")
+                if (hit) found.add(if (env.fs.isDir(d)) "📁 $p/" else "📄 $p")
                 found.size < max && visited < 20000
             }
             if (found.isEmpty()) "No items match '$pattern'."
@@ -239,10 +240,12 @@ object FsTools {
             var hits = 0
             var filesScanned = 0
             env.fs.walk(dir, base, Int.MAX_VALUE) { d, p, _ ->
-                if (!d.isDirectory && (fileRx == null || fileRx.matches(d.name ?: "")) && env.fs.isTextFile(d)) {
-                    filesScanned++
-                    val text = runCatching { env.fs.readDocText(d, p, 2_000_000) }.getOrNull()
+                env.fs.stopIfCancelled()
+                if (!env.fs.isDir(d) && (fileRx == null || fileRx.matches(env.fs.nameOf(d)))) {
+                    // Đọc một lần: nếu không phải văn bản (hoặc quá lớn) thì trả về null và bỏ qua.
+                    val text = env.fs.readTextIfText(d, p, 2_000_000)
                     if (text != null) {
+                        filesScanned++
                         text.lines().forEachIndexed { i, line ->
                             if (hits < max) {
                                 val match = when {
@@ -283,16 +286,17 @@ object FsTools {
             if (docs.any { it.second.isEmpty() }) throw ToolException("Cannot compress the whole root folder; pick individual items.")
             val segs = env.fs.segments(dest)
             val parent = env.fs.ensureDir(segs.dropLast(1))
-            if (parent.findFile(segs.last()) != null) throw ToolException("File '${env.fs.display(dest)}' already exists.")
+            if (env.fs.childByName(parent, segs.last()) != null) throw ToolException("File '${env.fs.display(dest)}' already exists.")
             val out = env.fs.createFileNamed(parent, segs.last())
             var files = 0
             ZipOutputStream(env.fs.openOut(out).buffered()).use { zos ->
                 fun add(d: DocumentFile, entry: String) {
+                    env.fs.stopIfCancelled()
                     if (d.uri == out.uri) return
-                    if (d.isDirectory) {
+                    if (env.fs.isDir(d)) {
                         zos.putNextEntry(ZipEntry("$entry/"))
                         zos.closeEntry()
-                        for (c in env.fs.children(d)) add(c, "$entry/${c.name}")
+                        for (c in env.fs.children(d)) add(c, "$entry/${env.fs.nameOf(c)}")
                     } else {
                         zos.putNextEntry(ZipEntry(entry))
                         env.fs.openIn(d).use { it.copyTo(zos) }
@@ -318,12 +322,15 @@ object FsTools {
         ) { env, a ->
             val zip = env.fs.requireFile(a.reqStr("source"))
             val destSegs = env.fs.segments(a.str("dest_dir").orEmpty())
-            val destRoot = env.fs.ensureDir(destSegs)
+            // Nhớ các thư mục đã tạo trong lần giải nén này (một tệp zip có thể có hàng trăm tệp cùng thư mục).
+            val dirCache = HashMap<List<String>, DocumentFile>()
+            val destRoot = env.fs.ensureDir(destSegs, dirCache)
             var files = 0
             var skipped = 0
             var total = 0L
             ZipInputStream(env.fs.openIn(zip).buffered()).use { zis ->
                 while (true) {
+                    env.fs.stopIfCancelled()
                     val e = zis.nextEntry ?: break
                     val rel = e.name.replace('\\', '/')
                     val segs = rel.split('/').filter { it.isNotEmpty() && it != "." }
@@ -332,11 +339,11 @@ object FsTools {
                         continue
                     }
                     if (e.isDirectory) {
-                        env.fs.ensureDir(destSegs + segs)
+                        env.fs.ensureDir(destSegs + segs, dirCache)
                     } else {
-                        val parent = env.fs.ensureDir(destSegs + segs.dropLast(1))
+                        val parent = env.fs.ensureDir(destSegs + segs.dropLast(1), dirCache)
                         val name = segs.last()
-                        val doc = parent.findFile(name)?.takeIf { !it.isDirectory } ?: env.fs.createFileNamed(parent, name)
+                        val doc = env.fs.childByName(parent, name)?.takeIf { !env.fs.isDir(it) } ?: env.fs.createFileNamed(parent, name)
                         env.fs.openOut(doc).use { o ->
                             val buf = ByteArray(8192)
                             while (true) {

@@ -4,6 +4,8 @@ import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.util.TextUtil
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
 /** A piece of text around a match, with the character ranges to highlight. */
 data class Snippet(val text: String, val highlights: List<IntRange>)
@@ -52,18 +54,55 @@ fun buildSearchGroups(
     val messagesByConv = messages.groupBy { it.conversationId }
     val out = mutableListOf<SearchGroup>()
     for (c in conversations.sortedByDescending { it.updatedAt }) {
-        val msgs = messagesByConv[c.id] ?: continue // empty drafts are never offered
-        val title = displayTitle(c.title)
-        val titleMatch = TextUtil.findAll(title, query).isNotEmpty()
-        val matching = msgs.sortedByDescending { it.createdAt }.filter { TextUtil.findAll(it.text, query).isNotEmpty() }
-        if (!titleMatch && matching.isEmpty()) continue
-        out += SearchGroup(
-            conversationId = c.id,
-            title = title,
-            titleMatch = titleMatch,
-            hits = matching.take(maxHitsPerGroup).map { SearchHit(it.id, it.role, makeSnippet(it.text, query)) },
-            totalHits = matching.size,
-        )
+        val group = searchGroupFor(c, messagesByConv[c.id].orEmpty(), query, maxHitsPerGroup) ?: continue
+        out += group
+        if (out.size >= maxGroups) break
+    }
+    return out
+}
+
+/**
+ * The search result of ONE conversation, or null if nothing in it matches (or it has no messages:
+ * empty drafts are never offered). [msgs] are that conversation's messages only.
+ */
+fun searchGroupFor(
+    c: ConversationEntity,
+    msgs: List<MessageEntity>,
+    query: String,
+    maxHitsPerGroup: Int = 3,
+): SearchGroup? {
+    if (msgs.isEmpty()) return null
+    val title = displayTitle(c.title)
+    val titleMatch = TextUtil.findAll(title, query).isNotEmpty()
+    val matching = msgs.sortedByDescending { it.createdAt }.filter { TextUtil.findAll(it.text, query).isNotEmpty() }
+    if (!titleMatch && matching.isEmpty()) return null
+    return SearchGroup(
+        conversationId = c.id,
+        title = title,
+        titleMatch = titleMatch,
+        hits = matching.take(maxHitsPerGroup).map { SearchHit(it.id, it.role, makeSnippet(it.text, query)) },
+        totalHits = matching.size,
+    )
+}
+
+/**
+ * Same result as [buildSearchGroups], but reads the messages one conversation at a time through
+ * [loadMessages], so only one conversation's messages are in memory at once. Stops as soon as the
+ * coroutine is cancelled (for example when the user types a new search).
+ */
+suspend fun searchAllChats(
+    conversations: List<ConversationEntity>,
+    loadMessages: suspend (String) -> List<MessageEntity>,
+    query: String,
+    maxGroups: Int = 50,
+    maxHitsPerGroup: Int = 3,
+): List<SearchGroup> {
+    if (query.isBlank()) return emptyList()
+    val out = mutableListOf<SearchGroup>()
+    for (c in conversations.sortedByDescending { it.updatedAt }) {
+        currentCoroutineContext().ensureActive()
+        val group = searchGroupFor(c, loadMessages(c.id), query, maxHitsPerGroup) ?: continue
+        out += group
         if (out.size >= maxGroups) break
     }
     return out

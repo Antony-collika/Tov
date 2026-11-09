@@ -12,7 +12,7 @@ class ConversationGroupsTest {
     private val now = at(20, 9)
 
     private fun conv(id: String, updatedAt: Long, pinned: Boolean = false) = ConversationEntity(
-        id = id, title = id, providerId = "", model = "", systemPrompt = "",
+        id = id, title = id,
         createdAt = updatedAt, updatedAt = updatedAt, pinned = pinned,
     )
 

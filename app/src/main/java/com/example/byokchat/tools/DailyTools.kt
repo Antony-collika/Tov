@@ -182,10 +182,18 @@ private fun parseDateTime(s: String, zone: ZoneId): ZonedDateTime {
 }
 
 // ---------- Web ----------
+// Biểu thức chính quy dựng một lần (không tạo lại mỗi lần đọc trang).
+private val HTML_HIDDEN_BLOCK = Regex("(?is)<(script|style|noscript|svg|head)[^>]*>.*?</\\1>")
+private val HTML_LINE_BREAK = Regex("(?i)<br\\s*/?>|</p>|</div>|</li>|</h[1-6]>|</tr>")
+private val HTML_TITLE = Regex("(?is)<title[^>]*>(.*?)</title>")
+
+/** Trang dài hơn mức này thì chỉ xử lý phần đầu (công cụ chỉ trả tối đa 40 000 ký tự). */
+private const val MAX_PAGE_CHARS = 600_000
+
 private fun htmlToText(html: String): String {
     val cleaned = html
-        .replace(Regex("(?is)<(script|style|noscript|svg|head)[^>]*>.*?</\\1>"), " ")
-        .replace(Regex("(?i)<br\\s*/?>|</p>|</div>|</li>|</h[1-6]>|</tr>"), "\n")
+        .replace(HTML_HIDDEN_BLOCK, " ")
+        .replace(HTML_LINE_BREAK, "\n")
     val text = Html.fromHtml(cleaned, Html.FROM_HTML_MODE_LEGACY).toString()
     return text.replace('\u00A0', ' ').lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString("\n")
 }
@@ -242,8 +250,8 @@ object DailyTools {
             } catch (e: IllegalArgumentException) {
                 throw ToolException("Invalid link.")
             }
-            val (type, body) = try {
-                Http.client.newCall(req).execute().use { r ->
+            val (type, rawBody) = try {
+                Http.fetchClient.newCall(req).execute().use { r ->
                     if (!r.isSuccessful) throw ToolException("The page returned error ${r.code}.")
                     val src = r.body?.source() ?: throw ToolException("The page has no content.")
                     src.request(1_500_000)
@@ -253,7 +261,8 @@ object DailyTools {
             } catch (e: java.io.IOException) {
                 throw ToolException("Could not load the page: ${e.message}")
             }
-            val title = Regex("(?is)<title[^>]*>(.*?)</title>").find(body)?.groupValues?.get(1)?.let { Html.fromHtml(it, Html.FROM_HTML_MODE_LEGACY).toString().trim() }
+            val body = if (rawBody.length > MAX_PAGE_CHARS) rawBody.take(MAX_PAGE_CHARS) else rawBody
+            val title = HTML_TITLE.find(body)?.groupValues?.get(1)?.let { Html.fromHtml(it, Html.FROM_HTML_MODE_LEGACY).toString().trim() }
             val text = if (type.contains("html", true) || body.trimStart().startsWith("<")) htmlToText(body) else body
             val out = if (text.length > max) text.take(max) + "\n…[truncated, ${text.length - max} more characters]" else text
             (if (title != null) "Title: $title\n" else "") + "Source: $url\n\n" + out

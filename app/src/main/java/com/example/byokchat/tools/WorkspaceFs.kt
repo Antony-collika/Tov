@@ -4,16 +4,20 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import com.example.byokchat.data.SettingsRepository
 import com.example.byokchat.util.humanSize
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Mọi thao tác tệp của AI đều đi qua lớp này:
@@ -29,10 +33,24 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     // ---------- Quyền truy cập ----------
 
+    /** Mốc (SystemClock.elapsedRealtime) của lần kiểm tra quyền gần nhất; -1 = chưa kiểm tra lần nào. */
+    private var lastRefreshAt = -1L
+
     fun refresh(): Boolean {
         val ok = computeAccess()
         _accessible.value = ok
+        lastRefreshAt = SystemClock.elapsedRealtime()
         return ok
+    }
+
+    /**
+     * Chỉ kiểm tra lại quyền khi lần trước đã cũ hơn [maxAgeMs]. Dùng cho mỗi lượt gửi tới AI,
+     * để không hỏi nhà cung cấp tài liệu lại mỗi lần.
+     */
+    fun refreshIfStale(maxAgeMs: Long = 10_000): Boolean {
+        val last = lastRefreshAt
+        if (last >= 0 && SystemClock.elapsedRealtime() - last < maxAgeMs) return _accessible.value
+        return refresh()
     }
 
     private fun computeAccess(): Boolean {
@@ -123,8 +141,8 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     fun find(path: String): DocumentFile? {
         var cur = root()
         for (seg in segments(path)) {
-            if (!cur.isDirectory) return null
-            cur = cur.findFile(seg) ?: return null
+            if (!isDir(cur)) return null
+            cur = childByName(cur, seg) ?: return null
         }
         return cur
     }
@@ -143,18 +161,83 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return d
     }
 
-    fun children(dir: DocumentFile): List<DocumentFile> =
+    // ---------- Bộ nhớ đệm metadata ----------
+    // Hỏi nhà cung cấp tài liệu (qua DocumentFile) mỗi lần rất chậm. Khi liệt kê thư mục, ta lấy
+    // tên, loại, kích thước, ngày sửa trong MỘT truy vấn và nhớ lại ở đây. Bộ nhớ đệm bị xóa khi có ghi.
+
+    private class Meta(val name: String, val isDir: Boolean, val size: Long, val modified: Long, val mime: String?)
+
+    private val meta = ConcurrentHashMap<String, Meta>()
+
+    fun clearMeta() = meta.clear()
+
+    fun nameOf(d: DocumentFile): String = meta[d.uri.toString()]?.name ?: d.name.orEmpty()
+    fun isDir(d: DocumentFile): Boolean = meta[d.uri.toString()]?.isDir ?: d.isDirectory
+    fun sizeOf(d: DocumentFile): Long = meta[d.uri.toString()]?.size ?: d.length()
+    fun modifiedOf(d: DocumentFile): Long = meta[d.uri.toString()]?.modified ?: d.lastModified()
+    fun mimeOf(d: DocumentFile): String? = meta[d.uri.toString()]?.mime ?: d.type
+
+    /** Liệt kê thư mục: một truy vấn lấy đủ thông tin; nếu lỗi thì rơi về cách cũ (chậm nhưng chắc chắn). */
+    fun children(dir: DocumentFile): List<DocumentFile> {
+        val treeUri = settings.workspaceUri.value?.let { Uri.parse(it) } ?: return childrenSlow(dir)
+        return try {
+            val listing = mutableListOf<Pair<DocumentFile, Meta>>()
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, DocumentsContract.getDocumentId(dir.uri))
+            val columns = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+            )
+            resolver.query(childrenUri, columns, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getString(0) ?: continue
+                    val name = c.getString(1) ?: continue
+                    val mime = c.getString(2)
+                    val isDir = mime == DocumentsContract.Document.MIME_TYPE_DIR
+                    val size = if (c.isNull(3)) 0L else c.getLong(3)
+                    val modified = if (c.isNull(4)) 0L else c.getLong(4)
+                    val doc = DocumentFile.fromTreeUri(ctx, DocumentsContract.buildDocumentUriUsingTree(treeUri, id)) ?: continue
+                    val m = Meta(name, isDir, size, modified, mime)
+                    meta[doc.uri.toString()] = m
+                    listing += doc to m
+                }
+            }
+            listing.sortedWith(compareBy({ !it.second.isDir }, { it.second.name.lowercase() })).map { it.first }
+        } catch (e: Exception) {
+            childrenSlow(dir)
+        }
+    }
+
+    /** Cách cũ, dùng khi truy vấn nhanh không được. */
+    private fun childrenSlow(dir: DocumentFile): List<DocumentFile> =
         dir.listFiles().filter { it.name != null }.sortedWith(compareBy({ !it.isDirectory }, { it.name!!.lowercase() }))
 
-    fun ensureDir(segs: List<String>): DocumentFile {
+    /** Tìm mục con theo đúng tên (không phân biệt bằng cách hỏi từng mục như trước). */
+    fun childByName(dir: DocumentFile, name: String): DocumentFile? = children(dir).firstOrNull { nameOf(it) == name }
+
+    /**
+     * Đảm bảo các thư mục tồn tại. [cache] (tùy chọn) nhớ thư mục đã xử lý theo đường dẫn,
+     * để một lần chạy công cụ nhiều tệp không phải kiểm tra lại cùng một thư mục.
+     */
+    fun ensureDir(segs: List<String>, cache: MutableMap<List<String>, DocumentFile>? = null): DocumentFile {
         var cur = root()
-        for (seg in segs) {
-            val next = cur.findFile(seg)
+        for (i in segs.indices) {
+            val key = segs.subList(0, i + 1).toList()
+            val cached = cache?.get(key)
+            if (cached != null) {
+                cur = cached
+                continue
+            }
+            val seg = segs[i]
+            val next = childByName(cur, seg)
             cur = when {
                 next == null -> cur.createDirectory(seg) ?: throw ToolException("Could not create the folder '$seg'.")
-                next.isDirectory -> next
+                isDir(next) -> next
                 else -> throw ToolException("'$seg' already exists and is a file, so it cannot be used as a folder.")
             }
+            cache?.put(key, cur)
         }
         return cur
     }
@@ -183,6 +266,17 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     fun readText(path: String, maxBytes: Long = 5_000_000): String = readDocText(requireFile(path), display(path), maxBytes)
 
+    /**
+     * Đọc tệp văn bản chỉ MỘT lần. Trả về null nếu là tệp nhị phân, quá lớn, hoặc không đọc được.
+     * Dùng cho tìm kiếm nội dung (trước đây phải mở tệp hai lần).
+     */
+    fun readTextIfText(doc: DocumentFile, label: String, maxBytes: Long): String? {
+        if (sizeOf(doc) > maxBytes) return null
+        val bytes = runCatching { openIn(doc).use { it.readBytes() } }.getOrNull() ?: return null
+        if (looksBinary(bytes)) return null
+        return String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
+    }
+
     fun isTextFile(doc: DocumentFile, maxBytes: Long = 2_000_000): Boolean {
         if (doc.length() > maxBytes) return false
         return runCatching {
@@ -201,11 +295,12 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     fun createFileNamed(parent: DocumentFile, name: String): DocumentFile {
         val created = parent.createFile(mimeFor(name), name) ?: throw ToolException("Could not create the file '$name'.")
-        if (created.name != name) {
+        val result = if (created.name != name) {
             created.renameTo(name)
-            return parent.findFile(name) ?: created
-        }
-        return created
+            parent.findFile(name) ?: created
+        } else created
+        clearMeta()
+        return result
     }
 
     fun writeText(path: String, text: String, mustNotExist: Boolean = false, createParents: Boolean = true) {
@@ -218,6 +313,7 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         if (doc != null && mustNotExist) throw ToolException("File '${display(path)}' already exists. Use the overwrite tool to replace it.")
         if (doc == null) doc = createFileNamed(parent, name)
         openOut(doc).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+        clearMeta()
     }
 
     // ---------- Duyệt cây ----------
@@ -228,10 +324,11 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     private fun walkInner(dir: DocumentFile, dirPath: String, maxDepth: Int, depth: Int, visit: (DocumentFile, String, Int) -> Boolean): Boolean {
         for (child in children(dir)) {
+            stopIfCancelled()
             val name = child.name ?: continue
             val p = if (dirPath.isEmpty()) name else "$dirPath/$name"
             if (!visit(child, p, depth)) return false
-            if (child.isDirectory && depth < maxDepth) {
+            if (isDir(child) && depth < maxDepth) {
                 if (!walkInner(child, p, maxDepth, depth + 1, visit)) return false
             }
         }
@@ -274,12 +371,28 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     }
 
     fun copyDoc(src: DocumentFile, destParent: DocumentFile, newName: String) {
-        if (src.isDirectory) {
+        if (isDir(src)) {
             val d = destParent.createDirectory(newName) ?: throw ToolException("Could not create the folder '$newName'.")
-            for (c in children(src)) copyDoc(c, d, c.name ?: continue)
+            for (c in children(src)) {
+                stopIfCancelled()
+                copyDoc(c, d, nameOf(c))
+            }
         } else {
             val out = createFileNamed(destParent, newName)
             openIn(src).use { ins -> openOut(out).use { outs -> ins.copyTo(outs) } }
         }
+        clearMeta()
+    }
+
+    /** Ném CancellationException nếu người dùng vừa bấm Dừng. Các vòng lặp dài trong công cụ gọi hàm này. */
+    fun stopIfCancelled() {
+        cancelJob.get()?.ensureActive()
+    }
+
+    companion object {
+        /**
+         * Việc của công cụ đang chạy (ToolRegistry gắn vào luồng công việc). Đọc từ luồng công cụ để biết đã bị hủy chưa.
+         */
+        val cancelJob = ThreadLocal<Job?>()
     }
 }

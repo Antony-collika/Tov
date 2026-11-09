@@ -74,6 +74,10 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE role != 'tool' AND status != 'streaming'")
     suspend fun allChatMessages(): List<MessageEntity>
 
+    /** Như allChatMessages nhưng chỉ của một cuộc: để tìm kiếm nạp từng cuộc một, không nạp hết vào RAM. */
+    @Query("SELECT * FROM messages WHERE conversationId = :cid AND role != 'tool' AND status != 'streaming'")
+    suspend fun chatMessagesOf(cid: String): List<MessageEntity>
+
     @Query("SELECT MAX(seq) FROM messages WHERE conversationId = :cid")
     suspend fun maxSeq(cid: String): Long?
 
@@ -88,6 +92,30 @@ interface MessageDao {
 
     @Query("DELETE FROM messages WHERE turnId = :turnId")
     suspend fun deleteTurn(turnId: String)
+
+    /** Cập nhật chữ của một tin AI đang stream (nhẹ hơn upsert cả dòng). */
+    @Query("UPDATE messages SET text = :text WHERE id = :id")
+    suspend fun updateText(id: String, text: String)
+
+    @Query("SELECT * FROM messages WHERE conversationId = :cid AND turnId = :turnId ORDER BY seq")
+    suspend fun getTurn(cid: String, turnId: String): List<MessageEntity>
+
+    @Query("SELECT MAX(seq) FROM messages WHERE conversationId = :cid AND turnId = :turnId")
+    suspend fun maxSeqOfTurn(cid: String, turnId: String): Long?
+
+    @Query("SELECT COUNT(DISTINCT turnId) FROM messages WHERE conversationId = :cid AND seq > :seq")
+    suspend fun countTurnsAfter(cid: String, seq: Long): Int
+
+    @Query("DELETE FROM messages WHERE conversationId = :cid AND seq > :seq")
+    suspend fun deleteAfter(cid: String, seq: Long)
+
+    /** Đường dẫn ảnh (dạng JSON) của mọi tin trong một cuộc. */
+    @Query("SELECT imagePaths FROM messages WHERE conversationId = :cid AND imagePaths != '[]'")
+    suspend fun imagePathsOf(cid: String): List<String>
+
+    /** Đường dẫn ảnh (dạng JSON) của mọi tin thuộc các cuộc khác. */
+    @Query("SELECT imagePaths FROM messages WHERE conversationId != :cid AND imagePaths != '[]'")
+    suspend fun imagePathsOutside(cid: String): List<String>
 
     // Khi mở lại app: tin nhắn đang dở dang do app bị tắt được đánh dấu là bị gián đoạn.
     @Query("UPDATE messages SET status = 'error', error = 'Interrupted (the app was closed while the AI was replying).' WHERE status = 'streaming'")

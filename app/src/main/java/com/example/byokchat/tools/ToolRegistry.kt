@@ -8,6 +8,9 @@ import com.example.byokchat.chat.ToolRuntime
 import com.example.byokchat.util.cap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asContextElement
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -80,7 +83,7 @@ class ToolRegistry(
     // ---------- ToolRuntime ----------
 
     override suspend fun definitions(): List<ToolDef> {
-        withContext(Dispatchers.IO) { env.fs.refresh() }
+        withContext(Dispatchers.IO) { env.fs.refreshIfStale() }
         return all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
             .map { ToolDef(effectiveName(it), effectiveDescription(it), it.schema) }
     }
@@ -96,6 +99,8 @@ class ToolRegistry(
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
 
     override suspend fun execute(call: AiToolCall, turnId: String): ToolOutcome {
+        // Mỗi lần chạy công cụ bắt đầu với bộ nhớ đệm metadata sạch (xem WorkspaceFs).
+        env.fs.clearMeta()
         val tool = all.firstOrNull { effectiveName(it) == call.name && mode(it) != ToolMode.OFF && isAvailable(it) }
             ?: return ToolOutcome("", "There is no tool named '${call.name}', or it is turned off.", true)
         val displayName = effectiveName(tool)
@@ -108,7 +113,8 @@ class ToolRegistry(
 
         if (mode(tool) == ToolMode.ASK) {
             val detail = try {
-                withContext(Dispatchers.IO) { tool.preview(env, args) }
+                // Luồng công việc gắn kèm Job hiện tại: khi bấm Dừng, các vòng lặp của công cụ sẽ thoát sớm.
+                withContext(Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job])) { tool.preview(env, args) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -119,7 +125,11 @@ class ToolRegistry(
         }
 
         return try {
-            ToolOutcome(tool.uid, withContext(Dispatchers.IO) { tool.run(env, args) }.cap(), false)
+            ToolOutcome(
+                tool.uid,
+                withContext(Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job])) { tool.run(env, args) }.cap(),
+                false,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: ToolException) {

@@ -89,7 +89,6 @@ fun ChatScreen(
     val currentProviderId by vm.currentModelProviderId.collectAsState()
     val currentModelName by vm.currentModel.collectAsState()
     val modelsRefreshing by vm.modelsRefreshing.collectAsState()
-    val stats by vm.tokenStats.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()
     val toolPrefs by container.toolPrefs.prefs.collectAsState()
     // Text of the answer being streamed. Deliberately NOT read here (no `by`): only the streaming message reads it,
@@ -104,6 +103,11 @@ fun ChatScreen(
 
     var showModelPicker by remember { mutableStateOf(false) }
     var showMemory by remember { mutableStateOf(false) }
+    // Số liệu «Chat memory» chỉ tính khi hộp thoại được mở (xem ChatViewModel.computeTokenStats).
+    var memoryStats by remember { mutableStateOf<TokenStats?>(null) }
+    LaunchedEffect(showMemory, messages) {
+        if (showMemory) memoryStats = vm.computeTokenStats()
+    }
     var showMenu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<EditState?>(null) }
     var regenPrompt by remember { mutableStateOf<RegenPrompt?>(null) }
@@ -215,11 +219,18 @@ fun ChatScreen(
     // Turns that have an AI message on screen. A turn without one gets "Regenerate" in your message's menu.
     val turnsWithAnswer = remember(chrono) { chrono.filter { it.role == "assistant" }.map { it.turnId }.toSet() }
     val toolResults = remember(messages) {
-        messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! }
+        ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
     }
-    val matches = remember(chrono, query, searchOpen) {
+    // Bỏ dấu một lần: câu tìm và từng tin (chỉ khi đang mở thanh tìm), thay vì bỏ dấu lại mỗi lần gõ.
+    val foldedQuery = remember(query) { TextUtil.fold(query) }
+    val foldedTexts = remember(chrono, searchOpen) {
+        if (searchOpen) chrono.associate { it.id to TextUtil.fold(it.text) } else emptyMap()
+    }
+    val matches = remember(chrono, query, searchOpen, foldedQuery, foldedTexts) {
         if (!searchOpen || query.isBlank()) emptyList()
-        else chrono.flatMap { m -> TextUtil.findAll(m.text, query).indices.map { Match(m.id, it) } }
+        else chrono.flatMap { m ->
+            TextUtil.findAllFolded(foldedTexts[m.id].orEmpty(), foldedQuery).indices.map { Match(m.id, it) }
+        }
     }
     LaunchedEffect(query, searchOpen) { if (focusApplied) currentIdx = 0 }
     LaunchedEffect(matches) {
@@ -380,7 +391,7 @@ fun ChatScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    items(visible, key = { it.id }) { m ->
+                    items(visible, key = { it.id }, contentType = { it.role }) { m ->
                         val cur = matches.getOrNull(currentIdx)
                         val hl = if (searchOpen && query.isNotBlank()) Highlight(query, if (cur?.messageId == m.id) cur.occurrence else -1) else null
                         val edit = editing?.takeIf { it.messageId == m.id }
@@ -439,13 +450,13 @@ fun ChatScreen(
             onDismiss = { showModelPicker = false },
         )
     }
-    stats?.let { st ->
+    if (showMemory) memoryStats?.let { st ->
         ChatMemoryDialog(
             used = st.used,
             limit = st.limit,
             dropped = st.droppedTurns,
-            open = showMemory,
-            onDismiss = { showMemory = false },
+            open = true,
+            onDismiss = { showMemory = false; memoryStats = null },
             onNewChat = onNewChat,
         )
     }

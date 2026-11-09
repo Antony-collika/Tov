@@ -135,6 +135,9 @@ internal fun UserMessage(
     var menuOpen by remember { mutableStateOf(false) }
     var selectOpen by remember { mutableStateOf(false) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
+    // Decoded once per change instead of on every redraw.
+    val imgs = remember(m.imagePaths) { m.images() }
+    val annotated = remember(m.text, hl) { highlighted(m.text, hl) }
     val haptic = LocalHapticFeedback.current
     // Position of the last finger-down inside this message (px, relative to the
     // outer Column). combinedClickable's onLongClick does not report where the
@@ -189,7 +192,6 @@ internal fun UserMessage(
                 ),
             ) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val imgs = m.images()
                     if (imgs.isNotEmpty()) {
                         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             imgs.forEachIndexed { idx, path ->
@@ -203,14 +205,14 @@ internal fun UserMessage(
                         }
                     }
                     if (m.text.isNotEmpty()) {
-                        Text(highlighted(m.text, hl), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Text(annotated, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
                 }
             }
             if (m.edited) EditedLabel()
         }
     }
-    viewerIndex?.let { idx -> ImageViewerDialog(m.images(), idx) { viewerIndex = null } }
+    viewerIndex?.let { idx -> ImageViewerDialog(imgs, idx) { viewerIndex = null } }
     if (selectOpen) SelectTextSheet(m.text, onCopyAll = { actions.copy(m.text) }, onDismiss = { selectOpen = false })
 }
 
@@ -229,7 +231,7 @@ internal fun AssistantMessage(
     hl: Highlight?,
     edit: EditState?,
     actions: Actions,
-    toolResults: Map<String, MessageEntity>,
+    toolResults: ToolResults,
     showActions: Boolean,
     errorFix: ErrorFix?,
     onErrorFix: (ErrorFix) -> Unit,
@@ -299,7 +301,11 @@ internal fun AssistantMessage(
                 return@Column
             }
             if (shownText.isNotEmpty()) {
-                MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl, onLongPress = openMenu, anchorCoordinates = boxCoords)
+                MarkdownBody(
+                    shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl,
+                    onLongPress = openMenu, anchorCoordinates = boxCoords,
+                    streaming = m.status == "streaming",
+                )
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }

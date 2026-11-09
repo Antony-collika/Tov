@@ -95,4 +95,30 @@ class MarkdownSegmentsTest {
         val src = "$f" + "js `x`\nabc"
         assertEquals(listOf(MdSegment.Text(src)), parseMarkdownSegments(src))
     }
+
+    @Test
+    fun indentedFenceIsStillDetected() {
+        val r = parseMarkdownSegments("  $f" + "python\n  x = 1\n  $f")
+        assertEquals(listOf(MdSegment.Code("python", "  x = 1", true)), r)
+    }
+
+    @Test
+    fun longerFenceNeedsLongerClosingFence() {
+        // Mở bằng 4 dấu huyền: dòng đóng 3 dấu chưa đóng được khối (nó là chữ trong khối).
+        val four = "````"
+        val r = parseMarkdownSegments(four + "\nabc\n$f\nxyz\n" + four)
+        assertEquals(listOf(MdSegment.Code("", "abc\n$f\nxyz", true)), r)
+    }
+
+    @Test
+    fun unclosedBlockWithoutTrailingNewlineKeepsEveryLine() {
+        val r = parseMarkdownSegments("$f" + "js\nvar a\nvar b")
+        assertEquals(listOf(MdSegment.Code("js", "var a\nvar b", false)), r)
+    }
+
+    @Test
+    fun textWithoutBackticksIsUnchanged() {
+        val src = "dong 1\n\ndong 3 co ** dam **"
+        assertEquals(listOf(MdSegment.Text(src)), parseMarkdownSegments(src))
+    }
 }

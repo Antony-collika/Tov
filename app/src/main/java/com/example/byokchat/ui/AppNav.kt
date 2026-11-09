@@ -33,8 +33,6 @@ fun AppNav() {
     val scope = rememberCoroutineScope()
     // One Markwon for the whole app (building one per message was slow)
     val markwon = remember { createMarkwon(context) }
-    // New users (no provider yet, welcome screen not finished/skipped) start at the welcome screen.
-    val start = remember { if (settings.providers.value.isEmpty() && !settings.onboardingDone.value) "onboarding" else "chat" }
 
     // Which conversation the chat screen shows. Saved so it survives rotation / process restart.
     var chatId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -73,6 +71,19 @@ fun AppNav() {
             nav.navigate("chat") { popUpTo("onboarding") { inclusive = true } }
         }
     }
+
+    // Chờ kho mã hóa đọc xong (xem SettingsRepository.ready). Trong lúc chờ chỉ hiện nền trống,
+    // nên không có màn chào hay thẻ "No AI connected" chớp lên với người dùng cũ.
+    // Việc tạo/mở cuộc chat ở trên vẫn chạy song song.
+    val ready by settings.ready.collectAsState()
+    if (!ready) {
+        Box(Modifier.fillMaxSize())
+        return
+    }
+
+    // New users (no provider yet, welcome screen not finished/skipped) start at the welcome screen.
+    // Tính sau khi đã sẵn sàng, vì khi đó mới biết có nhà cung cấp hay không.
+    val start = remember { if (settings.providers.value.isEmpty() && !settings.onboardingDone.value) "onboarding" else "chat" }
 
     CompositionLocalProvider(LocalMarkwon provides markwon) {
         NavHost(navController = nav, startDestination = start) {

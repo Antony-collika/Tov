@@ -3,6 +3,9 @@ package com.example.byokchat.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,12 +19,18 @@ class SettingsRepository(context: Context) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val listSer = ListSerializer(ProviderConfig.serializer())
 
-    // API key nằm trong kho được mã hóa (khóa mã hóa do Android Keystore giữ)
-    private val secure: SharedPreferences = createSecurePrefs(appContext)
+    // API key nằm trong kho được mã hóa (khóa mã hóa do Android Keystore giữ).
+    // Mở kho này khá chậm nên chỉ mở khi cần, và đọc nội dung ở luồng nền (xem init ở cuối class).
+    private val secure: SharedPreferences by lazy { createSecurePrefs(appContext) }
     private val plain: SharedPreferences = appContext.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
-    private val _providers = MutableStateFlow(loadProviders())
+    // Danh sách nhà cung cấp và API key tìm kiếm chỉ có sau khi kho mã hóa được đọc xong (xem ready).
+    private val _providers = MutableStateFlow<List<ProviderConfig>>(emptyList())
     val providers: StateFlow<List<ProviderConfig>> = _providers.asStateFlow()
+
+    private val _ready = MutableStateFlow(false)
+    /** True khi kho mã hóa (nhà cung cấp, API key) đã đọc xong. Trước đó danh sách nhà cung cấp còn rỗng. */
+    val ready: StateFlow<Boolean> = _ready.asStateFlow()
 
     private val _theme = MutableStateFlow(
         runCatching { ThemeMode.valueOf(plain.getString("theme", "SYSTEM")!!) }.getOrDefault(ThemeMode.SYSTEM)
@@ -66,10 +75,11 @@ class SettingsRepository(context: Context) {
         plain.edit().putString("search_provider", p).apply()
     }
 
-    private val _searchKey = MutableStateFlow(secure.getString("search_key", "") ?: "")
+    private val _searchKey = MutableStateFlow("")
     val searchApiKey: StateFlow<String> = _searchKey.asStateFlow()
 
     fun setSearchApiKey(k: String) {
+        ensureSecureLoaded() // không ghi đè khi chưa đọc xong
         _searchKey.value = k
         secure.edit().putString("search_key", k).apply()
     }
@@ -95,6 +105,7 @@ class SettingsRepository(context: Context) {
     fun defaultProvider(): ProviderConfig? = provider(_activeProviderId.value) ?: _providers.value.firstOrNull()
 
     fun saveProvider(p: ProviderConfig, makeDefault: Boolean = false) {
+        ensureSecureLoaded() // không ghi đè danh sách bằng rỗng khi chưa đọc xong
         val list = _providers.value.toMutableList()
         val idx = list.indexOfFirst { it.id == p.id }
         if (idx >= 0) list[idx] = p else list.add(p)
@@ -104,6 +115,7 @@ class SettingsRepository(context: Context) {
     }
 
     fun deleteProvider(id: String) {
+        ensureSecureLoaded()
         val list = _providers.value.filter { it.id != id }
         _providers.value = list
         secure.edit().putString("providers", json.encodeToString(listSer, list)).apply()
@@ -128,6 +140,21 @@ class SettingsRepository(context: Context) {
     private fun loadProviders(): List<ProviderConfig> {
         val raw = secure.getString("providers", null) ?: return emptyList()
         return runCatching { json.decodeFromString(listSer, raw) }.getOrDefault(emptyList())
+    }
+
+    /** Đọc nhà cung cấp và API key tìm kiếm từ kho mã hóa, đúng một lần. Gọi nhiều lần cũng được. */
+    @Synchronized
+    private fun ensureSecureLoaded() {
+        if (_ready.value) return
+        _providers.value = loadProviders()
+        _searchKey.value = secure.getString("search_key", "") ?: ""
+        _ready.value = true
+    }
+
+    init {
+        // Đọc kho mã hóa ở luồng nền để không làm đứng luồng chính khi mở app.
+        // (Khối init đặt ở cuối class để mọi biến đã được khởi tạo trước khi luồng nền chạy.)
+        CoroutineScope(Dispatchers.IO).launch { ensureSecureLoaded() }
     }
 
     private companion object {

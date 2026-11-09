@@ -1,7 +1,9 @@
 package com.example.byokchat.ai
 
 import com.example.byokchat.data.ProviderConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.*
 import okhttp3.Request
@@ -74,7 +76,7 @@ class GeminiProvider(private val cfg: ProviderConfig) : AiProvider {
         }
         val valid = calls.filter { it.name.isNotEmpty() }
         if (valid.isNotEmpty()) emit(AiEvent.ToolCalls(valid))
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun sanitize(el: JsonElement): JsonElement = when (el) {
         is JsonObject -> JsonObject(

@@ -1,7 +1,9 @@
 package com.example.byokchat.ai
 
 import com.example.byokchat.data.ProviderConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.*
 import okhttp3.Request
@@ -10,6 +12,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
     private val base: String get() = cfg.effectiveBaseUrl().trimEnd('/')
 
+    private companion object {
+        val CACHE_MARK: JsonElement = buildJsonObject { put("type", "ephemeral") }
+    }
+
     private fun Request.Builder.withAuth(): Request.Builder =
         header("x-api-key", cfg.apiKey).header("anthropic-version", "2023-06-01")
 
@@ -17,20 +23,41 @@ class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
         val args = StringBuilder()
     }
 
+    /**
+     * Prompt caching của Claude: chỉ bật với địa chỉ mặc định (hoặc có chứa anthropic.com), vì
+     * máy chủ khác có thể không hiểu trường này. Đánh dấu 3 chỗ: system, công cụ cuối, khối cuối của tin cuối.
+     */
+    private val caching: Boolean
+        get() = cfg.baseUrl.isBlank() || cfg.baseUrl.contains("anthropic.com")
+
     override fun stream(request: AiRequest): Flow<AiEvent> = flow {
+        val useCache = caching
         val body = buildJsonObject {
             put("model", request.model)
             put("max_tokens", request.maxOutputTokens)
             put("stream", true)
-            if (request.system.isNotBlank()) put("system", request.system)
-            put("messages", buildMessages(request.messages))
+            if (request.system.isNotBlank()) {
+                if (useCache) {
+                    put("system", buildJsonArray {
+                        add(buildJsonObject {
+                            put("type", "text")
+                            put("text", request.system)
+                            put("cache_control", CACHE_MARK)
+                        })
+                    })
+                } else {
+                    put("system", request.system)
+                }
+            }
+            put("messages", buildMessages(request.messages, useCache))
             if (request.tools.isNotEmpty()) {
                 put("tools", buildJsonArray {
-                    request.tools.forEach { t ->
+                    request.tools.forEachIndexed { i, t ->
                         add(buildJsonObject {
                             put("name", t.name)
                             put("description", t.description)
                             put("input_schema", t.schema)
+                            if (useCache && i == request.tools.lastIndex) put("cache_control", CACHE_MARK)
                         })
                     }
                 })
@@ -73,12 +100,15 @@ class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
             AiToolCall(it.id, it.name, it.args.toString().ifBlank { "{}" })
         }
         if (calls.isNotEmpty()) emit(AiEvent.ToolCalls(calls))
-    }
+    }.flowOn(Dispatchers.IO)
+
+    private fun withCacheMark(el: JsonElement): JsonElement =
+        if (el is JsonObject) JsonObject(el + ("cache_control" to CACHE_MARK)) else el
 
     private fun parseObject(s: String): JsonElement =
         runCatching { Json.parseToJsonElement(s) }.getOrNull()?.takeIf { it is JsonObject } ?: JsonObject(emptyMap())
 
-    private fun buildMessages(msgs: List<AiMessage>): JsonArray {
+    private fun buildMessages(msgs: List<AiMessage>, useCache: Boolean): JsonArray {
         class Turn(val role: String, val blocks: MutableList<JsonElement>)
 
         val out = mutableListOf<Turn>()
@@ -120,10 +150,15 @@ class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
             }
         }
         return buildJsonArray {
-            out.forEach { t ->
+            out.forEachIndexed { ti, t ->
+                // Khối cuối của tin cuối được đánh dấu để Claude nhớ lại phần hội thoại đã gửi.
+                val blocks: List<JsonElement> =
+                    if (useCache && ti == out.lastIndex && t.blocks.isNotEmpty()) {
+                        t.blocks.dropLast(1) + withCacheMark(t.blocks.last())
+                    } else t.blocks
                 add(buildJsonObject {
                     put("role", t.role)
-                    put("content", JsonArray(t.blocks))
+                    put("content", JsonArray(blocks))
                 })
             }
         }

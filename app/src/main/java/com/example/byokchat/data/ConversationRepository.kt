@@ -27,20 +27,11 @@ class ConversationRepository(
     }
 
     suspend fun delete(id: String) {
-        db.messages().getAll(id).forEach { m ->
-            // Xóa file ảnh đính kèm của cuộc trò chuyện (nếu không được cuộc khác dùng chung)
-            m.images().forEach { path -> if (!isImageUsedElsewhere(path, id)) java.io.File(path).delete() }
-        }
+        // Ảnh có thể được dùng chung giữa cuộc gốc và cuộc nhánh (Branch) nên chỉ xóa file
+        // nào không còn được cuộc nào khác dùng. Đọc danh sách của các cuộc khác một lần.
+        val usedElsewhere = db.messages().imagePathsOutside(id).flatMap { decodeImages(it) }.toHashSet()
+        db.messages().imagePathsOf(id).flatMap { decodeImages(it) }.distinct()
+            .forEach { path -> if (path !in usedElsewhere) java.io.File(path).delete() }
         db.conversations().delete(id)
-    }
-
-    // Ảnh có thể được dùng chung giữa cuộc gốc và cuộc nhánh (Branch) nên cần kiểm tra trước khi xóa.
-    private suspend fun isImageUsedElsewhere(path: String, exceptConversationId: String): Boolean {
-        val all = db.conversations().getAllIds()
-        for (cid in all) {
-            if (cid == exceptConversationId) continue
-            if (db.messages().getAll(cid).any { path in it.images() }) return true
-        }
-        return false
     }
 }

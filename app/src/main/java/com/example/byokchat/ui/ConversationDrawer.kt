@@ -130,7 +130,7 @@ class ConversationListViewModel(private val app: AppContainer) : ViewModel() {
         .mapLatest { q ->
             if (q.isBlank()) SearchState()
             else SearchState(q, withContext(Dispatchers.Default) {
-                buildSearchGroups(app.db.conversations().observeAllOnce(), app.db.messages().allChatMessages(), q)
+                searchAllChats(app.db.conversations().observeAllOnce(), { app.db.messages().chatMessagesOf(it) }, q)
             })
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SearchState())

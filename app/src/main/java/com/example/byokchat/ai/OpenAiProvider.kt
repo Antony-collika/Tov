@@ -1,7 +1,9 @@
 package com.example.byokchat.ai
 
 import com.example.byokchat.data.ProviderConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.*
 import okhttp3.Request
@@ -73,7 +75,7 @@ class OpenAiProvider(private val cfg: ProviderConfig) : AiProvider {
             )
         }
         if (calls.isNotEmpty()) emit(AiEvent.ToolCalls(calls))
-    }
+    }.flowOn(Dispatchers.IO)
 
     private fun buildMessages(r: AiRequest): JsonArray = buildJsonArray {
         if (r.system.isNotBlank()) {
