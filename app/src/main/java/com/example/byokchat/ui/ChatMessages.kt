@@ -139,6 +139,10 @@ internal fun UserMessage(
     // Position of the last finger-down inside this message (px, relative to the
     // outer Column). combinedClickable's onLongClick does not report where the
     // finger is, so pointerInput records it; it only observes, never consumes.
+    // Note: combinedClickable consumes the down event before it reaches this
+    // parent pointerInput, so awaitFirstDown must not require it unconsumed —
+    // otherwise the position is never recorded and the menu falls back to
+    // offset zero (top-left corner).
     var pressOffset by remember { mutableStateOf<Offset?>(null) }
     val density = LocalDensity.current
     val menuOffset = with(density) { pressOffset?.let { DpOffset(it.x.toDp(), it.y.toDp()) } ?: DpOffset.Zero }
@@ -146,7 +150,7 @@ internal fun UserMessage(
         Modifier.fillMaxWidth().pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
-                    pressOffset = awaitFirstDown().position
+                    pressOffset = awaitFirstDown(requireUnconsumed = false).position
                 }
             }
         },
@@ -242,6 +246,8 @@ internal fun AssistantMessage(
     // outer Box below). Presses on Compose parts are recorded by pointerInput on
     // the Box; presses on the markdown TextView are recorded by its
     // OnTouchListener and converted into this same space (see MarkdownText).
+    // Same note as in UserMessage: the down is consumed by combinedClickable
+    // first, so awaitFirstDown must not require it unconsumed.
     var pressOffset by remember { mutableStateOf<Offset?>(null) }
     // Coordinates of the outer Box, passed down so the TextView can convert a
     // touch position into this Box's space.
@@ -270,7 +276,7 @@ internal fun AssistantMessage(
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
-                        pressOffset = awaitFirstDown().position
+                        pressOffset = awaitFirstDown(requireUnconsumed = false).position
                     }
                 }
             }
