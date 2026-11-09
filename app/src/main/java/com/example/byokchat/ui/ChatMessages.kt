@@ -225,21 +225,78 @@ internal fun AssistantMessage(
             menuOpen = true
         }
     }
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .combinedClickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = {},
-                onLongClickLabel = "Message options",
-                onLongClick = { openMenu() },
-            ),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    // The menu anchor lives in this outer Box, not inside the spaced Column below:
+    // adding it as a child of the Column would insert an extra 8.dp gap and push
+    // the whole message down when the menu opens. A Box stacks its children, so
+    // toggling the menu never moves the message content.
+    Box(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                    onLongClickLabel = "Message options",
+                    onLongClick = { openMenu() },
+                ),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (edit != null) {
+                MessageEditor(edit, "Save", onEditChange, onEditSave, onEditCancel)
+                return@Column
+            }
+            if (shownText.isNotEmpty()) {
+                MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl, onLongPress = openMenu)
+            } else if (m.status == "streaming") {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+            if (m.toolCallsJson != null) ToolCards(m, toolResults, generating)
+            if (m.status == "error") {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // The error text has two parts: a friendly sentence, then (after the first line break) a details line.
+                        val err = m.error ?: "Something went wrong."
+                        val nl = err.indexOf('\n')
+                        if (nl < 0) {
+                            Text(err, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
+                        } else {
+                            Text(err.substring(0, nl), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                err.substring(nl + 1).trim(),
+                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            FilledTonalButton(onClick = { actions.regen(m) }, enabled = !generating) { Text("Retry") }
+                            if (errorFix != null) {
+                                OutlinedButton(onClick = { onErrorFix(errorFix) }) { Text(errorFix.label()) }
+                            }
+                        }
+                    }
+                }
+            }
+            if (m.status != "streaming" && m.status != "error") {
+                if (showActions) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Copy stays available while the AI is answering; the others change data, so they are locked.
+                        if (shownText.isNotBlank()) ActionIcon(Icons.Default.ContentCopy, "Copy", true) { actions.copy(shownText) }
+                        ActionIcon(Icons.Default.Refresh, "Regenerate", !generating) { actions.regen(m) }
+                        ActionIcon(Icons.Default.CallSplit, "Branch in new chat", !generating) { actions.branch(m) }
+                        Spacer(Modifier.weight(1f))
+                        if (m.edited) EditedLabel()
+                    }
+                } else if (m.edited) {
+                    EditedLabel()
+                }
+            } else if (m.edited) {
+                EditedLabel()
+            }
+        }
         // Zero-size anchor at the top-end of the message; the dropdown opens below it.
         if (menuOpen) {
-            Box(Modifier.align(Alignment.End)) {
+            Box(Modifier.align(Alignment.TopEnd)) {
                 val items = buildList {
                     if (shownText.isNotBlank()) {
                         add(MenuAction(Icons.Default.ContentCopy, "Copy") { actions.copy(shownText) })
@@ -256,57 +313,6 @@ internal fun AssistantMessage(
                 }
                 MessageMenuDropdown(items, LOCKED_NOTE) { menuOpen = false }
             }
-        }
-        if (edit != null) {
-            MessageEditor(edit, "Save", onEditChange, onEditSave, onEditCancel)
-            return@Column
-        }
-        if (shownText.isNotEmpty()) {
-            MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl, onLongPress = openMenu)
-        } else if (m.status == "streaming") {
-            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-        }
-        if (m.toolCallsJson != null) ToolCards(m, toolResults, generating)
-        if (m.status == "error") {
-            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // The error text has two parts: a friendly sentence, then (after the first line break) a details line.
-                    val err = m.error ?: "Something went wrong."
-                    val nl = err.indexOf('\n')
-                    if (nl < 0) {
-                        Text(err, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
-                    } else {
-                        Text(err.substring(0, nl), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            err.substring(nl + 1).trim(),
-                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        FilledTonalButton(onClick = { actions.regen(m) }, enabled = !generating) { Text("Retry") }
-                        if (errorFix != null) {
-                            OutlinedButton(onClick = { onErrorFix(errorFix) }) { Text(errorFix.label()) }
-                        }
-                    }
-                }
-            }
-        }
-        if (m.status != "streaming" && m.status != "error") {
-            if (showActions) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Copy stays available while the AI is answering; the others change data, so they are locked.
-                    if (shownText.isNotBlank()) ActionIcon(Icons.Default.ContentCopy, "Copy", true) { actions.copy(shownText) }
-                    ActionIcon(Icons.Default.Refresh, "Regenerate", !generating) { actions.regen(m) }
-                    ActionIcon(Icons.Default.CallSplit, "Branch in new chat", !generating) { actions.branch(m) }
-                    Spacer(Modifier.weight(1f))
-                    if (m.edited) EditedLabel()
-                }
-            } else if (m.edited) {
-                EditedLabel()
-            }
-        } else if (m.edited) {
-            EditedLabel()
         }
     }
     selectText?.let { snap -> SelectTextSheet(snap, onCopyAll = { actions.copy(snap) }, onDismiss = { selectText = null }) }
