@@ -14,6 +14,9 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Danh sách toàn bộ công cụ + cầu nối với vòng chat.
@@ -82,9 +85,26 @@ class ToolRegistry(
 
     // ---------- ToolRuntime ----------
 
+    /**
+     * `time.now` is no longer offered to the model as a tool: its toggle now
+     * controls a date/time line injected at the top of the system prompt
+     * (see ChatEngine). Only date and time — no time zone or location, which
+     * would reveal where the device is. ASK is treated the same as AUTO
+     * here: knowing the date is read-only context, not an action that needs
+     * approval. Null means the toggle is off: no line, no tool.
+     */
+    override fun currentTimeLine(): String? {
+        val tool = tool("time.now") ?: return null
+        if (mode(tool) == ToolMode.OFF) return null
+        val text = LocalDateTime.now()
+            .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss (EEEE)", Locale.ENGLISH))
+        return "Current date and time: $text."
+    }
+
     override suspend fun definitions(): List<ToolDef> {
         withContext(Dispatchers.IO) { env.fs.refreshIfStale() }
-        return all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
+        // time.now is injected into the system prompt instead (see currentTimeLine).
+        return all.filter { mode(it) != ToolMode.OFF && isAvailable(it) && it.uid != "time.now" }
             .map { ToolDef(effectiveName(it), effectiveDescription(it), it.schema) }
     }
 
@@ -93,7 +113,7 @@ class ToolRegistry(
     override fun nameForUid(uid: String): String? = byUid[uid]?.let { effectiveName(it) }
 
     override fun estimateToolTokens(): Int =
-        all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
+        all.filter { mode(it) != ToolMode.OFF && isAvailable(it) && it.uid != "time.now" }
             .sumOf { TokenEstimator.text(effectiveName(it) + effectiveDescription(it) + it.schema.toString()) }
 
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)

@@ -211,11 +211,13 @@ object DailyTools {
         },
 
         dailyTool("time.now", Risk.READ, "current_time",
-            "Get the device's current date and time (with weekday and time zone).",
+            "Current date and time, injected at the top of the system prompt when this is on. Not a tool the AI calls.",
             schema { str("timezone", "IANA time zone, e.g. 'Asia/Ho_Chi_Minh', 'America/New_York' (default: the device's time zone).") }) { _, a ->
+            // Fallback for a model that still calls this name from an old
+            // conversation: date and time only, no time zone or location.
             val zone = a.str("timezone")?.let { runCatching { ZoneId.of(it) }.getOrNull() ?: throw ToolException("Invalid time zone '$it'.") } ?: ZoneId.systemDefault()
             val now = ZonedDateTime.now(zone)
-            "${now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))} (${weekdays[now.dayOfWeek]}), time zone ${zone.id} (UTC${now.offset.id.replace("Z", "+00:00")})"
+            "${now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))} (${weekdays[now.dayOfWeek]})"
         },
 
         dailyTool("time.diff", Risk.READ, "date_difference",
