@@ -7,6 +7,7 @@ import android.text.Spanned
 import android.text.method.LinkMovementMethod
 import android.text.style.BackgroundColorSpan
 import android.util.LruCache
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.widget.TextView
 import androidx.compose.foundation.layout.Arrangement
@@ -31,9 +32,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.byokchat.util.TextUtil
 import io.noties.markwon.Markwon
+import io.noties.markwon.ext.latex.JLatexMathPlugin
 import io.noties.markwon.ext.strikethrough.StrikethroughPlugin
 import io.noties.markwon.ext.tables.TablePlugin
 import io.noties.markwon.ext.tasklist.TaskListPlugin
+import io.noties.markwon.inlineparser.MarkwonInlineParserPlugin
 import io.noties.markwon.linkify.LinkifyPlugin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,13 +47,151 @@ data class Highlight(val query: String, val currentOccurrence: Int = -1)
 /** One Markwon instance shared by every message (building one per message was slow). Provided in AppNav. */
 val LocalMarkwon = staticCompositionLocalOf<Markwon?> { null }
 
-fun createMarkwon(context: Context): Markwon =
-    Markwon.builder(context)
+fun createMarkwon(context: Context): Markwon {
+    // TextView in MarkdownText uses 16sp, so LaTeX is rendered at the same size.
+    val textSizePx = TypedValue.applyDimension(
+        TypedValue.COMPLEX_UNIT_SP, 16f, context.resources.displayMetrics,
+    )
+    return Markwon.builder(context)
         .usePlugin(StrikethroughPlugin.create())
         .usePlugin(TablePlugin.create(context))
         .usePlugin(TaskListPlugin.create(context))
         .usePlugin(LinkifyPlugin.create())
+        // Required for inline $$...$$; blocks ($$ on their own lines) work without it.
+        .usePlugin(MarkwonInlineParserPlugin.create())
+        .usePlugin(
+            JLatexMathPlugin.create(
+                textSizePx,
+                object : JLatexMathPlugin.BuilderConfigure {
+                    override fun configureBuilder(builder: JLatexMathPlugin.Builder) {
+                        builder.inlinesEnabled(true)
+                    }
+                },
+            ),
+        )
         .build()
+}
+
+// ---------- Chuẩn hóa công thức LaTeX mà AI hay viết ----------
+
+/** `$$` as a plain string (in Kotlin source `$` must be escaped). */
+private const val LATEX_DELIM = "\$\$"
+
+private val MATH_WORD_RX = Regex("\\b(sin|cos|tan|log|sqrt|frac|pi|theta|alpha|beta|sum|int|lim)\\b")
+
+private fun isMathLike(inner: String): Boolean =
+    inner.contains('\\') || inner.contains('^') || inner.contains('_') || inner.contains('{') ||
+        (inner.length == 1 && inner[0].isLetter()) ||
+        MATH_WORD_RX.containsMatchIn(inner)
+
+/**
+ * Convert single-dollar math `$...$` to `$$...$$` (what Markwon's LaTeX plugin
+ * understands). A `$` followed by a digit is a price, not math, so it is left
+ * alone — and a non-math `$...$` pair is never consumed, so a stray price `$`
+ * cannot swallow the opening `$` of a real formula later in the line.
+ */
+private fun convertSingleDollarMath(text: String): String {
+    if (!text.contains('$')) return text
+    val out = StringBuilder()
+    var i = 0
+    while (i < text.length) {
+        if (text.startsWith(LATEX_DELIM, i)) {
+            out.append(LATEX_DELIM)
+            i += 2
+            continue
+        }
+        if (text[i] == '$' && i + 1 < text.length && !text[i + 1].isDigit() &&
+            text[i + 1] != ' ' && text[i + 1] != '\n'
+        ) {
+            val close = text.indexOf('$', i + 1)
+            if (close > i + 1 && close - i - 1 <= 200 &&
+                (close + 1 >= text.length || text[close + 1] != '$')
+            ) {
+                val inner = text.substring(i + 1, close)
+                if (!inner.contains('\n') && isMathLike(inner)) {
+                    out.append(LATEX_DELIM).append(inner).append(LATEX_DELIM)
+                    i = close + 1
+                    continue
+                }
+            }
+        }
+        out.append(text[i])
+        i++
+    }
+    return out.toString()
+}
+
+/**
+ * Normalize the LaTeX delimiters LLMs actually write so the LaTeX plugin can
+ * parse them. Without this, the exact text from the screenshot —
+ * `1. Trigonometric harmony: $$` followed by the formula on the next lines —
+ * is not a block the plugin recognizes, because its opening `$$` is not on
+ * its own line.
+ * - `\(...\)` -> `$$...$$`, `\[...\]` -> a `$$` block.
+ * - Single-dollar math -> `$$...$$` (see [convertSingleDollarMath]).
+ * - A `$$` at the end of a line, or a `$$` with formula text after it on the
+ *   same line, is moved onto its own line to open/close a display block.
+ * A complete `$$...$$` on one line is left alone (inline formula).
+ * Lines containing a backtick are left alone so inline code is not touched.
+ */
+private fun normalizeLatex(markdown: String): String {
+    if (!markdown.contains('$') && !markdown.contains('\\')) return markdown
+    var text = markdown
+    text = Regex("""\\\((.+?)\\\)""", RegexOption.DOT_MATCHES_ALL)
+        .replace(text) { LATEX_DELIM + it.groupValues[1] + LATEX_DELIM }
+    text = Regex("""\\\[(.+?)\\\]""", RegexOption.DOT_MATCHES_ALL)
+        .replace(text) { LATEX_DELIM + "\n" + it.groupValues[1] + "\n" + LATEX_DELIM }
+    text = convertSingleDollarMath(text)
+    val out = ArrayList<String>()
+    var inBlock = false
+    for (line in text.lines()) {
+        if (line.contains('`')) {
+            out.add(line)
+            continue
+        }
+        val trimmed = line.trim()
+        if (!inBlock) {
+            if (trimmed == LATEX_DELIM) {
+                inBlock = true
+                out.add(line)
+                continue
+            }
+            val first = line.indexOf(LATEX_DELIM)
+            if (first >= 0) {
+                if (line.indexOf(LATEX_DELIM, first + 2) >= 0) {
+                    out.add(line) // complete $$...$$ on one line: inline formula
+                    continue
+                }
+                val before = line.substring(0, first).trimEnd()
+                val after = line.substring(first + 2).trim()
+                if (before.isNotEmpty()) out.add(before)
+                out.add(LATEX_DELIM)
+                if (after.isNotEmpty()) out.add(after)
+                inBlock = true
+                continue
+            }
+            out.add(line)
+        } else {
+            if (trimmed == LATEX_DELIM) {
+                inBlock = false
+                out.add(line)
+                continue
+            }
+            val idx = line.indexOf(LATEX_DELIM)
+            if (idx >= 0) {
+                val before = line.substring(0, idx).trimEnd()
+                if (before.isNotEmpty()) out.add(before)
+                out.add(LATEX_DELIM)
+                val after = line.substring(idx + 2).trim()
+                if (after.isNotEmpty()) out.add(after)
+                inBlock = false
+                continue
+            }
+            out.add(line)
+        }
+    }
+    return out.joinToString("\n")
+}
 
 /**
  * LinkMovementMethod that still lets the TextView fire its long-click. It returns false for
@@ -122,13 +263,16 @@ fun MarkdownText(
     val linkColor = MaterialTheme.colorScheme.primary.toArgb()
     val textColor = color.toArgb()
     val query = highlight?.query.orEmpty()
-    val key = RenderKey(markdown, query, highlight?.currentOccurrence ?: -1)
+    // Normalize LaTeX delimiters once; every parse path below uses this text,
+    // so the cache key and the displayed text always agree.
+    val normalizedMarkdown = remember(markdown) { normalizeLatex(markdown) }
+    val key = RenderKey(normalizedMarkdown, query, highlight?.currentOccurrence ?: -1)
     // Đường bất đồng bộ: đang stream, không tô sáng, và chữ đủ dài.
-    val asyncParse = streaming && query.isEmpty() && markdown.length >= ASYNC_PARSE_MIN_CHARS
+    val asyncParse = streaming && query.isEmpty() && normalizedMarkdown.length >= ASYNC_PARSE_MIN_CHARS
     // Kết quả phân tích nền gần nhất. Khi có chữ mới, chữ cũ vẫn hiện cho đến khi kết quả mới xong.
     var parsed by remember { mutableStateOf<Spanned?>(null) }
-    LaunchedEffect(markdown, asyncParse) {
-        parsed = if (asyncParse) withContext(Dispatchers.Default) { markwon.toMarkdown(markdown) } else null
+    LaunchedEffect(normalizedMarkdown, asyncParse) {
+        parsed = if (asyncParse) withContext(Dispatchers.Default) { markwon.toMarkdown(normalizedMarkdown) } else null
     }
     // Layout coordinates of this TextView, for converting a touch position into
     // the anchor Box's space. Set after layout, before any user interaction.
@@ -179,8 +323,8 @@ fun MarkdownText(
             } else if (tv.tag != key) {
                 tv.tag = key
                 // Tin đang stream không đưa vào cache (mỗi lần chữ đổi là một khóa mới, làm đầy cache vô ích).
-                val spanned = if (query.isEmpty() && !streaming && isCacheable(markdown)) cachedParse(markwon, markdown) else null
-                if (spanned != null) markwon.setParsedMarkdown(tv, spanned) else markwon.setMarkdown(tv, markdown)
+                val spanned = if (query.isEmpty() && !streaming && isCacheable(normalizedMarkdown)) cachedParse(markwon, normalizedMarkdown) else null
+                if (spanned != null) markwon.setParsedMarkdown(tv, spanned) else markwon.setMarkdown(tv, normalizedMarkdown)
                 if (highlight != null && query.isNotEmpty()) {
                     val sp = tv.text as? Spannable
                     if (sp != null) {

@@ -87,6 +87,8 @@ dependencies {
     implementation(libs.markwon.tables)
     implementation(libs.markwon.tasklist)
     implementation(libs.markwon.linkify)
+    implementation(libs.markwon.latex)
+    implementation(libs.markwon.inline.parser)
 
     testImplementation(libs.junit)
 }
