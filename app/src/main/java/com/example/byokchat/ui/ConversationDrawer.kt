@@ -441,17 +441,22 @@ private fun ConversationRow(
                         if (working) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                         if (pinned) Icon(Icons.Default.PushPin, contentDescription = "Pinned", modifier = Modifier.size(16.dp).padding(start = 2.dp))
                         if (!selecting) {
-                            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Options") }
+                            // The menu must live inside a Box around its button: DropdownMenu
+                            // anchors to its parent layout, and the row is full-width, so a menu
+                            // placed at row level opens at the left edge instead of the button.
+                            Box {
+                                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Options") }
+                                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                                    DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = { menu = false; onTogglePin() })
+                                    DropdownMenuItem(text = { Text("Select") }, onClick = { menu = false; onStartSelecting() })
+                                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
+                                }
+                            }
                         }
                     }
                 },
             )
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
-                DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = { menu = false; onTogglePin() })
-                DropdownMenuItem(text = { Text("Select") }, onClick = { menu = false; onStartSelecting() })
-                DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
-            }
         }
     }
 }
