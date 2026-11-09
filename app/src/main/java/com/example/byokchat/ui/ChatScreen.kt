@@ -102,7 +102,7 @@ fun ChatScreen(
 
     var showModelPicker by remember { mutableStateOf(false) }
     var showPrompt by remember { mutableStateOf(false) }
-    var showRename by remember { mutableStateOf(false) }
+    var showMemory by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<EditState?>(null) }
     var regenPrompt by remember { mutableStateOf<RegenPrompt?>(null) }
@@ -326,18 +326,15 @@ fun ChatScreen(
                         IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, contentDescription = "Conversations") }
                     },
                     actions = {
-                        stats?.let { ContextRing(it.used, it.limit, it.droppedTurns, onNewChat) }
                         IconButton(onClick = { searchOpen = true }) { Icon(Icons.Default.Search, contentDescription = "Search") }
                         val hasPrompt = conv?.systemPrompt?.isNotBlank() == true
                         Box {
                             IconButton(onClick = { showMenu = true }) {
-                                // A small dot on the menu button tells you this chat has a system prompt.
-                                BadgedBox(badge = { if (hasPrompt) Badge() }) {
-                                    Icon(Icons.Default.MoreVert, contentDescription = if (hasPrompt) "More (this chat has a system prompt)" else "More")
-                                }
+                                Icon(Icons.Default.MoreVert, contentDescription = "More")
                             }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("Rename") }, onClick = { showMenu = false; showRename = true })
+                                DropdownMenuItem(text = { Text("New chat") }, onClick = { showMenu = false; onNewChat() })
+                                DropdownMenuItem(text = { Text("Chat memory") }, onClick = { showMenu = false; showMemory = true })
                                 DropdownMenuItem(
                                     text = { Text("System prompt") },
                                     trailingIcon = if (hasPrompt) {
@@ -452,12 +449,14 @@ fun ChatScreen(
             onDismiss = { showPrompt = false },
         )
     }
-    if (showRename) {
-        TextEditDialog(
-            title = "Rename chat",
-            initial = displayTitle(conv?.title ?: ""),
-            onConfirm = { vm.rename(it); showRename = false },
-            onDismiss = { showRename = false },
+    stats?.let { st ->
+        ChatMemoryDialog(
+            used = st.used,
+            limit = st.limit,
+            dropped = st.droppedTurns,
+            open = showMemory,
+            onDismiss = { showMemory = false },
+            onNewChat = onNewChat,
         )
     }
     regenPrompt?.let { rp ->
