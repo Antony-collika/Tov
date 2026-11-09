@@ -204,7 +204,7 @@ private fun noteId() = UUID.randomUUID().toString().take(8)
 object DailyTools {
     fun build(): List<Tool> = listOf(
         dailyTool("calc.eval", Risk.READ, "calculator",
-            "Evaluate a math expression. Supports + - * / % (remainder) ^ (power), parentheses, the constants pi and e, and the functions sqrt abs sin cos tan asin acos atan ln log exp floor ceil round pow min max (angles in radians). Use this tool instead of calculating in your head.",
+            "Evaluate a math expression with real numbers only. Supports + - * / % ^, parentheses, pi, e, sqrt, abs, sin, cos, tan, asin, acos, atan, ln, log, exp, floor, ceil, round, pow, min, max (angles in radians). No imaginary or complex numbers.",
             schema { str("expression", "Expression, e.g. (12.5 + 3) * 4 / sqrt(16)", required = true) }) { _, a ->
             val expr = a.reqStr("expression").replace('×', '*').replace('÷', '/').replace("−", "-")
             "${a.reqStr("expression")} = ${fmtResult(Calc(expr).eval())}"
