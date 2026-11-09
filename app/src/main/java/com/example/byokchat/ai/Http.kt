@@ -43,7 +43,7 @@ fun OkHttpClient.sseFlow(request: Request): Flow<SseEvent> = flow {
             if (!resp.isSuccessful) {
                 throw AiException(errorMessage(resp.code, resp.body?.string().orEmpty()))
             }
-            val source = resp.body?.source() ?: throw AiException("Máy chủ không trả về dữ liệu.")
+            val source = resp.body?.source() ?: throw AiException("The server returned no data.")
             var event: String? = null
             val data = StringBuilder()
             while (true) {
@@ -99,26 +99,26 @@ fun errorMessage(code: Int, body: String): String {
             else -> root["message"]?.jsonPrimitive?.contentOrNull
         }
     }.getOrNull()
-    val raw = "Lỗi $code: ${detail ?: body.take(300).ifBlank { "không rõ nguyên nhân" }}"
-    return friendlyHttpMessage(code) + "\nChi tiết: " + raw
+    val raw = "Error $code: ${detail ?: body.take(300).ifBlank { "unknown cause" }}"
+    return friendlyHttpMessage(code) + "\nDetails: " + raw
 }
 
 /** Câu giải thích dễ hiểu cho từng mã lỗi HTTP. */
 internal fun friendlyHttpMessage(code: Int): String = when (code) {
-    400 -> "Yêu cầu bị từ chối vì nội dung hoặc cài đặt chưa hợp lệ."
-    401 -> "API key không đúng hoặc đã bị thu hồi. Hãy kiểm tra lại key trong Cài đặt → Nhà cung cấp AI."
-    403 -> "Key này không có quyền dùng mô hình hoặc chức năng đang chọn, hoặc tài khoản bị hạn chế."
-    404 -> "Không tìm thấy mô hình hoặc địa chỉ máy chủ. Hãy kiểm tra tên mô hình và địa chỉ máy chủ."
-    408 -> "Máy chủ phản hồi quá lâu. Hãy thử lại."
-    413 -> "Nội dung gửi đi quá lớn (cuộc trò chuyện quá dài hoặc ảnh quá lớn)."
-    429 -> "Bạn gửi quá nhanh hoặc đã hết hạn mức của tài khoản. Hãy đợi một lúc rồi thử lại, hoặc kiểm tra hạn mức/số dư."
-    in 500..599 -> "Máy chủ của nhà cung cấp đang gặp sự cố hoặc quá tải. Hãy thử lại sau ít phút."
-    else -> "Nhà cung cấp trả về lỗi."
+    400 -> "The request was rejected because its content or settings are not valid."
+    401 -> "The API key is wrong or has been revoked. Check the key in Settings → AI providers."
+    403 -> "This key is not allowed to use the selected model or feature, or the account is restricted."
+    404 -> "The model or server address was not found. Check the model name and the server address."
+    408 -> "The server took too long to respond. Please try again."
+    413 -> "The request is too large (the conversation or an image is too big)."
+    429 -> "You are sending requests too fast or have run out of quota. Wait a moment and try again, or check your limits/balance."
+    in 500..599 -> "The provider's server is having problems or is overloaded. Try again in a few minutes."
+    else -> "The provider returned an error."
 }
 
 /** Lỗi mạng (mất kết nối, hết thời gian chờ...). */
 internal fun networkErrorMessage(detail: String): String =
-    "Không kết nối được mạng. Hãy kiểm tra Wi-Fi/4G rồi thử lại.\nChi tiết: $detail"
+    "Could not connect to the network. Check your Wi-Fi/mobile data and try again.\nDetails: $detail"
 
 fun errorText(el: JsonElement): String = when (el) {
     is JsonObject -> el["message"]?.jsonPrimitive?.contentOrNull ?: el.toString()

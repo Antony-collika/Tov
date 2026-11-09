@@ -43,7 +43,7 @@ fun humanSize(bytes: Long): String = when {
 }
 
 fun String.cap(max: Int = 30000): String =
-    if (length <= max) this else take(max) + "\n…[đã cắt bớt, còn ${length - max} ký tự nữa]"
+    if (length <= max) this else take(max) + "\n…[truncated, ${length - max} more characters]"
 
 fun fmtTime(ms: Long): String =
     if (ms <= 0) "?" else SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(ms))

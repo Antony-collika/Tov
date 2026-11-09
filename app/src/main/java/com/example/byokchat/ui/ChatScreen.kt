@@ -47,6 +47,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.byokchat.container
+import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
 import com.example.byokchat.util.TextUtil
@@ -319,7 +320,7 @@ fun ChatScreen(
             } else {
                 TopAppBar(
                     title = {
-                        Text(conv?.title ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(displayTitle(conv?.title ?: ""), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     },
                     navigationIcon = {
                         IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, contentDescription = "Conversations") }
@@ -454,7 +455,7 @@ fun ChatScreen(
     if (showRename) {
         TextEditDialog(
             title = "Rename chat",
-            initial = conv?.title ?: "",
+            initial = displayTitle(conv?.title ?: ""),
             onConfirm = { vm.rename(it); showRename = false },
             onDismiss = { showRename = false },
         )

@@ -61,7 +61,7 @@ import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.withTimeout
 import java.util.UUID
 
-/** Kết quả của nút "Kiểm tra" ở bước 2. */
+/** Kết quả của nút "Check" ở bước 2. */
 sealed interface CheckState {
     data object Idle : CheckState
     data object Checking : CheckState
@@ -133,7 +133,7 @@ class OnboardingViewModel(private val app: AppContainer) : ViewModel() {
         if (check is CheckState.Checking) return
         val url = baseUrl.trim()
         if (t == ProviderType.CUSTOM && !(url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true))) {
-            check = CheckState.Failed("Địa chỉ máy chủ cần bắt đầu bằng http:// hoặc https://")
+            check = CheckState.Failed("The server address must start with http:// or https://")
             return
         }
         val cfg = ProviderConfig(
@@ -152,8 +152,8 @@ class OnboardingViewModel(private val app: AppContainer) : ViewModel() {
                     val list = withTimeout(20_000) { job.await() }.distinct()
                     if (list.isEmpty()) {
                         check = CheckState.Failed(
-                            "Kết nối được, nhưng máy chủ không có mô hình nào để chọn. " +
-                                "Bạn có thể bấm \"Bỏ qua\" rồi thêm mô hình thủ công trong Cài đặt → Nhà cung cấp AI."
+                            "Connected, but the server has no models to choose from. " +
+                                "You can tap \"Skip\" and add a model manually in Settings → AI providers."
                         )
                     } else {
                         models = list
@@ -164,11 +164,11 @@ class OnboardingViewModel(private val app: AppContainer) : ViewModel() {
                     }
                 } catch (e: TimeoutCancellationException) {
                     job.cancel()
-                    check = CheckState.Failed("Máy chủ phản hồi quá lâu. Hãy thử lại.")
+                    check = CheckState.Failed("The server took too long to respond. Please try again.")
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
-                    check = CheckState.Failed(e.message ?: "Không kiểm tra được. Hãy thử lại.")
+                    check = CheckState.Failed(e.message ?: "Couldn't check the connection. Please try again.")
                 }
             }
         }
@@ -218,9 +218,9 @@ fun OnboardingScreen(onExit: (String?) -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Bước ${vm.step}/3") },
+                title = { Text("Step ${vm.step}/3") },
                 actions = {
-                    TextButton(onClick = { vm.skip(); onExit(null) }) { Text("Bỏ qua") }
+                    TextButton(onClick = { vm.skip(); onExit(null) }) { Text("Skip") }
                 },
             )
         },
@@ -234,10 +234,10 @@ fun OnboardingScreen(onExit: (String?) -> Unit) {
                 }
             }
             Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (vm.step > 1) TextButton(onClick = { vm.back() }) { Text("Quay lại") }
+                if (vm.step > 1) TextButton(onClick = { vm.back() }) { Text("Back") }
                 Spacer(Modifier.weight(1f))
                 when (vm.step) {
-                    2 -> Button(onClick = { vm.runCheck() }, enabled = vm.canCheck) { Text("Kiểm tra") }
+                    2 -> Button(onClick = { vm.runCheck() }, enabled = vm.canCheck) { Text("Check") }
                     3 -> Button(
                         onClick = {
                             scope.launch {
@@ -266,17 +266,17 @@ private fun ProviderChoiceCard(type: ProviderType, subtitle: String, onClick: ()
 @Composable
 private fun StepChooseProvider(vm: OnboardingViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Bạn muốn dùng AI của ai?", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
+        Text("Whose AI do you want to use?", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
         Text(
-            "Chọn một nơi. Bạn cần có API key (giống như mật khẩu để dùng AI) lấy từ tài khoản của mình ở đó.",
+            "Pick one. You need an API key (like a password for using the AI) from your account there.",
             style = MaterialTheme.typography.bodyMedium,
         )
-        ProviderChoiceCard(ProviderType.CLAUDE, "Dùng key lấy từ trang quản lý tài khoản Anthropic.") { vm.chooseType(ProviderType.CLAUDE) }
-        ProviderChoiceCard(ProviderType.OPENAI, "Dùng key lấy từ trang quản lý tài khoản OpenAI.") { vm.chooseType(ProviderType.OPENAI) }
-        ProviderChoiceCard(ProviderType.GEMINI, "Dùng key lấy từ tài khoản Google của bạn.") { vm.chooseType(ProviderType.GEMINI) }
+        ProviderChoiceCard(ProviderType.CLAUDE, "Use a key from your Anthropic account page.") { vm.chooseType(ProviderType.CLAUDE) }
+        ProviderChoiceCard(ProviderType.OPENAI, "Use a key from your OpenAI account page.") { vm.chooseType(ProviderType.OPENAI) }
+        ProviderChoiceCard(ProviderType.GEMINI, "Use a key from your Google account.") { vm.chooseType(ProviderType.GEMINI) }
         ProviderChoiceCard(
             ProviderType.CUSTOM,
-            "Dùng một máy chủ AI khác (của bạn hoặc của một dịch vụ khác) có cách kết nối giống OpenAI.",
+            "Use another AI server (your own or another service) that connects the same way as OpenAI.",
         ) { vm.chooseType(ProviderType.CUSTOM) }
     }
 }
@@ -288,7 +288,7 @@ private fun StepEnterKey(vm: OnboardingViewModel) {
     val isCustom = t == ProviderType.CUSTOM
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            "Nhập thông tin cho ${t.label.substringBefore(" (")}",
+            "Enter details for ${t.label.substringBefore(" (")}",
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(top = 8.dp),
         )
@@ -296,7 +296,7 @@ private fun StepEnterKey(vm: OnboardingViewModel) {
             OutlinedTextField(
                 value = vm.baseUrl,
                 onValueChange = { vm.onBaseUrlChange(it) },
-                label = { Text("Địa chỉ máy chủ") },
+                label = { Text("Server address") },
                 placeholder = { Text("https://ten-may-chu/v1") },
                 singleLine = true,
                 enabled = !busy,
@@ -307,22 +307,22 @@ private fun StepEnterKey(vm: OnboardingViewModel) {
         OutlinedTextField(
             value = vm.apiKey,
             onValueChange = { vm.onApiKeyChange(it) },
-            label = { Text(if (isCustom) "API key (không bắt buộc)" else "API key") },
+            label = { Text(if (isCustom) "API key (optional)" else "API key") },
             singleLine = true,
             enabled = !busy,
             visualTransformation = if (vm.showKey) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            trailingIcon = { TextButton(onClick = { vm.showKey = !vm.showKey }) { Text(if (vm.showKey) "Ẩn" else "Hiện") } },
-            supportingText = { Text("Được mã hóa và chỉ lưu trên máy này.") },
+            trailingIcon = { TextButton(onClick = { vm.showKey = !vm.showKey }) { Text(if (vm.showKey) "Hide" else "Show") } },
+            supportingText = { Text("Encrypted and stored only on this device.") },
             modifier = Modifier.fillMaxWidth(),
         )
         when (val c = vm.check) {
             CheckState.Idle -> {}
             CheckState.Checking -> Row(verticalAlignment = Alignment.CenterVertically) {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Text("Đang kiểm tra…", modifier = Modifier.padding(start = 12.dp))
+                Text("Checking…", modifier = Modifier.padding(start = 12.dp))
             }
-            CheckState.Ok -> Text("Kết nối thành công.", color = MaterialTheme.colorScheme.primary)
+            CheckState.Ok -> Text("Connected successfully.", color = MaterialTheme.colorScheme.primary)
             is CheckState.Failed -> Text(c.message, color = MaterialTheme.colorScheme.error)
         }
     }
@@ -332,12 +332,12 @@ private fun StepEnterKey(vm: OnboardingViewModel) {
 private fun StepPickModels(vm: OnboardingViewModel) {
     val shown = remember(vm.models, vm.filter) { vm.models.filter { it.contains(vm.filter, ignoreCase = true) } }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Chọn mô hình", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
-        Text("Tick ít nhất một mô hình. Mô hình bạn tick đầu tiên sẽ là mô hình mặc định.", style = MaterialTheme.typography.bodyMedium)
+        Text("Choose a model", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
+        Text("Tick at least one model. The first model you tick becomes the default.", style = MaterialTheme.typography.bodyMedium)
         OutlinedTextField(
             value = vm.filter,
             onValueChange = { vm.filter = it },
-            label = { Text("Lọc") },
+            label = { Text("Filter") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -350,10 +350,10 @@ private fun StepPickModels(vm: OnboardingViewModel) {
             }
         }
         if (vm.picked.isNotEmpty()) {
-            Text("Mô hình mặc định: ${vm.picked.first()}", style = MaterialTheme.typography.labelLarge)
+            Text("Default model: ${vm.picked.first()}", style = MaterialTheme.typography.labelLarge)
         }
         Text(
-            "Bạn có thể thêm mô hình khác sau trong Cài đặt → Nhà cung cấp AI.",
+            "You can add more models later in Settings → AI providers.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

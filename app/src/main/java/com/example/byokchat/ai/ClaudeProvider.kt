@@ -114,7 +114,7 @@ class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
                 Role.TOOL -> add("user", buildJsonObject {
                     put("type", "tool_result")
                     put("tool_use_id", m.toolCallId ?: "")
-                    put("content", m.text.ifEmpty { "(không có kết quả)" })
+                    put("content", m.text.ifEmpty { "(no result)" })
                     if (m.isError) put("is_error", true)
                 })
             }

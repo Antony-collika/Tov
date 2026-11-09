@@ -44,16 +44,16 @@ fun ProvidersScreen(onBack: () -> Unit, onAdd: (ProviderType) -> Unit, onEdit: (
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Nhà cung cấp AI") },
+                title = { Text("AI providers") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
                     Box {
                         IconButton(onClick = { addMenu = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "Thêm nhà cung cấp")
+                            Icon(Icons.Default.Add, contentDescription = "Add provider")
                         }
                         DropdownMenu(expanded = addMenu, onDismissRequest = { addMenu = false }) {
                             ProviderType.entries.forEach { t ->
@@ -67,19 +67,19 @@ fun ProvidersScreen(onBack: () -> Unit, onAdd: (ProviderType) -> Unit, onEdit: (
     ) { padding ->
         if (providers.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
-                Text("Bấm dấu + ở góc trên để thêm nhà cung cấp AI.", modifier = Modifier.padding(32.dp))
+                Text("Tap + in the top corner to add an AI provider.", modifier = Modifier.padding(32.dp))
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
                 items(providers, key = { it.id }) { p: ProviderConfig ->
                     ListItem(
                         modifier = Modifier.fillMaxWidth().clickable { onEdit(p.id) },
-                        headlineContent = { Text(p.name + if (p.id == activeId) "  (mặc định)" else "") },
+                        headlineContent = { Text(p.name + if (p.id == activeId) "  (default)" else "") },
                         supportingContent = {
                             Text(
                                 p.type.label + " · " +
-                                    (p.defaultModel.ifBlank { "chưa chọn mô hình" }) +
-                                    if (p.apiKey.isBlank() && p.type != ProviderType.CUSTOM) " · thiếu API key" else ""
+                                    (p.defaultModel.ifBlank { "no model selected" }) +
+                                    if (p.apiKey.isBlank() && p.type != ProviderType.CUSTOM) " · missing API key" else ""
                             )
                         },
                     )

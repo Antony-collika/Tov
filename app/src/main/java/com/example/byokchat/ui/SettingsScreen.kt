@@ -10,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -20,7 +19,9 @@ import com.example.byokchat.container
 import com.example.byokchat.data.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
+/** Settings, split into four clearly titled groups: AI, Tools, Data & workspace, Appearance. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -43,110 +44,129 @@ fun SettingsScreen(
     var showKey by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
     val pickFolder = rememberFolderPicker()
+    // Reading the folder name touches the document provider, so it is done off the main thread.
+    val workspacePath by produceState<String?>(null, workspaceUri, accessible) {
+        value = withContext(Dispatchers.IO) { container.fs.displayPath() }
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Cài đặt") },
+                title = { Text("Settings") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại") }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
             )
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
+            // ---------- AI ----------
             SectionTitle("AI")
             ListItem(
                 modifier = Modifier.clickable(onClick = onProviders),
-                headlineContent = { Text("Nhà cung cấp AI") },
-                supportingContent = { Text(if (providers.isEmpty()) "Chưa có nhà cung cấp nào" else providers.joinToString(", ") { it.name }) },
+                headlineContent = { Text("AI providers") },
+                supportingContent = { Text(if (providers.isEmpty()) "No providers yet" else providers.joinToString(", ") { it.name }) },
             )
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 OutlinedTextField(
                     value = prompt,
                     onValueChange = { prompt = it; settings.setDefaultSystemPrompt(it) },
-                    label = { Text("Prompt hệ thống mặc định") },
-                    supportingText = { Text("Áp dụng cho các cuộc trò chuyện mới. Từng cuộc vẫn sửa riêng được.") },
+                    label = { Text("Default system prompt") },
+                    supportingText = { Text("Used for new conversations. Each conversation can still change its own.") },
                     minLines = 3,
                     maxLines = 8,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
 
+            // ---------- Tools ----------
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Công cụ cho AI")
+            SectionTitle("Tools")
             ListItem(
                 modifier = Modifier.clickable(onClick = onTools),
-                headlineContent = { Text("Quản lý công cụ") },
-                supportingContent = { Text("Bật/tắt, mức kiểm soát, đổi tên và mô tả từng công cụ") },
+                headlineContent = { Text("Manage tools") },
+                supportingContent = { Text("Turn tools on or off, choose how much control you keep, rename them and edit their descriptions") },
             )
-            ListItem(
-                modifier = Modifier.clickable(onClick = onNotes),
-                headlineContent = { Text("Ghi chú & việc cần làm") },
-                supportingContent = { Text("Xem những gì AI đã lưu giúp bạn") },
+            Text(
+                "Web search (for the web_search tool)",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
             )
-
-            SectionTitle("Thư mục làm việc (workspace)")
-            ListItem(
-                headlineContent = { Text(if (workspaceUri == null) "Chưa chọn thư mục" else container.fs.rootName() ?: "Đã chọn") },
-                supportingContent = {
-                    Text(
-                        when {
-                            workspaceUri == null -> "Các công cụ tệp sẽ bị chặn cho đến khi bạn chọn một thư mục."
-                            accessible -> "Đang hoạt động. AI chỉ thấy và sửa được bên trong thư mục này."
-                            else -> "Mất quyền truy cập hoặc thư mục không còn tồn tại. Hãy chọn lại."
-                        }
+            val engines = listOf("BRAVE" to "Brave Search", "TAVILY" to "Tavily")
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                engines.forEachIndexed { index, (id, label) ->
+                    SegmentedButton(
+                        selected = searchProvider == id,
+                        onClick = { settings.setSearchProvider(id) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = engines.size),
+                        label = { Text(label) },
                     )
-                },
-            )
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = pickFolder) { Text(if (workspaceUri == null) "Chọn thư mục" else "Đổi thư mục") }
-                if (workspaceUri != null) {
-                    OutlinedButton(onClick = {
-                        scope.launch(Dispatchers.IO) {
-                            val msg = container.fs.selfTest()
-                            launch(Dispatchers.Main) { Toast.makeText(context, msg, Toast.LENGTH_LONG).show() }
-                        }
-                    }) { Text("Kiểm tra") }
-                    TextButton(onClick = { confirmClear = true }) { Text("Bỏ chọn") }
-                }
-            }
-
-            SectionTitle("Tìm kiếm web (cho công cụ web_search)")
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                listOf("BRAVE" to "Brave Search", "TAVILY" to "Tavily").forEach { (id, label) ->
-                    Row(
-                        Modifier.clickable { settings.setSearchProvider(id) },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = searchProvider == id, onClick = null)
-                        Text(label, modifier = Modifier.padding(start = 8.dp))
-                    }
                 }
             }
             Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                 OutlinedTextField(
                     value = searchKey,
                     onValueChange = { searchKey = it; settings.setSearchApiKey(it.trim()) },
-                    label = { Text("API key dịch vụ tìm kiếm của bạn") },
+                    label = { Text("Your search service API key") },
                     singleLine = true,
                     visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Ẩn" else "Hiện") } },
-                    supportingText = { Text("Để trống thì công cụ tìm kiếm web không được gửi cho AI. Key được mã hóa trên máy.") },
+                    trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
+                    supportingText = { Text("If empty, the web search tool is not offered to the AI. The key is encrypted on this device.") },
                     keyboardOptions = KeyboardOptions.Default,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
 
+            // ---------- Data & workspace ----------
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Giao diện")
-            ThemeMode.entries.forEach { mode ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { settings.setThemeMode(mode) }.padding(horizontal = 16.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = theme == mode, onClick = null)
-                    Text(mode.label, modifier = Modifier.padding(start = 12.dp))
+            SectionTitle("Data & workspace")
+            ListItem(
+                headlineContent = { Text(if (workspaceUri == null) "No folder chosen" else workspacePath ?: "Folder selected") },
+                overlineContent = { Text("Workspace folder") },
+                supportingContent = {
+                    Text(
+                        when {
+                            workspaceUri == null -> "File tools are blocked until you choose a folder."
+                            accessible -> "Active. The AI can only see and change things inside this folder."
+                            else -> "Access was lost or the folder no longer exists. Please choose it again."
+                        }
+                    )
+                },
+            )
+            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = pickFolder) { Text(if (workspaceUri == null) "Choose folder" else "Change folder") }
+                if (workspaceUri != null) {
+                    TextButton(onClick = { confirmClear = true }) { Text("Remove") }
+                }
+            }
+            if (workspaceUri != null) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            val msg = container.fs.selfTest()
+                            launch(Dispatchers.Main) { Toast.makeText(context, msg, Toast.LENGTH_LONG).show() }
+                        }
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                ) { Text("Check read/write access") }
+            }
+            ListItem(
+                modifier = Modifier.clickable(onClick = onNotes),
+                headlineContent = { Text("Notes & to-dos") },
+                supportingContent = { Text("See what the AI has saved for you") },
+            )
+
+            // ---------- Appearance ----------
+            HorizontalDivider(Modifier.padding(vertical = 8.dp))
+            SectionTitle("Appearance")
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+                ThemeMode.entries.forEachIndexed { index, mode ->
+                    SegmentedButton(
+                        selected = theme == mode,
+                        onClick = { settings.setThemeMode(mode) },
+                        shape = SegmentedButtonDefaults.itemShape(index = index, count = ThemeMode.entries.size),
+                        label = { Text(mode.label) },
+                    )
                 }
             }
             Spacer(Modifier.height(24.dp))
@@ -155,9 +175,9 @@ fun SettingsScreen(
 
     if (confirmClear) {
         ConfirmDialog(
-            title = "Bỏ chọn thư mục làm việc?",
-            message = "App sẽ quên quyền truy cập thư mục này. File trong thư mục không bị ảnh hưởng.",
-            confirmLabel = "Bỏ chọn",
+            title = "Remove the workspace folder?",
+            message = "The app will forget its access to this folder. The files in the folder are not affected.",
+            confirmLabel = "Remove",
             onConfirm = { confirmClear = false; scope.launch(Dispatchers.IO) { container.fs.clear() } },
             onDismiss = { confirmClear = false },
         )

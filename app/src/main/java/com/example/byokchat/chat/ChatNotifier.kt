@@ -135,10 +135,10 @@ class ChatNotifier(private val context: Context) {
         fun createChannels(context: Context) {
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_ANSWERS, "Câu trả lời của AI", NotificationManager.IMPORTANCE_DEFAULT)
+                NotificationChannel(CHANNEL_ANSWERS, "AI answers", NotificationManager.IMPORTANCE_DEFAULT)
             )
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL_RUNNING, "Đang trả lời", NotificationManager.IMPORTANCE_LOW).apply {
+                NotificationChannel(CHANNEL_RUNNING, "Replying", NotificationManager.IMPORTANCE_LOW).apply {
                     setSound(null, null)
                 }
             )

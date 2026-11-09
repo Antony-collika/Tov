@@ -34,11 +34,12 @@ fun ChatHost(
     focusMessageId: String?,
     initialQuery: String?,
     branchFrom: String?,
+    openNonce: Int,
     onOpenChat: (id: String, branchFrom: String?) -> Unit,
+    onOpenSearchResult: (conversationId: String, messageId: String?, query: String?) -> Unit,
     onNewChat: () -> Unit,
     onBranchNoticeShown: () -> Unit,
     onSettings: () -> Unit,
-    onSearch: () -> Unit,
     onOnboarding: () -> Unit,
     onProvider: (String?) -> Unit,
 ) {
@@ -77,6 +78,7 @@ fun ChatHost(
         drawerContent = {
             ModalDrawerSheet {
                 ConversationDrawerContent(
+                    isOpen = drawerOpen,
                     currentId = conversationId,
                     onSelect = { id ->
                         closeDrawer()
@@ -91,14 +93,17 @@ fun ChatHost(
                         }
                     },
                     onDeleted = { id -> if (id == conversationId) onNewChat() },
+                    onOpenResult = { cid, mid, q ->
+                        closeDrawer()
+                        onOpenSearchResult(cid, mid, q)
+                    },
                     onSettings = { closeDrawer(); onSettings() },
-                    onSearch = { closeDrawer(); onSearch() },
                 )
             }
         },
     ) {
-        // key(): every conversation gets its own fresh screen state (search, editing, scroll position...)
-        key(conversationId) {
+        // key(): every conversation (and every "open from search") gets its own fresh screen state (search, editing, scroll position...)
+        key(conversationId, openNonce) {
             ChatScreen(
                 conversationId = conversationId,
                 focusMessageId = focusMessageId,

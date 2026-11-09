@@ -30,7 +30,7 @@ class GenerationService : Service() {
         )
         val notification = NotificationCompat.Builder(this, ChatNotifier.CHANNEL_RUNNING)
             .setSmallIcon(R.drawable.ic_stat_tov)
-            .setContentTitle("Tov đang trả lời…")
+            .setContentTitle("Tov is replying…")
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(open)

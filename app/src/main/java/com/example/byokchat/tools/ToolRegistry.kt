@@ -56,18 +56,18 @@ class ToolRegistry(
     /** Trả về thông báo lỗi nếu tên không hợp lệ, null nếu ổn. */
     fun validateName(t: Tool, name: String): String? {
         val n = name.trim()
-        if (n.isEmpty()) return "Tên không được để trống."
+        if (n.isEmpty()) return "The name must not be empty."
         if (!NAME_RX.matches(n)) {
-            return "Tên chỉ gồm chữ cái không dấu, số, dấu gạch dưới (_) hoặc gạch ngang (-); phải bắt đầu bằng chữ cái hoặc _; tối đa 64 ký tự (đây là yêu cầu của các nhà cung cấp AI)."
+            return "The name may only contain unaccented letters, digits, underscores (_) or hyphens (-); it must start with a letter or _; at most 64 characters (an AI provider requirement)."
         }
         val clash = all.firstOrNull { it.uid != t.uid && effectiveName(it).equals(n, ignoreCase = true) }
-        if (clash != null) return "Tên này đang được công cụ \"${clash.uid}\" dùng. Hãy chọn tên khác."
+        if (clash != null) return "This name is already used by the tool \"${clash.uid}\". Choose a different name."
         return null
     }
 
     fun validateDescription(d: String): String? = when {
-        d.isBlank() -> "Mô tả không được để trống (model cần mô tả để biết khi nào dùng công cụ)."
-        d.length > 1500 -> "Mô tả quá dài (tối đa 1500 ký tự)."
+        d.isBlank() -> "The description must not be empty (the model needs it to know when to use the tool)."
+        d.length > 1500 -> "The description is too long (max 1500 characters)."
         else -> null
     }
 
@@ -97,13 +97,13 @@ class ToolRegistry(
 
     override suspend fun execute(call: AiToolCall, turnId: String): ToolOutcome {
         val tool = all.firstOrNull { effectiveName(it) == call.name && mode(it) != ToolMode.OFF && isAvailable(it) }
-            ?: return ToolOutcome("", "Không có công cụ tên '${call.name}' hoặc công cụ này đang tắt.", true)
+            ?: return ToolOutcome("", "There is no tool named '${call.name}', or it is turned off.", true)
         val displayName = effectiveName(tool)
         val args: JsonObject = try {
             if (call.argsJson.isBlank()) JsonObject(emptyMap()) else Json.parseToJsonElement(call.argsJson) as? JsonObject
-                ?: return ToolOutcome(tool.uid, "Tham số phải là một đối tượng JSON.", true)
+                ?: return ToolOutcome(tool.uid, "The arguments must be a JSON object.", true)
         } catch (e: Exception) {
-            return ToolOutcome(tool.uid, "Tham số không phải JSON hợp lệ: ${e.message?.lineSequence()?.firstOrNull()}", true)
+            return ToolOutcome(tool.uid, "The arguments are not valid JSON: ${e.message?.lineSequence()?.firstOrNull()}", true)
         }
 
         if (mode(tool) == ToolMode.ASK) {
@@ -112,10 +112,10 @@ class ToolRegistry(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                "(Không tạo được bản xem trước: ${e.message})\n" + args.toString().take(500)
+                "(Could not build a preview: ${e.message})\n" + args.toString().take(500)
             }
             val allowed = confirmations.ask(ConfirmRequest(displayName, tool.uid, tool.risk, detail, turnId))
-            if (!allowed) return ToolOutcome(tool.uid, "Người dùng đã từ chối thao tác này. Đừng thử lại trừ khi họ yêu cầu.", true)
+            if (!allowed) return ToolOutcome(tool.uid, "The user denied this action. Do not try again unless they ask you to.", true)
         }
 
         return try {
@@ -123,9 +123,9 @@ class ToolRegistry(
         } catch (e: CancellationException) {
             throw e
         } catch (e: ToolException) {
-            ToolOutcome(tool.uid, e.message ?: "Lỗi không rõ.", true)
+            ToolOutcome(tool.uid, e.message ?: "Unknown error.", true)
         } catch (e: Exception) {
-            ToolOutcome(tool.uid, "Lỗi khi chạy công cụ: ${e.message ?: e.javaClass.simpleName}", true)
+            ToolOutcome(tool.uid, "Error while running the tool: ${e.message ?: e.javaClass.simpleName}", true)
         }
     }
 

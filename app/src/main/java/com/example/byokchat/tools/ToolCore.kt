@@ -8,11 +8,11 @@ import kotlinx.serialization.json.*
 enum class Risk { READ, WRITE, DELETE }
 
 enum class ToolMode(val label: String) {
-    AUTO("Tự động"), ASK("Hỏi trước"), OFF("Tắt")
+    AUTO("Auto"), ASK("Ask first"), OFF("Off")
 }
 
 enum class ToolGroup(val label: String) {
-    FILES("Tệp và thư mục"), TEXT("Tệp văn bản"), DAILY("Công việc hằng ngày")
+    FILES("Files & folders"), TEXT("Text files"), DAILY("Daily tools")
 }
 
 class ToolException(message: String) : Exception(message)
@@ -43,13 +43,13 @@ class Tool(
     suspend fun preview(env: ToolEnv, args: JsonObject): String =
         previewFn?.invoke(env, args) ?: args.entries.joinToString("\n") { (k, v) ->
             "$k: " + ((v as? JsonPrimitive)?.contentOrNull ?: v.toString()).take(300)
-        }.ifBlank { "(không có tham số)" }
+        }.ifBlank { "(no parameters)" }
 }
 
 // ---------- Hỗ trợ đọc tham số ----------
 
 fun JsonObject.str(k: String): String? = (this[k] as? JsonPrimitive)?.contentOrNull
-fun JsonObject.reqStr(k: String): String = str(k) ?: throw ToolException("Thiếu tham số '$k'.")
+fun JsonObject.reqStr(k: String): String = str(k) ?: throw ToolException("Missing parameter '$k'.")
 fun JsonObject.int(k: String): Int? = (this[k] as? JsonPrimitive)?.let { it.intOrNull ?: it.doubleOrNull?.toInt() }
 fun JsonObject.bool(k: String): Boolean? = (this[k] as? JsonPrimitive)?.booleanOrNull
 fun JsonObject.strList(k: String): List<String>? =
@@ -108,6 +108,6 @@ class TextDoc(val lines: MutableList<String>, val eol: String, var trailing: Boo
 fun previewText(s: String, maxLines: Int = 12, maxChars: Int = 800): String {
     val lines = s.lines()
     var out = lines.take(maxLines).joinToString("\n")
-    if (lines.size > maxLines) out += "\n… (còn ${lines.size - maxLines} dòng)"
+    if (lines.size > maxLines) out += "\n… (${lines.size - maxLines} more lines)"
     return if (out.length > maxChars) out.take(maxChars) + "…" else out
 }

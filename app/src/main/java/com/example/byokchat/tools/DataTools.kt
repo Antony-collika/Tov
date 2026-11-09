@@ -58,7 +58,7 @@ private class CsvFile(val rows: MutableList<MutableList<String>>, val delim: Cha
     fun colIndex(col: String): Int {
         col.toIntOrNull()?.let { if (it in 1..header.size) return it - 1 }
         val i = header.indexOfFirst { it.equals(col.trim(), ignoreCase = true) }
-        if (i < 0) throw ToolException("Không có cột '$col'. Các cột hiện có: ${header.joinToString(", ")}")
+        if (i < 0) throw ToolException("No column '$col'. Available columns: ${header.joinToString(", ")}")
         return i
     }
 
@@ -69,7 +69,7 @@ private fun loadCsv(env: ToolEnv, path: String, delimArg: String?): CsvFile {
     val text = env.fs.readText(path)
     val delim = delimArg?.let { if (it == "\\t" || it.equals("tab", true)) '\t' else it.firstOrNull() } ?: Csv.detectDelimiter(text)
     val rows = Csv.parse(text, delim)
-    if (rows.isEmpty()) throw ToolException("File CSV '${env.fs.display(path)}' trống.")
+    if (rows.isEmpty()) throw ToolException("CSV file '${env.fs.display(path)}' is empty.")
     return CsvFile(rows, delim, if (text.contains("\r\n")) "\r\n" else "\n")
 }
 
@@ -102,9 +102,9 @@ private fun jsonGet(root: JsonElement, tokens: List<Any>): JsonElement {
     var cur = root
     for (t in tokens) {
         cur = when {
-            t is String && cur is JsonObject -> cur[t] ?: throw ToolException("Không có khóa '$t'.")
-            t is Int && cur is JsonArray -> cur.getOrNull(t) ?: throw ToolException("Chỉ số [$t] vượt quá độ dài mảng (${cur.size}).")
-            else -> throw ToolException("Không thể truy cập '$t' trong giá trị kiểu ${cur::class.simpleName}.")
+            t is String && cur is JsonObject -> cur[t] ?: throw ToolException("No key '$t'.")
+            t is Int && cur is JsonArray -> cur.getOrNull(t) ?: throw ToolException("Index [$t] is beyond the array length (${cur.size}).")
+            else -> throw ToolException("Cannot access '$t' in a value of type ${cur::class.simpleName}.")
         }
     }
     return cur
@@ -115,13 +115,13 @@ private fun jsonSet(cur: JsonElement?, tokens: List<Any>, idx: Int, value: JsonE
     val t = tokens[idx]
     return when (t) {
         is String -> {
-            val obj = (cur as? JsonObject) ?: if (cur == null || cur is JsonNull) JsonObject(emptyMap()) else throw ToolException("'${tokens.take(idx).joinToString(".")}' không phải object nên không thể đặt khóa '$t'.")
+            val obj = (cur as? JsonObject) ?: if (cur == null || cur is JsonNull) JsonObject(emptyMap()) else throw ToolException("'${tokens.take(idx).joinToString(".")}' is not an object, so key '$t' cannot be set.")
             JsonObject(obj + (t to jsonSet(obj[t], tokens, idx + 1, value)))
         }
         else -> {
             val i = t as Int
-            val arr = (cur as? JsonArray) ?: if (cur == null || cur is JsonNull) JsonArray(emptyList()) else throw ToolException("Giá trị tại vị trí này không phải mảng nên không thể dùng chỉ số [$i].")
-            if (i > arr.size) throw ToolException("Chỉ số [$i] vượt quá độ dài mảng (${arr.size}).")
+            val arr = (cur as? JsonArray) ?: if (cur == null || cur is JsonNull) JsonArray(emptyList()) else throw ToolException("The value at this position is not an array, so index [$i] cannot be used.")
+            if (i > arr.size) throw ToolException("Index [$i] is beyond the array length (${arr.size}).")
             val list = arr.toMutableList()
             if (i == list.size) list.add(jsonSet(null, tokens, idx + 1, value)) else list[i] = jsonSet(list[i], tokens, idx + 1, value)
             JsonArray(list)
@@ -133,35 +133,35 @@ private fun parseJson(text: String, label: String): JsonElement =
     try {
         Json.parseToJsonElement(text)
     } catch (e: Exception) {
-        throw ToolException("JSON không hợp lệ trong '$label': ${e.message?.lineSequence()?.firstOrNull()}")
+        throw ToolException("Invalid JSON in '$label': ${e.message?.lineSequence()?.firstOrNull()}")
     }
 
-private const val CSV_NOTE = "Dòng đầu tiên là tiêu đề cột. Cột có thể chỉ định bằng tên hoặc số thứ tự (từ 1). Số dòng dữ liệu tính từ 1 (không tính dòng tiêu đề)."
+private const val CSV_NOTE = "The first row is the column header. A column can be given by name or by position (1-based). Data row numbers start at 1 (the header row is not counted)."
 
 /** Nhóm 2 (phần dữ liệu): CSV, JSON, chuyển đổi định dạng. */
 object DataTools {
     fun build(): List<Tool> = listOf(
-        textTool("csv.read", Risk.READ, "csv_read", "Đọc file CSV dạng bảng. $CSV_NOTE",
+        textTool("csv.read", Risk.READ, "csv_read", "Read a CSV file as a table. $CSV_NOTE",
             schema {
-                str("path", "Đường dẫn file CSV.", required = true)
-                int("offset", "Bỏ qua bấy nhiêu dòng dữ liệu đầu (mặc định 0).")
-                int("limit", "Số dòng dữ liệu tối đa (mặc định 50).")
-                str("delimiter", "Ký tự phân cách (mặc định: tự nhận).")
+                str("path", "CSV file path.", required = true)
+                int("offset", "Skip this many data rows from the start (default 0).")
+                int("limit", "Maximum number of data rows (default 50).")
+                str("delimiter", "Delimiter character (default: auto-detect).")
             }) { env, a ->
             val f = loadCsv(env, a.reqStr("path"), a.str("delimiter"))
             val off = (a.int("offset") ?: 0).coerceAtLeast(0)
             val lim = (a.int("limit") ?: 50).coerceIn(1, 500)
             val slice = f.data.drop(off).take(lim).mapIndexed { i, r -> (off + i + 1) to r }
-            "CSV '${env.fs.display(a.reqStr("path"))}': ${f.header.size} cột, ${f.data.size} dòng dữ liệu; hiển thị ${slice.size} dòng từ dòng ${off + 1}\n" + table(f.header, slice)
+            "CSV '${env.fs.display(a.reqStr("path"))}': ${f.header.size} columns, ${f.data.size} data rows; showing ${slice.size} rows starting at row ${off + 1}\n" + table(f.header, slice)
         },
 
-        textTool("csv.filter", Risk.READ, "csv_filter", "Lọc các dòng CSV theo điều kiện trên một cột. $CSV_NOTE",
+        textTool("csv.filter", Risk.READ, "csv_filter", "Filter CSV rows by a condition on one column. $CSV_NOTE",
             schema {
-                str("path", "Đường dẫn file CSV.", required = true)
-                str("column", "Tên hoặc số thứ tự cột.", required = true)
-                str("op", "Phép so sánh.", required = true, enum = listOf("eq", "ne", "contains", "gt", "ge", "lt", "le", "starts_with", "ends_with", "empty", "not_empty"))
-                str("value", "Giá trị so sánh (không cần với empty/not_empty).")
-                int("limit", "Số dòng kết quả tối đa (mặc định 50).")
+                str("path", "CSV file path.", required = true)
+                str("column", "Column name or position.", required = true)
+                str("op", "Comparison operator.", required = true, enum = listOf("eq", "ne", "contains", "gt", "ge", "lt", "le", "starts_with", "ends_with", "empty", "not_empty"))
+                str("value", "Value to compare with (not needed for empty/not_empty).")
+                int("limit", "Maximum number of result rows (default 50).")
             }) { env, a ->
             val f = loadCsv(env, a.reqStr("path"), null)
             val ci = f.colIndex(a.reqStr("column"))
@@ -185,18 +185,18 @@ object DataTools {
                     "ge" -> (cmp() ?: 0) >= 0
                     "lt" -> (cmp() ?: 0) < 0
                     "le" -> (cmp() ?: 0) <= 0
-                    else -> throw ToolException("Phép so sánh '$op' không hợp lệ.")
+                    else -> throw ToolException("Invalid operator '$op'.")
                 }
             }
-            "Có ${matches.size} dòng khớp (hiển thị ${minOf(lim, matches.size)}):\n" + table(f.header, matches.take(lim))
+            "${matches.size} rows match (showing ${minOf(lim, matches.size)}):\n" + table(f.header, matches.take(lim))
         },
 
-        textTool("csv.sort", Risk.READ, "csv_sort", "Sắp xếp dòng CSV theo một cột và hiển thị kết quả (KHÔNG sửa file). Cột toàn số được sắp theo giá trị số. $CSV_NOTE",
+        textTool("csv.sort", Risk.READ, "csv_sort", "Sort CSV rows by one column and show the result (does NOT modify the file). Columns containing only numbers are sorted numerically. $CSV_NOTE",
             schema {
-                str("path", "Đường dẫn file CSV.", required = true)
-                str("column", "Tên hoặc số thứ tự cột.", required = true)
-                bool("descending", "Sắp giảm dần (mặc định false).")
-                int("limit", "Số dòng hiển thị (mặc định 50).")
+                str("path", "CSV file path.", required = true)
+                str("column", "Column name or position.", required = true)
+                bool("descending", "Sort descending (default false).")
+                int("limit", "Number of rows to show (default 50).")
             }) { env, a ->
             val f = loadCsv(env, a.reqStr("path"), null)
             val ci = f.colIndex(a.reqStr("column"))
@@ -206,105 +206,105 @@ object DataTools {
             else indexed.sortedBy { (_, r) -> r.getOrElse(ci) { "" }.lowercase() }
             if (a.bool("descending") == true) sorted = sorted.reversed()
             val lim = (a.int("limit") ?: 50).coerceIn(1, 500)
-            "Sắp xếp theo '${f.header[ci]}' (${if (numeric) "số" else "chữ"}, ${if (a.bool("descending") == true) "giảm" else "tăng"} dần), hiển thị ${minOf(lim, sorted.size)}/${sorted.size} dòng (cột # là số dòng gốc):\n" + table(f.header, sorted.take(lim))
+            "Sorted by '${f.header[ci]}' (${if (numeric) "numeric" else "text"}, ${if (a.bool("descending") == true) "descending" else "ascending"}), showing ${minOf(lim, sorted.size)}/${sorted.size} rows (column # is the original row number):\n" + table(f.header, sorted.take(lim))
         },
 
-        textTool("csv.stats", Risk.READ, "csv_stats", "Thống kê CSV: với cột số cho đếm/nhỏ nhất/lớn nhất/tổng/trung bình, với cột chữ cho số giá trị khác nhau và giá trị phổ biến. Bỏ trống 'column' để thống kê mọi cột. $CSV_NOTE",
+        textTool("csv.stats", Risk.READ, "csv_stats", "CSV statistics: for numeric columns gives count/min/max/sum/average, for text columns gives the number of distinct values and the most common ones. Leave 'column' empty to cover every column. $CSV_NOTE",
             schema {
-                str("path", "Đường dẫn file CSV.", required = true)
-                str("column", "Tên hoặc số thứ tự cột (bỏ trống = tất cả).")
+                str("path", "CSV file path.", required = true)
+                str("column", "Column name or position (empty = all columns).")
             }) { env, a ->
             val f = loadCsv(env, a.reqStr("path"), null)
             val cols = a.str("column")?.let { listOf(f.colIndex(it)) } ?: f.header.indices.toList()
-            val sb = StringBuilder("CSV '${env.fs.display(a.reqStr("path"))}': ${f.data.size} dòng, ${f.header.size} cột\n")
+            val sb = StringBuilder("CSV '${env.fs.display(a.reqStr("path"))}': ${f.data.size} rows, ${f.header.size} columns\n")
             for (ci in cols) {
                 val vals = f.data.map { it.getOrElse(ci) { "" } }
                 val nonEmpty = vals.filter { it.isNotBlank() }
                 val nums = nonEmpty.mapNotNull { it.replace(",", ".").toDoubleOrNull() }
-                sb.append("\n[${f.header[ci]}] có giá trị: ${nonEmpty.size}, trống: ${vals.size - nonEmpty.size}, khác nhau: ${nonEmpty.toSet().size}\n")
+                sb.append("\n[${f.header[ci]}] values: ${nonEmpty.size}, empty: ${vals.size - nonEmpty.size}, distinct: ${nonEmpty.toSet().size}\n")
                 if (nonEmpty.isNotEmpty() && nums.size == nonEmpty.size) {
-                    sb.append("  số: nhỏ nhất ${fmtNum(nums.min())}, lớn nhất ${fmtNum(nums.max())}, tổng ${fmtNum(nums.sum())}, trung bình ${fmtNum(nums.average())}\n")
+                    sb.append("  numeric: min ${fmtNum(nums.min())}, max ${fmtNum(nums.max())}, sum ${fmtNum(nums.sum())}, average ${fmtNum(nums.average())}\n")
                 } else if (nonEmpty.isNotEmpty()) {
                     val top = nonEmpty.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(5)
-                    sb.append("  phổ biến: " + top.joinToString("; ") { "${it.key} (${it.value})" } + "\n")
+                    sb.append("  most common: " + top.joinToString("; ") { "${it.key} (${it.value})" } + "\n")
                 }
             }
             sb.toString().trimEnd()
         },
 
-        textTool("csv.append_row", Risk.WRITE, "csv_add_row", "Thêm một dòng vào cuối file CSV. 'values' là các giá trị theo thứ tự cột. $CSV_NOTE",
+        textTool("csv.append_row", Risk.WRITE, "csv_add_row", "Append a row to the end of a CSV file. 'values' are the cell values in column order. $CSV_NOTE",
             schema {
-                str("path", "Đường dẫn file CSV.", required = true)
-                strArray("values", "Giá trị các ô theo thứ tự cột.", required = true)
+                str("path", "CSV file path.", required = true)
+                strArray("values", "Cell values in column order.", required = true)
             },
-            preview = { env, a -> "Thêm dòng vào '${env.fs.display(a.reqStr("path"))}':\n" + a.strList("values").orEmpty().joinToString(" | ") }) { env, a ->
+            preview = { env, a -> "Add row to '${env.fs.display(a.reqStr("path"))}':\n" + a.strList("values").orEmpty().joinToString(" | ") }) { env, a ->
             val f = loadCsv(env, a.reqStr("path"), null)
             val vals = a.strList("values").orEmpty().toMutableList()
-            if (vals.size > f.header.size) throw ToolException("Có ${vals.size} giá trị nhưng file chỉ có ${f.header.size} cột.")
+            if (vals.size > f.header.size) throw ToolException("${vals.size} values were given but the file has only ${f.header.size} columns.")
             while (vals.size < f.header.size) vals.add("")
             f.rows.add(vals)
             f.save(env, a.reqStr("path"))
-            "Đã thêm dòng dữ liệu số ${f.data.size} vào '${env.fs.display(a.reqStr("path"))}'."
+            "Added data row ${f.data.size} to '${env.fs.display(a.reqStr("path"))}'."
         },
 
-        textTool("csv.update_cell", Risk.WRITE, "csv_set_cell", "Sửa một ô trong file CSV. $CSV_NOTE",
+        textTool("csv.update_cell", Risk.WRITE, "csv_set_cell", "Edit one cell in a CSV file. $CSV_NOTE",
             schema {
-                str("path", "Đường dẫn file CSV.", required = true)
-                int("row", "Số dòng dữ liệu (từ 1, không tính tiêu đề).", required = true)
-                str("column", "Tên hoặc số thứ tự cột.", required = true)
-                str("value", "Giá trị mới.", required = true)
+                str("path", "CSV file path.", required = true)
+                int("row", "Data row number (1-based, header not counted).", required = true)
+                str("column", "Column name or position.", required = true)
+                str("value", "New value.", required = true)
             },
             preview = { env, a ->
                 val f = loadCsv(env, a.reqStr("path"), null)
                 val r = a.int("row") ?: 0
                 val ci = f.colIndex(a.reqStr("column"))
-                val old = f.data.getOrNull(r - 1)?.getOrElse(ci) { "" } ?: "(không có dòng này)"
-                "Sửa ô [dòng $r, cột ${f.header[ci]}] của '${env.fs.display(a.reqStr("path"))}':\n$old  →  ${a.str("value").orEmpty()}"
+                val old = f.data.getOrNull(r - 1)?.getOrElse(ci) { "" } ?: "(no such row)"
+                "Edit cell [row $r, column ${f.header[ci]}] of '${env.fs.display(a.reqStr("path"))}':\n$old  →  ${a.str("value").orEmpty()}"
             }) { env, a ->
             val f = loadCsv(env, a.reqStr("path"), null)
-            val r = a.int("row") ?: throw ToolException("Thiếu tham số 'row'.")
-            if (r < 1 || r > f.data.size) throw ToolException("Dòng $r không tồn tại (file có ${f.data.size} dòng dữ liệu).")
+            val r = a.int("row") ?: throw ToolException("Missing parameter 'row'.")
+            if (r < 1 || r > f.data.size) throw ToolException("Row $r does not exist (the file has ${f.data.size} data rows).")
             val ci = f.colIndex(a.reqStr("column"))
             val row = f.rows[r]
             while (row.size <= ci) row.add("")
             val old = row[ci]
             row[ci] = a.str("value").orEmpty()
             f.save(env, a.reqStr("path"))
-            "Đã sửa ô [dòng $r, cột ${f.header[ci]}]: '$old' → '${row[ci]}'."
+            "Edited cell [row $r, column ${f.header[ci]}]: '$old' → '${row[ci]}'."
         },
 
-        textTool("json.validate", Risk.READ, "json_validate", "Kiểm tra file có phải JSON hợp lệ không.",
-            schema { str("path", "Đường dẫn file JSON.", required = true) }) { env, a ->
+        textTool("json.validate", Risk.READ, "json_validate", "Check whether a file is valid JSON.",
+            schema { str("path", "JSON file path.", required = true) }) { env, a ->
             val el = parseJson(env.fs.readText(a.reqStr("path")), env.fs.display(a.reqStr("path")))
-            val kind = when (el) { is JsonObject -> "object (${el.size} khóa)"; is JsonArray -> "mảng (${el.size} phần tử)"; else -> "giá trị đơn" }
-            "JSON hợp lệ. Gốc là $kind."
+            val kind = when (el) { is JsonObject -> "object (${el.size} keys)"; is JsonArray -> "array (${el.size} elements)"; else -> "single value" }
+            "Valid JSON. The root is $kind."
         },
 
-        textTool("json.format", Risk.WRITE, "json_format", "Định dạng lại (làm đẹp, thụt lề 2 khoảng trắng) file JSON và ghi đè lên chính file đó.",
-            schema { str("path", "Đường dẫn file JSON.", required = true) },
-            preview = { env, a -> "Định dạng lại và ghi đè '${env.fs.display(a.reqStr("path"))}'" }) { env, a ->
+        textTool("json.format", Risk.WRITE, "json_format", "Reformat (pretty-print with 2-space indentation) a JSON file and overwrite it in place.",
+            schema { str("path", "JSON file path.", required = true) },
+            preview = { env, a -> "Reformat and overwrite '${env.fs.display(a.reqStr("path"))}'" }) { env, a ->
             val el = parseJson(env.fs.readText(a.reqStr("path")), env.fs.display(a.reqStr("path")))
             env.fs.writeText(a.reqStr("path"), jsonPretty.encodeToString(JsonElement.serializer(), el) + "\n")
-            "Đã định dạng lại '${env.fs.display(a.reqStr("path"))}'."
+            "Reformatted '${env.fs.display(a.reqStr("path"))}'."
         },
 
-        textTool("json.get", Risk.READ, "json_get", "Lấy một giá trị trong file JSON theo đường dẫn khóa, ví dụ 'users[0].name'. Bỏ trống để lấy toàn bộ.",
+        textTool("json.get", Risk.READ, "json_get", "Get a value from a JSON file by key path, e.g. 'users[0].name'. Leave empty to get the whole document.",
             schema {
-                str("path", "Đường dẫn file JSON.", required = true)
-                str("pointer", "Đường dẫn khóa, ví dụ 'a.b[2].c'.")
+                str("path", "JSON file path.", required = true)
+                str("pointer", "Key path, e.g. 'a.b[2].c'.")
             }) { env, a ->
             val root = parseJson(env.fs.readText(a.reqStr("path")), env.fs.display(a.reqStr("path")))
             val v = jsonGet(root, jsonTokens(a.str("pointer").orEmpty()))
             jsonPretty.encodeToString(JsonElement.serializer(), v)
         },
 
-        textTool("json.set", Risk.WRITE, "json_set", "Đặt/sửa một giá trị trong file JSON theo đường dẫn khóa (tự tạo khóa còn thiếu). 'value_json' là giá trị dạng JSON, ví dụ \"abc\" (có ngoặc kép), 42, true, {\"a\":1}. File được ghi lại với thụt lề 2 khoảng trắng.",
+        textTool("json.set", Risk.WRITE, "json_set", "Set/edit a value in a JSON file by key path (missing keys are created). 'value_json' is the value as JSON, e.g. \"abc\" (with quotes), 42, true, {\"a\":1}. The file is written back with 2-space indentation.",
             schema {
-                str("path", "Đường dẫn file JSON.", required = true)
-                str("pointer", "Đường dẫn khóa, ví dụ 'a.b[2].c'.", required = true)
-                str("value_json", "Giá trị mới dạng JSON.", required = true)
+                str("path", "JSON file path.", required = true)
+                str("pointer", "Key path, e.g. 'a.b[2].c'.", required = true)
+                str("value_json", "New value as JSON.", required = true)
             },
-            preview = { env, a -> "Sửa '${env.fs.display(a.reqStr("path"))}':\n${a.reqStr("pointer")} = ${a.reqStr("value_json").take(300)}" }) { env, a ->
+            preview = { env, a -> "Edit '${env.fs.display(a.reqStr("path"))}':\n${a.reqStr("pointer")} = ${a.reqStr("value_json").take(300)}" }) { env, a ->
             val path = a.reqStr("path")
             val root = parseJson(env.fs.readText(path), env.fs.display(path))
             val raw = a.reqStr("value_json")
@@ -312,31 +312,31 @@ object DataTools {
             val tokens = jsonTokens(a.reqStr("pointer"))
             val updated = jsonSet(root, tokens, 0, value)
             env.fs.writeText(path, jsonPretty.encodeToString(JsonElement.serializer(), updated) + "\n")
-            "Đã đặt '${a.reqStr("pointer")}' trong '${env.fs.display(path)}'."
+            "Set '${a.reqStr("pointer")}' in '${env.fs.display(path)}'."
         },
 
-        textTool("convert.csv_to_json", Risk.WRITE, "csv_to_json", "Chuyển file CSV thành file JSON (mảng các object, khóa lấy từ dòng tiêu đề, mọi giá trị là chuỗi).",
+        textTool("convert.csv_to_json", Risk.WRITE, "csv_to_json", "Convert a CSV file into a JSON file (array of objects, keys taken from the header row, all values are strings).",
             schema {
-                str("path", "File CSV nguồn.", required = true)
-                str("output_path", "File JSON đầu ra (mặc định: cùng tên, đuôi .json).")
+                str("path", "Source CSV file.", required = true)
+                str("output_path", "Output JSON file (default: same name with a .json extension).")
             },
-            preview = { env, a -> "Chuyển '${env.fs.display(a.reqStr("path"))}' thành JSON → '${env.fs.display(a.str("output_path") ?: a.reqStr("path").substringBeforeLast('.') + ".json")}'" }) { env, a ->
+            preview = { env, a -> "Convert '${env.fs.display(a.reqStr("path"))}' to JSON → '${env.fs.display(a.str("output_path") ?: a.reqStr("path").substringBeforeLast('.') + ".json")}'" }) { env, a ->
             val f = loadCsv(env, a.reqStr("path"), null)
             val arr = JsonArray(f.data.map { r -> JsonObject(f.header.indices.associate { f.header[it] to JsonPrimitive(r.getOrElse(it) { "" }) }) })
             val out = a.str("output_path") ?: (a.reqStr("path").substringBeforeLast('.') + ".json")
             env.fs.writeText(out, jsonPretty.encodeToString(JsonElement.serializer(), arr) + "\n")
-            "Đã chuyển ${f.data.size} dòng sang '${env.fs.display(out)}'."
+            "Converted ${f.data.size} rows to '${env.fs.display(out)}'."
         },
 
-        textTool("convert.json_to_csv", Risk.WRITE, "json_to_csv", "Chuyển file JSON (mảng các object phẳng) thành file CSV.",
+        textTool("convert.json_to_csv", Risk.WRITE, "json_to_csv", "Convert a JSON file (array of flat objects) into a CSV file.",
             schema {
-                str("path", "File JSON nguồn.", required = true)
-                str("output_path", "File CSV đầu ra (mặc định: cùng tên, đuôi .csv).")
+                str("path", "Source JSON file.", required = true)
+                str("output_path", "Output CSV file (default: same name with a .csv extension).")
             },
-            preview = { env, a -> "Chuyển '${env.fs.display(a.reqStr("path"))}' thành CSV → '${env.fs.display(a.str("output_path") ?: a.reqStr("path").substringBeforeLast('.') + ".csv")}'" }) { env, a ->
+            preview = { env, a -> "Convert '${env.fs.display(a.reqStr("path"))}' to CSV → '${env.fs.display(a.str("output_path") ?: a.reqStr("path").substringBeforeLast('.') + ".csv")}'" }) { env, a ->
             val root = parseJson(env.fs.readText(a.reqStr("path")), env.fs.display(a.reqStr("path")))
-            val arr = root as? JsonArray ?: throw ToolException("Gốc JSON phải là một mảng các object.")
-            val objs = arr.map { it as? JsonObject ?: throw ToolException("Mỗi phần tử trong mảng phải là một object.") }
+            val arr = root as? JsonArray ?: throw ToolException("The JSON root must be an array of objects.")
+            val objs = arr.map { it as? JsonObject ?: throw ToolException("Every element of the array must be an object.") }
             val keys = LinkedHashSet<String>().apply { objs.forEach { addAll(it.keys) } }.toList()
             fun cell(e: JsonElement?): String = when (e) {
                 null, is JsonNull -> ""
@@ -347,15 +347,15 @@ object DataTools {
             objs.forEach { o -> rows.add(keys.map { cell(o[it]) }) }
             val out = a.str("output_path") ?: (a.reqStr("path").substringBeforeLast('.') + ".csv")
             env.fs.writeText(out, Csv.render(rows, ',', "\n"))
-            "Đã chuyển ${objs.size} object (${keys.size} cột) sang '${env.fs.display(out)}'."
+            "Converted ${objs.size} objects (${keys.size} columns) to '${env.fs.display(out)}'."
         },
 
-        textTool("convert.md_to_html", Risk.WRITE, "markdown_to_html", "Chuyển file Markdown thành trang HTML hoàn chỉnh (hỗ trợ bảng, gạch ngang chữ).",
+        textTool("convert.md_to_html", Risk.WRITE, "markdown_to_html", "Convert a Markdown file into a complete HTML page (supports tables and strikethrough).",
             schema {
-                str("path", "File Markdown nguồn.", required = true)
-                str("output_path", "File HTML đầu ra (mặc định: cùng tên, đuôi .html).")
+                str("path", "Source Markdown file.", required = true)
+                str("output_path", "Output HTML file (default: same name with a .html extension).")
             },
-            preview = { env, a -> "Chuyển '${env.fs.display(a.reqStr("path"))}' thành HTML → '${env.fs.display(a.str("output_path") ?: a.reqStr("path").substringBeforeLast('.') + ".html")}'" }) { env, a ->
+            preview = { env, a -> "Convert '${env.fs.display(a.reqStr("path"))}' to HTML → '${env.fs.display(a.str("output_path") ?: a.reqStr("path").substringBeforeLast('.') + ".html")}'" }) { env, a ->
             val md = env.fs.readText(a.reqStr("path"))
             val exts = listOf(TablesExtension.create(), StrikethroughExtension.create())
             val parser = Parser.builder().extensions(exts).build()
@@ -368,7 +368,7 @@ object DataTools {
                 body + "</body>\n</html>\n"
             val out = a.str("output_path") ?: (a.reqStr("path").substringBeforeLast('.') + ".html")
             env.fs.writeText(out, html)
-            "Đã tạo '${env.fs.display(out)}'."
+            "Created '${env.fs.display(out)}'."
         },
     )
 }

@@ -61,9 +61,9 @@ fun ModelPickerSheet(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).navigationBarsPadding(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text("Chưa có AI nào được kết nối", style = MaterialTheme.typography.titleMedium)
-                Text("Hãy kết nối một AI (Claude, OpenAI, Gemini...) để chọn mô hình.")
-                Button(onClick = onConnect) { Text("Kết nối AI") }
+                Text("No AI connected yet", style = MaterialTheme.typography.titleMedium)
+                Text("Connect an AI (Claude, OpenAI, Gemini...) to choose a model.")
+                Button(onClick = onConnect) { Text("Connect AI") }
             }
         } else {
             PickerBody(providers, providerId, model, onSelect, onTogglePin)
@@ -91,7 +91,7 @@ private fun PickerBody(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp).navigationBarsPadding(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text("Chọn mô hình", style = MaterialTheme.typography.titleMedium)
+        Text("Choose a model", style = MaterialTheme.typography.titleMedium)
         if (providers.size >= 2) {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 providers.forEach { p ->
@@ -102,24 +102,24 @@ private fun PickerBody(
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("Tìm mô hình") },
+            label = { Text("Search models") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
         LazyColumn(Modifier.heightIn(max = 420.dp)) {
             if (pinned.isNotEmpty()) {
-                item(key = "h-pin") { SectionLabel("Đã ghim") }
+                item(key = "h-pin") { SectionLabel("Pinned") }
                 items(pinned, key = { "pin:$it" }) { m ->
                     ModelRow(m, selected = cur.id == providerId && m == model, pinned = true,
                         onClick = { onSelect(cur.id, m) }, onTogglePin = { onTogglePin(cur.id, m) })
                 }
             }
-            item(key = "h-all") { SectionLabel("Tất cả") }
+            item(key = "h-all") { SectionLabel("All") }
             if (all.isEmpty()) {
                 item(key = "empty") {
                     Text(
-                        if (q.isEmpty()) "Nhà cung cấp này chưa có mô hình nào. Hãy nhập tên mô hình ở dòng bên dưới."
-                        else "Không có mô hình nào khớp.",
+                        if (q.isEmpty()) "This provider has no models yet. Enter a model name in the row below."
+                        else "No models match.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(vertical = 8.dp),
@@ -132,7 +132,7 @@ private fun PickerBody(
             }
             item(key = "manual") {
                 Text(
-                    "Nhập tên mô hình khác…",
+                    "Enter another model name…",
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.fillMaxWidth().clickable { manual = true }.padding(vertical = 14.dp, horizontal = 12.dp),
@@ -145,12 +145,12 @@ private fun PickerBody(
         var typed by remember { mutableStateOf(if (cur.id == providerId) model else "") }
         AlertDialog(
             onDismissRequest = { manual = false },
-            title = { Text("Nhập tên mô hình") },
+            title = { Text("Enter a model name") },
             text = {
                 OutlinedTextField(
                     value = typed,
                     onValueChange = { typed = it },
-                    label = { Text("Tên mô hình") },
+                    label = { Text("Model name") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -159,9 +159,9 @@ private fun PickerBody(
                 TextButton(
                     onClick = { manual = false; onSelect(cur.id, typed.trim()) },
                     enabled = typed.isNotBlank(),
-                ) { Text("Chọn") }
+                ) { Text("Select") }
             },
-            dismissButton = { TextButton(onClick = { manual = false }) { Text("Hủy") } },
+            dismissButton = { TextButton(onClick = { manual = false }) { Text("Cancel") } },
         )
     }
 }
@@ -195,7 +195,7 @@ private fun ModelRow(model: String, selected: Boolean, pinned: Boolean, onClick:
         IconButton(onClick = onTogglePin) {
             Icon(
                 if (pinned) Icons.Filled.Star else Icons.Filled.StarBorder,
-                contentDescription = if (pinned) "Bỏ ghim mô hình" else "Ghim mô hình",
+                contentDescription = if (pinned) "Unpin model" else "Pin model",
             )
         }
     }

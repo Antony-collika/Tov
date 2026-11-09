@@ -54,7 +54,7 @@ class GeminiProvider(private val cfg: ProviderConfig) : AiProvider {
             val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
             obj["error"]?.let { throw AiException(errorText(it)) }
             obj["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitive?.contentOrNull
-                ?.let { throw AiException("Yêu cầu bị chặn: $it") }
+                ?.let { throw AiException("Request blocked: $it") }
             val cand = obj["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@collect
             cand["content"]?.jsonObject?.get("parts")?.jsonArray?.forEach { p ->
                 val po = p.jsonObject
@@ -70,7 +70,7 @@ class GeminiProvider(private val cfg: ProviderConfig) : AiProvider {
                 }
             }
             val finish = cand["finishReason"]?.jsonPrimitive?.contentOrNull
-            if (finish != null && finish in blockedReasons) throw AiException("Phản hồi bị chặn bởi bộ lọc của Gemini ($finish).")
+            if (finish != null && finish in blockedReasons) throw AiException("The response was blocked by Gemini's safety filter ($finish).")
         }
         val valid = calls.filter { it.name.isNotEmpty() }
         if (valid.isNotEmpty()) emit(AiEvent.ToolCalls(valid))

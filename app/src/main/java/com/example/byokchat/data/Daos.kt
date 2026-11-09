@@ -47,12 +47,27 @@ interface ConversationDao {
     @Query("UPDATE conversations SET updatedAt = :time WHERE id = :id")
     suspend fun touch(id: String, time: Long)
 
+    @Query("UPDATE conversations SET pinned = :pinned WHERE id = :id")
+    suspend fun setPinned(id: String, pinned: Boolean)
+
     @Query("DELETE FROM conversations WHERE id = :id")
     suspend fun delete(id: String)
 }
 
+/** Start of the newest text message (user or AI) of a conversation, used as the preview line in the drawer. */
+data class LastMessageRow(val conversationId: String, val text: String)
+
 @Dao
 interface MessageDao {
+    /** One row per conversation: the newest user/AI message that has text (cut to 160 characters in SQL). */
+    @Query(
+        "SELECT m.conversationId AS conversationId, substr(m.text, 1, 160) AS text FROM messages m " +
+            "WHERE m.role IN ('user', 'assistant') AND m.text != '' AND m.seq = (" +
+            "SELECT MAX(m2.seq) FROM messages m2 WHERE m2.conversationId = m.conversationId " +
+            "AND m2.role IN ('user', 'assistant') AND m2.text != '')"
+    )
+    fun observeLastMessages(): Flow<List<LastMessageRow>>
+
     @Query("SELECT * FROM messages WHERE conversationId = :cid ORDER BY seq")
     fun observe(cid: String): Flow<List<MessageEntity>>
 
@@ -81,7 +96,7 @@ interface MessageDao {
     suspend fun deleteTurn(turnId: String)
 
     // Khi mở lại app: tin nhắn đang dở dang do app bị tắt được đánh dấu là bị gián đoạn.
-    @Query("UPDATE messages SET status = 'error', error = 'Bị gián đoạn (ứng dụng đã bị đóng khi AI đang trả lời).' WHERE status = 'streaming'")
+    @Query("UPDATE messages SET status = 'error', error = 'Interrupted (the app was closed while the AI was replying).' WHERE status = 'streaming'")
     suspend fun markInterrupted()
 }
 

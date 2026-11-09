@@ -10,7 +10,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-private const val PATH_NOTE = " Đường dẫn tương đối so với gốc workspace (ví dụ: 'bao-cao/thang-11.md')."
+private const val PATH_NOTE = " Path relative to the workspace root (e.g. 'reports/november.md')."
 
 fun fsTool(
     uid: String,
@@ -27,29 +27,29 @@ object FsTools {
     fun build(): List<Tool> = listOf(
         fsTool(
             "fs.list", Risk.READ, "list_dir",
-            "Liệt kê các tệp và thư mục con trong một thư mục của workspace. Để trống path để xem thư mục gốc.",
-            schema { str("path", "Đường dẫn thư mục (mặc định: gốc workspace).") },
+            "List the files and subfolders inside a workspace folder. Leave path empty to list the workspace root.",
+            schema { str("path", "Folder path (default: workspace root).") },
         ) { env, a ->
             val path = a.str("path").orEmpty()
             val items = env.fs.children(env.fs.requireDir(path))
-            if (items.isEmpty()) "Thư mục '${env.fs.display(path)}' trống."
+            if (items.isEmpty()) "Folder '${env.fs.display(path)}' is empty."
             else {
-                val sb = StringBuilder("Thư mục '${env.fs.display(path)}': ${items.size} mục\n")
+                val sb = StringBuilder("Folder '${env.fs.display(path)}': ${items.size} items\n")
                 items.take(500).forEach { d ->
                     if (d.isDirectory) sb.append("📁 ${d.name}/\n")
                     else sb.append("📄 ${d.name}  (${humanSize(d.length())}, ${fmtTime(d.lastModified())})\n")
                 }
-                if (items.size > 500) sb.append("… còn ${items.size - 500} mục nữa\n")
+                if (items.size > 500) sb.append("… ${items.size - 500} more items\n")
                 sb.toString().trimEnd()
             }
         },
 
         fsTool(
             "fs.tree", Risk.READ, "tree",
-            "Xem cây thư mục (các cấp con lồng nhau) của workspace.",
+            "Show the workspace folder tree (nested subfolders).",
             schema {
-                str("path", "Thư mục gốc của cây (mặc định: gốc workspace).")
-                int("max_depth", "Số cấp tối đa (mặc định 3).")
+                str("path", "Root folder of the tree (default: workspace root).")
+                int("max_depth", "Maximum depth (default 3).")
             },
         ) { env, a ->
             val path = a.str("path").orEmpty()
@@ -64,30 +64,30 @@ object FsTools {
                 if (count >= 800) truncated = true
                 count < 800
             }
-            if (truncated) sb.append("… đã dừng ở 800 mục, hãy thu hẹp path hoặc giảm max_depth.\n")
+            if (truncated) sb.append("… stopped at 800 entries; narrow the path or lower max_depth.\n")
             sb.toString().trimEnd()
         },
 
         fsTool(
             "fs.info", Risk.READ, "file_info",
-            "Xem thông tin một tệp hoặc thư mục: loại, kích thước, ngày sửa, số dòng (với file văn bản).",
-            schema { str("path", "Đường dẫn tệp hoặc thư mục.$PATH_NOTE", required = true) },
+            "Show information about a file or folder: type, size, modified date, line count (for text files).",
+            schema { str("path", "File or folder path.$PATH_NOTE", required = true) },
         ) { env, a ->
             val path = a.reqStr("path")
             val d = env.fs.require(path)
             val sb = StringBuilder()
-            sb.append("Đường dẫn: ${env.fs.display(path)}\n")
-            sb.append("Loại: ${if (d.isDirectory) "thư mục" else "tệp"}\n")
-            sb.append("Sửa lần cuối: ${fmtTime(d.lastModified())}\n")
+            sb.append("Path: ${env.fs.display(path)}\n")
+            sb.append("Type: ${if (d.isDirectory) "folder" else "file"}\n")
+            sb.append("Last modified: ${fmtTime(d.lastModified())}\n")
             if (d.isDirectory) {
                 val kids = env.fs.children(d)
-                sb.append("Chứa: ${kids.count { it.isDirectory }} thư mục, ${kids.count { !it.isDirectory }} tệp")
+                sb.append("Contains: ${kids.count { it.isDirectory }} folders, ${kids.count { !it.isDirectory }} files")
             } else {
-                sb.append("Kích thước: ${humanSize(d.length())} (${d.length()} byte)\n")
-                sb.append("Kiểu: ${d.type ?: "không rõ"}")
+                sb.append("Size: ${humanSize(d.length())} (${d.length()} bytes)\n")
+                sb.append("MIME type: ${d.type ?: "unknown"}")
                 if (env.fs.isTextFile(d)) {
                     val text = env.fs.readDocText(d, path)
-                    sb.append("\nSố dòng: ${TextDoc.parse(text).lines.size}")
+                    sb.append("\nLines: ${TextDoc.parse(text).lines.size}")
                 }
             }
             sb.toString()
@@ -95,96 +95,96 @@ object FsTools {
 
         fsTool(
             "fs.mkdir", Risk.WRITE, "make_dir",
-            "Tạo thư mục (tạo luôn các thư mục cha nếu chưa có).",
-            schema { str("path", "Đường dẫn thư mục cần tạo.$PATH_NOTE", required = true) },
-            preview = { env, a -> "Tạo thư mục: ${env.fs.display(a.reqStr("path"))}" },
+            "Create a folder (parent folders are created too if missing).",
+            schema { str("path", "Path of the folder to create.$PATH_NOTE", required = true) },
+            preview = { env, a -> "Create folder: ${env.fs.display(a.reqStr("path"))}" },
         ) { env, a ->
             val path = a.reqStr("path")
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Thiếu tên thư mục.")
+            if (env.fs.segments(path).isEmpty()) throw ToolException("Missing folder name.")
             env.fs.ensureDir(env.fs.segments(path))
-            "Đã tạo thư mục '${env.fs.display(path)}'."
+            "Created folder '${env.fs.display(path)}'."
         },
 
         fsTool(
             "fs.copy", Risk.WRITE, "copy",
-            "Sao chép tệp hoặc cả thư mục. Nếu dest là thư mục có sẵn thì bản sao được đặt bên trong nó; nếu không, dest là đường dẫn mới. Không ghi đè.",
+            "Copy a file or a whole folder. If dest is an existing folder the copy is placed inside it; otherwise dest is the new path. Never overwrites.",
             schema {
-                str("source", "Đường dẫn nguồn.", required = true)
-                str("dest", "Đường dẫn đích.", required = true)
+                str("source", "Source path.", required = true)
+                str("dest", "Destination path.", required = true)
             },
-            preview = { env, a -> "Sao chép '${env.fs.display(a.reqStr("source"))}' → '${env.fs.display(a.reqStr("dest"))}'" },
+            preview = { env, a -> "Copy '${env.fs.display(a.reqStr("source"))}' → '${env.fs.display(a.reqStr("dest"))}'" },
         ) { env, a ->
             val src = env.fs.require(a.reqStr("source"))
             val (parent, name, finalSegs) = env.fs.resolveTarget(a.reqStr("source"), a.reqStr("dest"))
             env.fs.copyDoc(src, parent, name)
-            "Đã sao chép '${env.fs.display(a.reqStr("source"))}' → '${finalSegs.joinToString("/")}'."
+            "Copied '${env.fs.display(a.reqStr("source"))}' → '${finalSegs.joinToString("/")}'."
         },
 
         fsTool(
             "fs.move", Risk.WRITE, "move",
-            "Di chuyển tệp hoặc thư mục sang nơi khác (có thể kèm đổi tên). Nếu dest là thư mục có sẵn thì đặt bên trong nó. Không ghi đè.",
+            "Move a file or folder elsewhere (optionally renaming it). If dest is an existing folder the item is placed inside it. Never overwrites.",
             schema {
-                str("source", "Đường dẫn nguồn.", required = true)
-                str("dest", "Đường dẫn đích.", required = true)
+                str("source", "Source path.", required = true)
+                str("dest", "Destination path.", required = true)
             },
-            preview = { env, a -> "Di chuyển '${env.fs.display(a.reqStr("source"))}' → '${env.fs.display(a.reqStr("dest"))}'" },
+            preview = { env, a -> "Move '${env.fs.display(a.reqStr("source"))}' → '${env.fs.display(a.reqStr("dest"))}'" },
         ) { env, a ->
             val src = env.fs.require(a.reqStr("source"))
             val (parent, name, finalSegs) = env.fs.resolveTarget(a.reqStr("source"), a.reqStr("dest"))
             env.fs.copyDoc(src, parent, name)
-            if (!src.delete()) throw ToolException("Đã sao chép nhưng không xóa được bản gốc '${env.fs.display(a.reqStr("source"))}'. Bản sao nằm ở '${finalSegs.joinToString("/")}'.")
-            "Đã di chuyển '${env.fs.display(a.reqStr("source"))}' → '${finalSegs.joinToString("/")}'."
+            if (!src.delete()) throw ToolException("Copied, but could not delete the original '${env.fs.display(a.reqStr("source"))}'. The copy is at '${finalSegs.joinToString("/")}'.")
+            "Moved '${env.fs.display(a.reqStr("source"))}' → '${finalSegs.joinToString("/")}'."
         },
 
         fsTool(
             "fs.rename", Risk.WRITE, "rename",
-            "Đổi tên tệp hoặc thư mục (giữ nguyên vị trí).",
+            "Rename a file or folder (it stays in the same place).",
             schema {
-                str("path", "Đường dẫn hiện tại.", required = true)
-                str("new_name", "Tên mới (chỉ tên, không có dấu '/').", required = true)
+                str("path", "Current path.", required = true)
+                str("new_name", "New name (name only, no '/').", required = true)
             },
-            preview = { env, a -> "Đổi tên '${env.fs.display(a.reqStr("path"))}' thành '${a.reqStr("new_name")}'" },
+            preview = { env, a -> "Rename '${env.fs.display(a.reqStr("path"))}' to '${a.reqStr("new_name")}'" },
         ) { env, a ->
             val path = a.reqStr("path")
             val newName = a.reqStr("new_name").trim()
             if (newName.isEmpty() || newName.contains('/') || newName.contains('\\') || newName == "." || newName == "..") {
-                throw ToolException("Tên mới không hợp lệ.")
+                throw ToolException("Invalid new name.")
             }
             val doc = env.fs.require(path)
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Không thể đổi tên thư mục gốc.")
+            if (env.fs.segments(path).isEmpty()) throw ToolException("Cannot rename the root folder.")
             val parentPath = env.fs.segments(path).dropLast(1).joinToString("/")
             if (env.fs.find(if (parentPath.isEmpty()) newName else "$parentPath/$newName") != null) {
-                throw ToolException("Đã có mục tên '$newName' trong thư mục này.")
+                throw ToolException("An item named '$newName' already exists in this folder.")
             }
-            if (!doc.renameTo(newName)) throw ToolException("Không đổi tên được.")
-            "Đã đổi tên '${env.fs.display(path)}' thành '$newName'."
+            if (!doc.renameTo(newName)) throw ToolException("Could not rename.")
+            "Renamed '${env.fs.display(path)}' to '$newName'."
         },
 
         fsTool(
             "fs.delete", Risk.DELETE, "delete",
-            "Xóa tệp hoặc thư mục (xóa luôn mọi thứ bên trong). Người dùng luôn phải xác nhận. Không thể hoàn tác.",
-            schema { str("path", "Đường dẫn cần xóa.", required = true) },
+            "Delete a file or folder (including everything inside it). The user must always confirm. Cannot be undone.",
+            schema { str("path", "Path to delete.", required = true) },
             preview = { env, a ->
                 val path = a.reqStr("path")
                 val d = env.fs.require(path)
-                if (d.isDirectory) "XÓA thư mục '${env.fs.display(path)}' cùng ${env.fs.countItems(d)} mục bên trong."
-                else "XÓA tệp '${env.fs.display(path)}' (${humanSize(d.length())})."
+                if (d.isDirectory) "DELETE folder '${env.fs.display(path)}' and the ${env.fs.countItems(d)} items inside it."
+                else "DELETE file '${env.fs.display(path)}' (${humanSize(d.length())})."
             },
         ) { env, a ->
             val path = a.reqStr("path")
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Không thể xóa thư mục gốc của workspace.")
+            if (env.fs.segments(path).isEmpty()) throw ToolException("Cannot delete the workspace root folder.")
             val d = env.fs.require(path)
-            if (!d.delete()) throw ToolException("Không xóa được '${env.fs.display(path)}'.")
-            "Đã xóa '${env.fs.display(path)}'."
+            if (!d.delete()) throw ToolException("Could not delete '${env.fs.display(path)}'.")
+            "Deleted '${env.fs.display(path)}'."
         },
 
         fsTool(
             "fs.find", Risk.READ, "find_files",
-            "Tìm tệp/thư mục theo tên trong workspace. pattern có thể là một phần tên (không phân biệt hoa thường, bỏ dấu) hoặc mẫu có * và ? (ví dụ '*.csv').",
+            "Find files/folders by name in the workspace. pattern can be part of a name (case- and accent-insensitive) or a glob using * and ? (e.g. '*.csv').",
             schema {
-                str("pattern", "Phần tên hoặc mẫu cần tìm.", required = true)
-                str("path", "Thư mục bắt đầu tìm (mặc định: gốc workspace).")
-                int("max_results", "Số kết quả tối đa (mặc định 100).")
+                str("pattern", "Name fragment or pattern to look for.", required = true)
+                str("path", "Folder to start searching from (default: workspace root).")
+                int("max_results", "Maximum number of results (default 100).")
             },
         ) { env, a ->
             val pattern = a.reqStr("pattern")
@@ -204,20 +204,20 @@ object FsTools {
                 if (hit) found.add(if (d.isDirectory) "📁 $p/" else "📄 $p")
                 found.size < max && visited < 20000
             }
-            if (found.isEmpty()) "Không tìm thấy mục nào khớp '$pattern'."
-            else "Tìm thấy ${found.size} mục:\n" + found.joinToString("\n")
+            if (found.isEmpty()) "No items match '$pattern'."
+            else "Found ${found.size} items:\n" + found.joinToString("\n")
         },
 
         fsTool(
             "fs.grep", Risk.READ, "search_in_files",
-            "Tìm nội dung trong nhiều tệp văn bản của workspace. Trả về 'đường-dẫn:số-dòng: nội dung dòng'.",
+            "Search inside the text files of the workspace. Returns 'path:line-number: line content'.",
             schema {
-                str("query", "Chuỗi (hoặc biểu thức chính quy nếu regex=true) cần tìm.", required = true)
-                str("path", "Thư mục bắt đầu tìm (mặc định: gốc workspace).")
-                str("file_pattern", "Chỉ tìm trong tệp có tên khớp mẫu, ví dụ '*.md'.")
-                bool("regex", "Coi query là biểu thức chính quy (mặc định false).")
-                bool("case_sensitive", "Phân biệt hoa thường (mặc định false).")
-                int("max_results", "Số dòng khớp tối đa (mặc định 100).")
+                str("query", "Text (or regular expression if regex=true) to look for.", required = true)
+                str("path", "Folder to start searching from (default: workspace root).")
+                str("file_pattern", "Only search files whose name matches this pattern, e.g. '*.md'.")
+                bool("regex", "Treat query as a regular expression (default false).")
+                bool("case_sensitive", "Case-sensitive (default false).")
+                int("max_results", "Maximum number of matching lines (default 100).")
             },
         ) { env, a ->
             val query = a.reqStr("query")
@@ -228,7 +228,7 @@ object FsTools {
                 try {
                     Regex(query, if (caseSensitive) emptySet() else setOf(RegexOption.IGNORE_CASE))
                 } catch (e: Exception) {
-                    throw ToolException("Biểu thức chính quy không hợp lệ: ${e.message}")
+                    throw ToolException("Invalid regular expression: ${e.message}")
                 }
             } else null
             val fileRx = a.str("file_pattern")?.takeIf { it.isNotBlank() }?.let { globToRegex(it) }
@@ -260,30 +260,30 @@ object FsTools {
                 }
                 hits < max && filesScanned < 3000
             }
-            if (hits == 0) "Không có dòng nào khớp (đã quét $filesScanned tệp văn bản)."
-            else "Tìm thấy $hits dòng khớp (đã quét $filesScanned tệp):\n" + out.toString().trimEnd()
+            if (hits == 0) "No matching lines (scanned $filesScanned text files)."
+            else "Found $hits matching lines (scanned $filesScanned files):\n" + out.toString().trimEnd()
         },
 
         fsTool(
             "fs.zip", Risk.WRITE, "zip",
-            "Nén tệp/thư mục thành một file .zip trong workspace.",
+            "Compress files/folders into a .zip file in the workspace.",
             schema {
-                strArray("sources", "Danh sách đường dẫn tệp/thư mục cần nén.", required = true)
-                str("dest", "Đường dẫn file zip đầu ra (ví dụ 'sao-luu.zip').", required = true)
+                strArray("sources", "List of file/folder paths to compress.", required = true)
+                str("dest", "Output zip file path (e.g. 'backup.zip').", required = true)
             },
             preview = { env, a ->
-                "Nén ${a.strList("sources").orEmpty().joinToString(", ") { env.fs.display(it) }}\nthành '${env.fs.display(a.reqStr("dest"))}'"
+                "Compress ${a.strList("sources").orEmpty().joinToString(", ") { env.fs.display(it) }}\ninto '${env.fs.display(a.reqStr("dest"))}'"
             },
         ) { env, a ->
             val sources = a.strList("sources").orEmpty()
-            if (sources.isEmpty()) throw ToolException("Chưa có nguồn nào để nén.")
+            if (sources.isEmpty()) throw ToolException("No sources to compress.")
             val dest = a.reqStr("dest")
-            if (!dest.lowercase().endsWith(".zip")) throw ToolException("Tên file đích phải kết thúc bằng .zip")
+            if (!dest.lowercase().endsWith(".zip")) throw ToolException("The destination file name must end with .zip")
             val docs = sources.map { env.fs.require(it) to env.fs.segments(it) }
-            if (docs.any { it.second.isEmpty() }) throw ToolException("Không thể nén cả thư mục gốc; hãy chọn từng mục.")
+            if (docs.any { it.second.isEmpty() }) throw ToolException("Cannot compress the whole root folder; pick individual items.")
             val segs = env.fs.segments(dest)
             val parent = env.fs.ensureDir(segs.dropLast(1))
-            if (parent.findFile(segs.last()) != null) throw ToolException("File '${env.fs.display(dest)}' đã tồn tại.")
+            if (parent.findFile(segs.last()) != null) throw ToolException("File '${env.fs.display(dest)}' already exists.")
             val out = env.fs.createFileNamed(parent, segs.last())
             var files = 0
             ZipOutputStream(env.fs.openOut(out).buffered()).use { zos ->
@@ -302,18 +302,18 @@ object FsTools {
                 }
                 docs.forEach { (d, s) -> add(d, s.last()) }
             }
-            "Đã nén $files tệp vào '${env.fs.display(dest)}' (${humanSize(out.length())})."
+            "Compressed $files files into '${env.fs.display(dest)}' (${humanSize(out.length())})."
         },
 
         fsTool(
             "fs.unzip", Risk.WRITE, "unzip",
-            "Giải nén file .zip vào một thư mục trong workspace (ghi đè tệp trùng tên).",
+            "Extract a .zip file into a workspace folder (overwrites files with the same name).",
             schema {
-                str("source", "Đường dẫn file zip.", required = true)
-                str("dest_dir", "Thư mục đích (mặc định: gốc workspace).")
+                str("source", "Zip file path.", required = true)
+                str("dest_dir", "Destination folder (default: workspace root).")
             },
             preview = { env, a ->
-                "Giải nén '${env.fs.display(a.reqStr("source"))}' vào '${env.fs.display(a.str("dest_dir").orEmpty())}' (tệp trùng tên sẽ bị ghi đè)"
+                "Extract '${env.fs.display(a.reqStr("source"))}' into '${env.fs.display(a.str("dest_dir").orEmpty())}' (files with the same name will be overwritten)"
             },
         ) { env, a ->
             val zip = env.fs.requireFile(a.reqStr("source"))
@@ -343,7 +343,7 @@ object FsTools {
                                 val n = zis.read(buf)
                                 if (n < 0) break
                                 total += n
-                                if (total > 500L * 1024 * 1024) throw ToolException("Dừng giải nén: dung lượng vượt quá 500 MB.")
+                                if (total > 500L * 1024 * 1024) throw ToolException("Extraction stopped: size exceeds 500 MB.")
                                 o.write(buf, 0, n)
                             }
                         }
@@ -351,8 +351,8 @@ object FsTools {
                     }
                 }
             }
-            "Đã giải nén $files tệp vào '${env.fs.display(a.str("dest_dir").orEmpty())}'." +
-                if (skipped > 0) " Bỏ qua $skipped mục có đường dẫn không an toàn." else ""
+            "Extracted $files files into '${env.fs.display(a.str("dest_dir").orEmpty())}'." +
+                if (skipped > 0) " Skipped $skipped items with unsafe paths." else ""
         },
     )
 }

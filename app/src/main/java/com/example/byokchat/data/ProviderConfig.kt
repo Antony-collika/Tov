@@ -7,7 +7,7 @@ enum class ProviderType(val label: String) {
     CLAUDE("Claude (Anthropic)"),
     OPENAI("OpenAI"),
     GEMINI("Gemini (Google)"),
-    CUSTOM("Tùy chỉnh (tương thích OpenAI)"),
+    CUSTOM("Custom (OpenAI-compatible)"),
 }
 
 @Serializable

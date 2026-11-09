@@ -55,7 +55,7 @@ fun ImageViewerDialog(paths: List<String>, startIndex: Int, onDismiss: () -> Uni
                 onClick = onDismiss,
                 modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
             ) {
-                Icon(Icons.Default.Close, contentDescription = "Đóng", tint = Color.White)
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
             }
         }
     }
@@ -99,7 +99,7 @@ private fun ZoomableImage(path: String, onZoomChange: (Boolean) -> Unit) {
     ) {
         AsyncImage(
             model = File(path),
-            contentDescription = "Ảnh",
+            contentDescription = "Image",
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize().graphicsLayer {
                 scaleX = scale

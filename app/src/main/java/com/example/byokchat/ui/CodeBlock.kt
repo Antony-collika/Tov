@@ -41,18 +41,18 @@ fun CodeBlock(language: String, code: String, modifier: Modifier = Modifier) {
         Column {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    language.ifEmpty { "Mã" },
+                    language.ifEmpty { "Code" },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
                 )
                 TextButton(onClick = {
                     clipboard.setText(AnnotatedString(code))
-                    Toast.makeText(context, "Đã sao chép", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
                 }) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Sao chép")
+                    Text("Copy")
                 }
             }
             Text(

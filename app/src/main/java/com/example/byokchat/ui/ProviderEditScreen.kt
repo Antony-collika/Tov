@@ -102,10 +102,10 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (existing == null) "Thêm nhà cung cấp" else "Sửa nhà cung cấp") },
+                title = { Text(if (existing == null) "Add provider" else "Edit provider") },
                 navigationIcon = {
                     IconButton(onClick = onDone) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -113,15 +113,15 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                         val cfg = buildConfig()
                         when {
                             type == ProviderType.CUSTOM && !cfg.baseUrl.startsWith("http") ->
-                                toast("Loại Tùy chỉnh cần địa chỉ máy chủ bắt đầu bằng http:// hoặc https://")
+                                toast("The Custom type needs a server address starting with http:// or https://")
                             type != ProviderType.CUSTOM && cfg.apiKey.isBlank() ->
-                                toast("Hãy nhập API key.")
+                                toast("Please enter an API key.")
                             else -> {
                                 settings.saveProvider(cfg, makeDefault)
                                 onDone()
                             }
                         }
-                    }) { Text("Lưu") }
+                    }) { Text("Save") }
                 },
             )
         },
@@ -131,27 +131,27 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(type.label, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 8.dp))
-            OutlinedTextField(name, { name = it }, label = { Text("Tên hiển thị") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(name, { name = it }, label = { Text("Display name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(
                 value = apiKey,
                 onValueChange = { apiKey = it },
-                label = { Text(if (type == ProviderType.CUSTOM) "API key (để trống nếu máy chủ không cần)" else "API key") },
+                label = { Text(if (type == ProviderType.CUSTOM) "API key (leave empty if the server does not need one)" else "API key") },
                 singleLine = true,
                 visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Ẩn" else "Hiện") } },
-                supportingText = { Text("Được mã hóa và chỉ lưu trên máy này.") },
+                trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
+                supportingText = { Text("Encrypted and stored only on this device.") },
                 modifier = Modifier.fillMaxWidth(),
             )
             OutlinedTextField(
                 value = baseUrl,
                 onValueChange = { baseUrl = it },
-                label = { Text(if (type == ProviderType.CUSTOM) "Địa chỉ máy chủ (bắt buộc)" else "Địa chỉ máy chủ (không bắt buộc)") },
+                label = { Text(if (type == ProviderType.CUSTOM) "Server address (required)" else "Server address (optional)") },
                 placeholder = { Text(if (type == ProviderType.CUSTOM) "https://ten-may-chu/v1" else existing?.effectiveBaseUrl() ?: ProviderConfig("", type, "").effectiveBaseUrl()) },
                 singleLine = true,
                 supportingText = if (insecureHttp) {
                     {
                         Text(
-                            "Địa chỉ này dùng http (không mã hóa). API key sẽ bị gửi đi dạng thô, người khác trong cùng mạng có thể đọc được. Chỉ dùng khi đây là máy chủ trong mạng nhà bạn.",
+                            "This address uses http (not encrypted). The API key will be sent in plain text and others on the same network could read it. Only use this for a server on your own home network.",
                             color = MaterialTheme.colorScheme.error,
                         )
                     }
@@ -159,9 +159,9 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Text("Danh sách mô hình", style = MaterialTheme.typography.titleSmall)
+            Text("Models", style = MaterialTheme.typography.titleSmall)
             Text(
-                "Chọn một mô hình làm mặc định cho cuộc trò chuyện mới.",
+                "Choose one model as the default for new conversations.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -172,14 +172,14 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     IconButton(onClick = {
                         models.remove(m)
                         if (defaultModel == m) defaultModel = models.firstOrNull() ?: ""
-                    }) { Icon(Icons.Default.Close, contentDescription = "Xóa mô hình") }
+                    }) { Icon(Icons.Default.Close, contentDescription = "Remove model") }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = newModel,
                     onValueChange = { newModel = it },
-                    label = { Text("Thêm tên mô hình") },
+                    label = { Text("Add a model name") },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -192,14 +192,14 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                         }
                         newModel = ""
                     },
-                ) { Text("Thêm") }
+                ) { Text("Add") }
             }
             Button(
                 enabled = !fetching,
                 onClick = {
                     val cfg = buildConfig()
                     if (cfg.effectiveBaseUrl().isBlank()) {
-                        toast("Hãy nhập địa chỉ máy chủ trước.")
+                        toast("Enter the server address first.")
                         return@Button
                     }
                     scope.launch {
@@ -207,7 +207,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                         try {
                             fetched = ProviderFactory.create(cfg).listModels()
                         } catch (e: Exception) {
-                            toast("Không lấy được danh sách: ${e.message}")
+                            toast("Couldn't fetch the list: ${e.message}")
                         } finally {
                             fetching = false
                         }
@@ -215,13 +215,13 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 },
             ) {
                 if (fetching) CircularProgressIndicator(Modifier.padding(end = 8.dp).heightIn(max = 18.dp), strokeWidth = 2.dp)
-                Text("Lấy danh sách mô hình từ máy chủ")
+                Text("Fetch the model list from the server")
             }
 
             OutlinedTextField(
                 value = contextText,
                 onValueChange = { contextText = it.filter(Char::isDigit) },
-                label = { Text("Giới hạn ngữ cảnh (token) – để trống = tự đoán") },
+                label = { Text("Context limit (tokens) – leave empty to auto-detect") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
@@ -229,20 +229,20 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
             OutlinedTextField(
                 value = maxOutText,
                 onValueChange = { maxOutText = it.filter(Char::isDigit) },
-                label = { Text("Độ dài trả lời tối đa (token)") },
+                label = { Text("Maximum reply length (tokens)") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Dùng làm mặc định cho cuộc trò chuyện mới", modifier = Modifier.weight(1f))
+                Text("Use as the default for new conversations", modifier = Modifier.weight(1f))
                 Switch(checked = makeDefault, onCheckedChange = { makeDefault = it })
             }
             if (existing != null) {
                 OutlinedButton(
                     onClick = { confirmDelete = true },
                     modifier = Modifier.padding(bottom = 24.dp),
-                ) { Text("Xóa nhà cung cấp này", color = MaterialTheme.colorScheme.error) }
+                ) { Text("Delete this provider", color = MaterialTheme.colorScheme.error) }
             }
         }
     }
@@ -262,9 +262,9 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
 
     if (confirmDelete && existing != null) {
         ConfirmDialog(
-            title = "Xóa nhà cung cấp?",
-            message = "\"${existing.name}\" và API key đã lưu sẽ bị xóa khỏi máy. Các cuộc trò chuyện cũ vẫn được giữ.",
-            confirmLabel = "Xóa",
+            title = "Delete provider?",
+            message = "\"${existing.name}\" and its saved API key will be removed from this device. Existing conversations are kept.",
+            confirmLabel = "Delete",
             onConfirm = { settings.deleteProvider(existing.id); confirmDelete = false; onDone() },
             onDismiss = { confirmDelete = false },
         )

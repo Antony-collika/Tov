@@ -57,7 +57,7 @@ private class Calc(private val s: String) {
         return v
     }
 
-    private fun fail(): Nothing = throw ToolException("Biểu thức không hợp lệ gần vị trí ${i + 1}: '${s.drop(i).take(10)}'")
+    private fun fail(): Nothing = throw ToolException("Invalid expression near position ${i + 1}: '${s.drop(i).take(10)}'")
     private fun skip() { while (i < s.length && s[i].isWhitespace()) i++ }
     private fun peek(): Char { skip(); return if (i < s.length) s[i] else '\u0000' }
 
@@ -77,8 +77,8 @@ private class Calc(private val s: String) {
         while (true) {
             when (peek()) {
                 '*' -> { i++; v *= power() }
-                '/' -> { i++; val d = power(); if (d == 0.0) throw ToolException("Không thể chia cho 0."); v /= d }
-                '%' -> { i++; val d = power(); if (d == 0.0) throw ToolException("Không thể chia lấy dư cho 0."); v %= d }
+                '/' -> { i++; val d = power(); if (d == 0.0) throw ToolException("Cannot divide by zero."); v /= d }
+                '%' -> { i++; val d = power(); if (d == 0.0) throw ToolException("Cannot take a remainder by zero."); v %= d }
                 else -> return v
             }
         }
@@ -131,30 +131,30 @@ private class Calc(private val s: String) {
             return when (name) {
                 "pi" -> Math.PI
                 "e" -> Math.E
-                else -> throw ToolException("Không biết '$name'.")
+                else -> throw ToolException("Unknown name '$name'.")
             }
         }
         fail()
     }
 
     private fun call(name: String, a: List<Double>): Double {
-        fun one(): Double { if (a.size != 1) throw ToolException("Hàm $name cần đúng 1 tham số."); return a[0] }
+        fun one(): Double { if (a.size != 1) throw ToolException("Function $name takes exactly 1 argument."); return a[0] }
         return when (name) {
             "sqrt" -> Math.sqrt(one()); "abs" -> Math.abs(one())
             "sin" -> Math.sin(one()); "cos" -> Math.cos(one()); "tan" -> Math.tan(one())
             "asin" -> Math.asin(one()); "acos" -> Math.acos(one()); "atan" -> Math.atan(one())
             "ln" -> Math.log(one()); "log" -> Math.log10(one()); "exp" -> Math.exp(one())
             "floor" -> Math.floor(one()); "ceil" -> Math.ceil(one()); "round" -> Math.rint(one())
-            "pow" -> { if (a.size != 2) throw ToolException("pow cần 2 tham số."); Math.pow(a[0], a[1]) }
-            "min" -> a.minOrNull() ?: throw ToolException("min cần ít nhất 1 tham số.")
-            "max" -> a.maxOrNull() ?: throw ToolException("max cần ít nhất 1 tham số.")
-            else -> throw ToolException("Hàm '$name' không được hỗ trợ.")
+            "pow" -> { if (a.size != 2) throw ToolException("pow takes 2 arguments."); Math.pow(a[0], a[1]) }
+            "min" -> a.minOrNull() ?: throw ToolException("min needs at least 1 argument.")
+            "max" -> a.maxOrNull() ?: throw ToolException("max needs at least 1 argument.")
+            else -> throw ToolException("Function '$name' is not supported.")
         }
     }
 }
 
 private fun fmtResult(d: Double): String {
-    if (d.isNaN() || d.isInfinite()) throw ToolException("Kết quả không xác định (NaN hoặc vô cực).")
+    if (d.isNaN() || d.isInfinite()) throw ToolException("Undefined result (NaN or infinity).")
     if (d == Math.rint(d) && Math.abs(d) < 1e15) return d.toLong().toString()
     val bd = BigDecimal(d).round(MathContext(12)).stripTrailingZeros()
     return if (Math.abs(d) >= 1e15 || Math.abs(d) < 1e-6) bd.toString() else bd.toPlainString()
@@ -162,8 +162,8 @@ private fun fmtResult(d: Double): String {
 
 // ---------- Ngày giờ ----------
 private val weekdays = mapOf(
-    DayOfWeek.MONDAY to "Thứ Hai", DayOfWeek.TUESDAY to "Thứ Ba", DayOfWeek.WEDNESDAY to "Thứ Tư",
-    DayOfWeek.THURSDAY to "Thứ Năm", DayOfWeek.FRIDAY to "Thứ Sáu", DayOfWeek.SATURDAY to "Thứ Bảy", DayOfWeek.SUNDAY to "Chủ Nhật",
+    DayOfWeek.MONDAY to "Monday", DayOfWeek.TUESDAY to "Tuesday", DayOfWeek.WEDNESDAY to "Wednesday",
+    DayOfWeek.THURSDAY to "Thursday", DayOfWeek.FRIDAY to "Friday", DayOfWeek.SATURDAY to "Saturday", DayOfWeek.SUNDAY to "Sunday",
 )
 
 private fun parseDateTime(s: String, zone: ZoneId): ZonedDateTime {
@@ -178,7 +178,7 @@ private fun parseDateTime(s: String, zone: ZoneId): ZonedDateTime {
             return if (p.contains("HH")) LocalDateTime.parse(t, f).atZone(zone) else LocalDate.parse(t, f).atStartOfDay(zone)
         }
     }
-    throw ToolException("Không hiểu ngày giờ '$s'. Hãy dùng dạng 2026-11-06 hoặc 2026-11-06T14:30 hoặc 06/11/2026.")
+    throw ToolException("Cannot parse the date/time '$s'. Use a format like 2026-11-06, 2026-11-06T14:30 or 06/11/2026.")
 }
 
 // ---------- Web ----------
@@ -196,25 +196,25 @@ private fun noteId() = UUID.randomUUID().toString().take(8)
 object DailyTools {
     fun build(): List<Tool> = listOf(
         dailyTool("calc.eval", Risk.READ, "calculator",
-            "Tính một biểu thức toán học. Hỗ trợ + - * / % (chia dư) ^ (lũy thừa), ngoặc, hằng pi và e, hàm sqrt abs sin cos tan asin acos atan ln log exp floor ceil round pow min max (góc tính bằng radian). Hãy dùng công cụ này thay vì tự tính nhẩm.",
-            schema { str("expression", "Biểu thức, ví dụ: (12.5 + 3) * 4 / sqrt(16)", required = true) }) { _, a ->
+            "Evaluate a math expression. Supports + - * / % (remainder) ^ (power), parentheses, the constants pi and e, and the functions sqrt abs sin cos tan asin acos atan ln log exp floor ceil round pow min max (angles in radians). Use this tool instead of calculating in your head.",
+            schema { str("expression", "Expression, e.g. (12.5 + 3) * 4 / sqrt(16)", required = true) }) { _, a ->
             val expr = a.reqStr("expression").replace('×', '*').replace('÷', '/').replace("−", "-")
             "${a.reqStr("expression")} = ${fmtResult(Calc(expr).eval())}"
         },
 
         dailyTool("time.now", Risk.READ, "current_time",
-            "Lấy ngày giờ hiện tại của thiết bị (kèm thứ trong tuần và múi giờ).",
-            schema { str("timezone", "Múi giờ IANA, ví dụ 'Asia/Ho_Chi_Minh', 'America/New_York' (mặc định: múi giờ của máy).") }) { _, a ->
-            val zone = a.str("timezone")?.let { runCatching { ZoneId.of(it) }.getOrNull() ?: throw ToolException("Múi giờ '$it' không hợp lệ.") } ?: ZoneId.systemDefault()
+            "Get the device's current date and time (with weekday and time zone).",
+            schema { str("timezone", "IANA time zone, e.g. 'Asia/Ho_Chi_Minh', 'America/New_York' (default: the device's time zone).") }) { _, a ->
+            val zone = a.str("timezone")?.let { runCatching { ZoneId.of(it) }.getOrNull() ?: throw ToolException("Invalid time zone '$it'.") } ?: ZoneId.systemDefault()
             val now = ZonedDateTime.now(zone)
-            "${now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))} (${weekdays[now.dayOfWeek]}), múi giờ ${zone.id} (UTC${now.offset.id.replace("Z", "+00:00")})"
+            "${now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))} (${weekdays[now.dayOfWeek]}), time zone ${zone.id} (UTC${now.offset.id.replace("Z", "+00:00")})"
         },
 
         dailyTool("time.diff", Risk.READ, "date_difference",
-            "Tính khoảng cách giữa hai ngày/giờ: tổng số ngày, giờ, phút và dạng 'x năm y tháng z ngày'.",
+            "Compute the difference between two dates/times: total days, hours, minutes and a 'x years y months z days' form.",
             schema {
-                str("start", "Mốc đầu: 2026-11-06, 2026-11-06T14:30 hoặc 06/11/2026.", required = true)
-                str("end", "Mốc cuối (mặc định: hiện tại).")
+                str("start", "Start: 2026-11-06, 2026-11-06T14:30 or 06/11/2026.", required = true)
+                str("end", "End (default: now).")
             }) { _, a ->
             val zone = ZoneId.systemDefault()
             val s = parseDateTime(a.reqStr("start"), zone)
@@ -222,50 +222,50 @@ object DailyTools {
             val days = ChronoUnit.DAYS.between(s.toLocalDate(), e.toLocalDate())
             val dur = Duration.between(s, e)
             val p = if (s.toLocalDate() <= e.toLocalDate()) Period.between(s.toLocalDate(), e.toLocalDate()) else Period.between(e.toLocalDate(), s.toLocalDate())
-            "Từ ${s.toLocalDateTime()} đến ${e.toLocalDateTime()}:\n" +
-                "• Chênh lệch ${days} ngày theo lịch (${if (days < 0) "mốc cuối nằm TRƯỚC mốc đầu" else "mốc cuối sau mốc đầu"})\n" +
-                "• Tổng: ${dur.toHours()} giờ = ${dur.toMinutes()} phút\n" +
-                "• Dạng lịch: ${p.years} năm ${p.months} tháng ${p.days} ngày"
+            "From ${s.toLocalDateTime()} to ${e.toLocalDateTime()}:\n" +
+                "• Difference: ${days} calendar days (${if (days < 0) "the end is BEFORE the start" else "the end is after the start"})\n" +
+                "• Total: ${dur.toHours()} hours = ${dur.toMinutes()} minutes\n" +
+                "• Calendar form: ${p.years} years ${p.months} months ${p.days} days"
         },
 
         dailyTool("web.fetch", Risk.READ, "fetch_url",
-            "Đọc nội dung một trang web từ đường link (http/https) và trả về dạng chữ thuần, đã bỏ phần mã. Có thể cắt bớt nếu trang dài.",
+            "Read the content of a web page from a link (http/https) and return it as plain text with markup removed. Long pages may be truncated.",
             schema {
-                str("url", "Đường link đầy đủ bắt đầu bằng http:// hoặc https://", required = true)
-                int("max_chars", "Số ký tự tối đa trả về (mặc định 15000, tối đa 40000).")
+                str("url", "Full link starting with http:// or https://", required = true)
+                int("max_chars", "Maximum number of characters to return (default 15000, max 40000).")
             }) { _, a ->
             val url = a.reqStr("url").trim()
-            if (!url.startsWith("http://") && !url.startsWith("https://")) throw ToolException("Link phải bắt đầu bằng http:// hoặc https://")
+            if (!url.startsWith("http://") && !url.startsWith("https://")) throw ToolException("The link must start with http:// or https://")
             val max = (a.int("max_chars") ?: 15000).coerceIn(500, 40000)
             val req = try {
                 Request.Builder().url(url).header("User-Agent", "Mozilla/5.0 (Android) ByokChat").header("Accept-Language", "vi,en;q=0.8").build()
             } catch (e: IllegalArgumentException) {
-                throw ToolException("Link không hợp lệ.")
+                throw ToolException("Invalid link.")
             }
             val (type, body) = try {
                 Http.client.newCall(req).execute().use { r ->
-                    if (!r.isSuccessful) throw ToolException("Trang trả về lỗi ${r.code}.")
-                    val src = r.body?.source() ?: throw ToolException("Trang không có nội dung.")
+                    if (!r.isSuccessful) throw ToolException("The page returned error ${r.code}.")
+                    val src = r.body?.source() ?: throw ToolException("The page has no content.")
                     src.request(1_500_000)
                     val bytes = src.buffer.snapshot().toByteArray().let { if (it.size > 1_500_000) it.copyOf(1_500_000) else it }
                     (r.header("Content-Type") ?: "") to String(bytes, Charsets.UTF_8)
                 }
             } catch (e: java.io.IOException) {
-                throw ToolException("Không tải được trang: ${e.message}")
+                throw ToolException("Could not load the page: ${e.message}")
             }
             val title = Regex("(?is)<title[^>]*>(.*?)</title>").find(body)?.groupValues?.get(1)?.let { Html.fromHtml(it, Html.FROM_HTML_MODE_LEGACY).toString().trim() }
             val text = if (type.contains("html", true) || body.trimStart().startsWith("<")) htmlToText(body) else body
-            val out = if (text.length > max) text.take(max) + "\n…[đã cắt bớt, còn ${text.length - max} ký tự]" else text
-            (if (title != null) "Tiêu đề: $title\n" else "") + "Nguồn: $url\n\n" + out
+            val out = if (text.length > max) text.take(max) + "\n…[truncated, ${text.length - max} more characters]" else text
+            (if (title != null) "Title: $title\n" else "") + "Source: $url\n\n" + out
         },
 
         dailyTool("web.search", Risk.READ, "web_search",
-            "Tìm kiếm trên web và trả về danh sách kết quả (tiêu đề, link, mô tả). Dùng web fetch để đọc chi tiết một kết quả.",
+            "Search the web and return a list of results (title, link, description). Use web fetch to read a result in detail.",
             schema {
-                str("query", "Từ khóa tìm kiếm.", required = true)
-                int("count", "Số kết quả (mặc định 5, tối đa 10).")
+                str("query", "Search keywords.", required = true)
+                int("count", "Number of results (default 5, max 10).")
             },
-            unavailableHint = "Cần nhập API key dịch vụ tìm kiếm trong Cài đặt.",
+            unavailableHint = "Enter your search service API key in Settings.",
             isAvailable = { it.settings.searchApiKey.value.isNotBlank() }) { env, a ->
             val q = a.reqStr("query")
             val n = (a.int("count") ?: 5).coerceIn(1, 10)
@@ -290,112 +290,112 @@ object DailyTools {
                     lines.add("• ${o["title"]?.jsonPrimitive?.contentOrNull}\n  ${o["url"]?.jsonPrimitive?.contentOrNull}\n  ${desc?.take(300)}")
                 }
             }
-            if (lines.isEmpty()) "Không có kết quả cho '$q'." else "Kết quả tìm '$q':\n" + lines.joinToString("\n")
+            if (lines.isEmpty()) "No results for '$q'." else "Search results for '$q':\n" + lines.joinToString("\n")
         },
 
         // ----- Ghi chú nhớ lâu -----
         dailyTool("note.save", Risk.WRITE, "save_note",
-            "Lưu một ghi chú nhớ lâu (tồn tại qua các cuộc trò chuyện). Dùng cho thông tin người dùng muốn bạn nhớ.",
+            "Save a long-term note (persists across conversations). Use it for information the user wants you to remember.",
             schema {
-                str("title", "Tiêu đề ngắn.", required = true)
-                str("content", "Nội dung ghi chú.", required = true)
+                str("title", "Short title.", required = true)
+                str("content", "Note content.", required = true)
             },
-            preview = { _, a -> "Lưu ghi chú \"${a.reqStr("title")}\":\n" + previewText(a.reqStr("content")) }) { env, a ->
+            preview = { _, a -> "Save note \"${a.reqStr("title")}\":\n" + previewText(a.reqStr("content")) }) { env, a ->
             val now = System.currentTimeMillis()
             val id = noteId()
             env.db.notes().upsert(NoteEntity(id, a.reqStr("title").trim(), a.reqStr("content"), now, now))
-            "Đã lưu ghi chú (id: $id)."
+            "Note saved (id: $id)."
         },
 
         dailyTool("note.list", Risk.READ, "list_notes",
-            "Liệt kê các ghi chú đã lưu (id, tiêu đề, đoạn đầu). Có thể lọc theo từ khóa.",
-            schema { str("query", "Chỉ hiện ghi chú chứa từ khóa này (không bắt buộc).") }) { env, a ->
+            "List the saved notes (id, title, first part). Can be filtered by keyword.",
+            schema { str("query", "Only show notes containing this keyword (optional).") }) { env, a ->
             val q = a.str("query").orEmpty()
             val notes = env.db.notes().all().filter { q.isBlank() || TextUtil.findAll(it.title + "\n" + it.content, q).isNotEmpty() }
-            if (notes.isEmpty()) "Chưa có ghi chú nào." else notes.joinToString("\n") { "• [${it.id}] ${it.title} — ${it.content.replace("\n", " ").take(80)}" }
+            if (notes.isEmpty()) "No notes yet." else notes.joinToString("\n") { "• [${it.id}] ${it.title} — ${it.content.replace("\n", " ").take(80)}" }
         },
 
-        dailyTool("note.get", Risk.READ, "read_note", "Đọc đầy đủ một ghi chú theo id.",
-            schema { str("id", "Id ghi chú (lấy từ list_notes).", required = true) }) { env, a ->
-            val n = env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("Không có ghi chú id '${a.reqStr("id")}'.")
+        dailyTool("note.get", Risk.READ, "read_note", "Read a note in full by id.",
+            schema { str("id", "Note id (from list_notes).", required = true) }) { env, a ->
+            val n = env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("No note with id '${a.reqStr("id")}'.")
             "# ${n.title}\n\n${n.content}"
         },
 
-        dailyTool("note.update", Risk.WRITE, "update_note", "Sửa tiêu đề hoặc nội dung một ghi chú. Đặt append=true để thêm nội dung vào cuối thay vì thay thế.",
+        dailyTool("note.update", Risk.WRITE, "update_note", "Edit a note's title or content. Set append=true to add to the end instead of replacing.",
             schema {
-                str("id", "Id ghi chú.", required = true)
-                str("title", "Tiêu đề mới (không bắt buộc).")
-                str("content", "Nội dung mới (không bắt buộc).")
-                bool("append", "Thêm content vào cuối thay vì thay thế (mặc định false).")
+                str("id", "Note id.", required = true)
+                str("title", "New title (optional).")
+                str("content", "New content (optional).")
+                bool("append", "Append content to the end instead of replacing (default false).")
             },
             preview = { env, a ->
                 val n = env.db.notes().get(a.reqStr("id").trim())
-                "Sửa ghi chú \"${n?.title ?: a.reqStr("id")}\":\n" + (a.str("title")?.let { "Tiêu đề mới: $it\n" } ?: "") + (a.str("content")?.let { (if (a.bool("append") == true) "Thêm vào cuối:\n" else "Nội dung mới:\n") + previewText(it) } ?: "")
+                "Edit note \"${n?.title ?: a.reqStr("id")}\":\n" + (a.str("title")?.let { "New title: $it\n" } ?: "") + (a.str("content")?.let { (if (a.bool("append") == true) "Append:\n" else "New content:\n") + previewText(it) } ?: "")
             }) { env, a ->
-            val n = env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("Không có ghi chú id '${a.reqStr("id")}'.")
+            val n = env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("No note with id '${a.reqStr("id")}'.")
             val newContent = a.str("content")?.let { if (a.bool("append") == true) n.content.trimEnd() + "\n" + it else it } ?: n.content
             env.db.notes().upsert(n.copy(title = a.str("title")?.trim() ?: n.title, content = newContent, updatedAt = System.currentTimeMillis()))
-            "Đã cập nhật ghi chú ${n.id}."
+            "Updated note ${n.id}."
         },
 
-        dailyTool("note.delete", Risk.DELETE, "delete_note", "Xóa một ghi chú. Người dùng luôn phải xác nhận.",
-            schema { str("id", "Id ghi chú.", required = true) },
-            preview = { env, a -> "XÓA ghi chú: " + (env.db.notes().get(a.reqStr("id").trim())?.let { "\"${it.title}\"" } ?: a.reqStr("id")) }) { env, a ->
-            env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("Không có ghi chú id '${a.reqStr("id")}'.")
+        dailyTool("note.delete", Risk.DELETE, "delete_note", "Delete a note. The user must always confirm.",
+            schema { str("id", "Note id.", required = true) },
+            preview = { env, a -> "DELETE note: " + (env.db.notes().get(a.reqStr("id").trim())?.let { "\"${it.title}\"" } ?: a.reqStr("id")) }) { env, a ->
+            env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("No note with id '${a.reqStr("id")}'.")
             env.db.notes().delete(a.reqStr("id").trim())
-            "Đã xóa ghi chú."
+            "Note deleted."
         },
 
         // ----- Việc cần làm -----
-        dailyTool("todo.add", Risk.WRITE, "add_todo", "Thêm một việc vào danh sách việc cần làm.",
-            schema { str("text", "Nội dung việc cần làm.", required = true) },
-            preview = { _, a -> "Thêm việc: ${a.reqStr("text")}" }) { env, a ->
+        dailyTool("todo.add", Risk.WRITE, "add_todo", "Add an item to the to-do list.",
+            schema { str("text", "To-do text.", required = true) },
+            preview = { _, a -> "Add to-do: ${a.reqStr("text")}" }) { env, a ->
             val id = noteId()
             env.db.todos().upsert(TodoEntity(id, a.reqStr("text").trim(), false, System.currentTimeMillis()))
-            "Đã thêm việc (id: $id)."
+            "To-do added (id: $id)."
         },
 
-        dailyTool("todo.list", Risk.READ, "list_todos", "Xem danh sách việc cần làm.",
-            schema { str("filter", "Lọc theo trạng thái.", enum = listOf("all", "open", "done")) }) { env, a ->
+        dailyTool("todo.list", Risk.READ, "list_todos", "Show the to-do list.",
+            schema { str("filter", "Filter by status.", enum = listOf("all", "open", "done")) }) { env, a ->
             val f = a.str("filter") ?: "all"
             val items = env.db.todos().all().filter { f == "all" || (f == "open" && !it.done) || (f == "done" && it.done) }
-            if (items.isEmpty()) "Danh sách trống." else items.joinToString("\n") { "${if (it.done) "☑" else "☐"} [${it.id}] ${it.text}" }
+            if (items.isEmpty()) "The list is empty." else items.joinToString("\n") { "${if (it.done) "☑" else "☐"} [${it.id}] ${it.text}" }
         },
 
-        dailyTool("todo.complete", Risk.WRITE, "complete_todo", "Đánh dấu một việc đã xong (hoặc chưa xong nếu done=false).",
+        dailyTool("todo.complete", Risk.WRITE, "complete_todo", "Mark a to-do as done (or not done if done=false).",
             schema {
-                str("id", "Id việc.", required = true)
-                bool("done", "true = đã xong (mặc định), false = chưa xong.")
+                str("id", "To-do id.", required = true)
+                bool("done", "true = done (default), false = not done.")
             },
-            preview = { env, a -> "Đánh dấu ${if (a.bool("done") == false) "CHƯA xong" else "đã xong"}: " + (env.db.todos().get(a.reqStr("id").trim())?.text ?: a.reqStr("id")) }) { env, a ->
-            val t = env.db.todos().get(a.reqStr("id").trim()) ?: throw ToolException("Không có việc id '${a.reqStr("id")}'.")
+            preview = { env, a -> "Mark ${if (a.bool("done") == false) "NOT done" else "done"}: " + (env.db.todos().get(a.reqStr("id").trim())?.text ?: a.reqStr("id")) }) { env, a ->
+            val t = env.db.todos().get(a.reqStr("id").trim()) ?: throw ToolException("No to-do with id '${a.reqStr("id")}'.")
             env.db.todos().upsert(t.copy(done = a.bool("done") ?: true))
-            "Đã cập nhật: ${t.text}"
+            "Updated: ${t.text}"
         },
 
-        dailyTool("todo.delete", Risk.DELETE, "delete_todo", "Xóa một việc khỏi danh sách. Người dùng luôn phải xác nhận.",
-            schema { str("id", "Id việc.", required = true) },
-            preview = { env, a -> "XÓA việc: " + (env.db.todos().get(a.reqStr("id").trim())?.text ?: a.reqStr("id")) }) { env, a ->
-            env.db.todos().get(a.reqStr("id").trim()) ?: throw ToolException("Không có việc id '${a.reqStr("id")}'.")
+        dailyTool("todo.delete", Risk.DELETE, "delete_todo", "Delete a to-do from the list. The user must always confirm.",
+            schema { str("id", "To-do id.", required = true) },
+            preview = { env, a -> "DELETE to-do: " + (env.db.todos().get(a.reqStr("id").trim())?.text ?: a.reqStr("id")) }) { env, a ->
+            env.db.todos().get(a.reqStr("id").trim()) ?: throw ToolException("No to-do with id '${a.reqStr("id")}'.")
             env.db.todos().delete(a.reqStr("id").trim())
-            "Đã xóa việc."
+            "To-do deleted."
         },
 
         // ----- Báo thức, lịch, clipboard -----
         dailyTool("alarm.set", Risk.WRITE, "set_alarm",
-            "Đặt báo thức trong ứng dụng Đồng hồ của điện thoại. Không có 'days' thì chuông một lần vào lần tới giờ đó (trong 24 giờ).",
+            "Set an alarm in the phone's Clock app. Without 'days' it rings once at the next occurrence of that time (within 24 hours).",
             schema {
-                int("hour", "Giờ (0-23).", required = true)
-                int("minute", "Phút (0-59).", required = true)
-                str("message", "Nhãn báo thức.")
-                strArray("days", "Lặp lại hằng tuần vào các thứ: mon, tue, wed, thu, fri, sat, sun.")
+                int("hour", "Hour (0-23).", required = true)
+                int("minute", "Minute (0-59).", required = true)
+                str("message", "Alarm label.")
+                strArray("days", "Repeat weekly on these days: mon, tue, wed, thu, fri, sat, sun.")
             },
-            preview = { _, a -> "Đặt báo thức lúc %02d:%02d".format(a.int("hour") ?: 0, a.int("minute") ?: 0) + (a.str("message")?.let { " — $it" } ?: "") + (a.strList("days")?.takeIf { it.isNotEmpty() }?.let { "\nLặp lại: ${it.joinToString(", ")}" } ?: "") }) { env, a ->
-            val h = a.int("hour") ?: throw ToolException("Thiếu 'hour'.")
-            val m = a.int("minute") ?: throw ToolException("Thiếu 'minute'.")
-            if (h !in 0..23 || m !in 0..59) throw ToolException("Giờ phải từ 0-23 và phút từ 0-59.")
+            preview = { _, a -> "Set alarm at %02d:%02d".format(a.int("hour") ?: 0, a.int("minute") ?: 0) + (a.str("message")?.let { " — $it" } ?: "") + (a.strList("days")?.takeIf { it.isNotEmpty() }?.let { "\nRepeats: ${it.joinToString(", ")}" } ?: "") }) { env, a ->
+            val h = a.int("hour") ?: throw ToolException("Missing 'hour'.")
+            val m = a.int("minute") ?: throw ToolException("Missing 'minute'.")
+            if (h !in 0..23 || m !in 0..59) throw ToolException("Hour must be 0-23 and minute 0-59.")
             val dayMap = mapOf("mon" to Calendar.MONDAY, "tue" to Calendar.TUESDAY, "wed" to Calendar.WEDNESDAY, "thu" to Calendar.THURSDAY, "fri" to Calendar.FRIDAY, "sat" to Calendar.SATURDAY, "sun" to Calendar.SUNDAY)
-            val days = a.strList("days").orEmpty().map { d -> dayMap[d.trim().lowercase().take(3)] ?: throw ToolException("Thứ '$d' không hợp lệ.") }
+            val days = a.strList("days").orEmpty().map { d -> dayMap[d.trim().lowercase().take(3)] ?: throw ToolException("Invalid day '$d'.") }
             val intent = Intent(AlarmClock.ACTION_SET_ALARM).apply {
                 putExtra(AlarmClock.EXTRA_HOUR, h)
                 putExtra(AlarmClock.EXTRA_MINUTES, m)
@@ -407,28 +407,28 @@ object DailyTools {
             try {
                 env.app.startActivity(intent)
             } catch (e: Exception) {
-                throw ToolException("Không đặt được báo thức (không có ứng dụng Đồng hồ phù hợp hoặc bị hệ thống chặn): ${e.message}")
+                throw ToolException("Could not set the alarm (no suitable Clock app or blocked by the system): ${e.message}")
             }
-            "Đã gửi yêu cầu đặt báo thức lúc %02d:%02d".format(h, m) + (if (days.isEmpty()) " (một lần)." else ", lặp lại hằng tuần.")
+            "Alarm request sent for %02d:%02d".format(h, m) + (if (days.isEmpty()) " (one time)." else ", repeating weekly.")
         },
 
         dailyTool("calendar.create", Risk.WRITE, "create_calendar_event",
-            "Tạo sự kiện trong lịch của điện thoại (cần người dùng cấp quyền lịch).",
+            "Create an event in the phone's calendar (the user must grant calendar permission).",
             schema {
-                str("title", "Tên sự kiện.", required = true)
-                str("start", "Bắt đầu, giờ địa phương, dạng 2026-11-07T09:00.", required = true)
-                str("end", "Kết thúc (mặc định: 1 giờ sau khi bắt đầu).")
-                str("description", "Mô tả.")
-                str("location", "Địa điểm.")
-                int("reminder_minutes", "Nhắc trước bao nhiêu phút (không bắt buộc).")
+                str("title", "Event title.", required = true)
+                str("start", "Start, local time, like 2026-11-07T09:00.", required = true)
+                str("end", "End (default: 1 hour after the start).")
+                str("description", "Description.")
+                str("location", "Location.")
+                int("reminder_minutes", "Remind this many minutes before (optional).")
             },
-            preview = { _, a -> "Tạo sự kiện \"${a.reqStr("title")}\"\nBắt đầu: ${a.reqStr("start")}" + (a.str("end")?.let { "\nKết thúc: $it" } ?: "") + (a.str("location")?.let { "\nĐịa điểm: $it" } ?: "") }) { env, a ->
+            preview = { _, a -> "Create event \"${a.reqStr("title")}\"\nStart: ${a.reqStr("start")}" + (a.str("end")?.let { "\nEnd: $it" } ?: "") + (a.str("location")?.let { "\nLocation: $it" } ?: "") }) { env, a ->
             val zone = ZoneId.systemDefault()
             val start = parseDateTime(a.reqStr("start"), zone)
             val end = a.str("end")?.let { parseDateTime(it, zone) } ?: start.plusHours(1)
-            if (!end.isAfter(start)) throw ToolException("Thời điểm kết thúc phải sau thời điểm bắt đầu.")
+            if (!end.isAfter(start)) throw ToolException("The end time must be after the start time.")
             if (!env.permissions.ensure(listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))) {
-                throw ToolException("Chưa được cấp quyền truy cập lịch. Người dùng cần cho phép quyền Lịch cho ứng dụng.")
+                throw ToolException("Calendar access has not been granted. The user needs to allow the Calendar permission for the app.")
             }
             val cr = env.app.contentResolver
             val calId = cr.query(
@@ -445,7 +445,7 @@ object DailyTools {
                     if (c.getInt(1) == 1 && primary == null) primary = id
                 }
                 primary ?: first
-            } ?: throw ToolException("Không tìm thấy lịch nào có thể ghi trên điện thoại.")
+            } ?: throw ToolException("No writable calendar was found on the phone.")
             val values = ContentValues().apply {
                 put(CalendarContract.Events.CALENDAR_ID, calId)
                 put(CalendarContract.Events.TITLE, a.reqStr("title"))
@@ -455,7 +455,7 @@ object DailyTools {
                 a.str("description")?.let { put(CalendarContract.Events.DESCRIPTION, it) }
                 a.str("location")?.let { put(CalendarContract.Events.EVENT_LOCATION, it) }
             }
-            val uri = cr.insert(CalendarContract.Events.CONTENT_URI, values) ?: throw ToolException("Không tạo được sự kiện.")
+            val uri = cr.insert(CalendarContract.Events.CONTENT_URI, values) ?: throw ToolException("Could not create the event.")
             a.int("reminder_minutes")?.let { mins ->
                 val rv = ContentValues().apply {
                     put(CalendarContract.Reminders.EVENT_ID, uri.lastPathSegment?.toLongOrNull() ?: 0L)
@@ -464,18 +464,18 @@ object DailyTools {
                 }
                 runCatching { cr.insert(CalendarContract.Reminders.CONTENT_URI, rv) }
             }
-            "Đã tạo sự kiện \"${a.reqStr("title")}\" lúc ${start.toLocalDateTime()}."
+            "Created event \"${a.reqStr("title")}\" at ${start.toLocalDateTime()}."
         },
 
         dailyTool("clipboard.write", Risk.WRITE, "copy_to_clipboard",
-            "Chép một đoạn chữ vào bộ nhớ tạm (clipboard) để người dùng dán ở nơi khác. Bạn KHÔNG đọc được clipboard.",
-            schema { str("text", "Nội dung cần chép.", required = true) },
-            preview = { _, a -> "Chép vào clipboard:\n" + previewText(a.reqStr("text")) }) { env, a ->
+            "Copy a piece of text to the clipboard so the user can paste it elsewhere. You CANNOT read the clipboard.",
+            schema { str("text", "Text to copy.", required = true) },
+            preview = { _, a -> "Copy to clipboard:\n" + previewText(a.reqStr("text")) }) { env, a ->
             withContext(Dispatchers.Main) {
                 val cm = env.app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 cm.setPrimaryClip(ClipData.newPlainText("AI", a.reqStr("text")))
             }
-            "Đã chép ${a.reqStr("text").length} ký tự vào clipboard."
+            "Copied ${a.reqStr("text").length} characters to the clipboard."
         },
     )
 }

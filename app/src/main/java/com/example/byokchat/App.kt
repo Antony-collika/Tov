@@ -57,9 +57,9 @@ class App : Application() {
                             container.foregroundServiceError.value = null
                         } catch (e: IllegalStateException) {
                             // Hệ thống từ chối bật dịch vụ nền: việc trả lời vẫn tiếp tục như cũ, nhưng ghi lại lý do.
-                            val reason = e.javaClass.simpleName + ": " + (e.message ?: "không rõ lý do")
+                            val reason = e.javaClass.simpleName + ": " + (e.message ?: "unknown reason")
                             container.foregroundServiceError.value = reason
-                            Log.w("Tov", "Không bật được dịch vụ nền: $reason")
+                            Log.w("Tov", "Could not start the background service: $reason")
                         }
                     } else {
                         // Chờ một chút để dịch vụ kịp báo "đang chạy" với hệ thống trước khi tắt (tránh lỗi khi bấm Dừng ngay).

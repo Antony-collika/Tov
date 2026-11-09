@@ -6,6 +6,7 @@ import com.example.byokchat.ai.AiRequest
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.data.AppDatabase
+import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.SettingsRepository
@@ -95,13 +96,13 @@ class ChatEngine(
             var cancelled: CancellationException? = null
             try {
                 val cfg = settings.provider(conv.providerId)
-                    ?: throw AiException("Chưa chọn nhà cung cấp AI. Hãy vào Cài đặt → Nhà cung cấp AI để thêm, rồi bấm biểu tượng mô hình ở đầu màn hình chat để chọn.")
+                    ?: throw AiException("No AI provider is selected. Go to Settings → AI providers to add one, then tap the model name in the message box to choose a model.")
                 if (cfg.apiKey.isBlank() && cfg.type != ProviderType.CUSTOM) {
-                    throw AiException("Nhà cung cấp \"${cfg.name}\" chưa có API key. Hãy nhập key trong Cài đặt.")
+                    throw AiException("The provider \"${cfg.name}\" has no API key yet. Enter the key in Settings.")
                 }
-                if (conv.model.isBlank()) throw AiException("Chưa chọn mô hình. Hãy bấm biểu tượng mô hình ở đầu màn hình chat.")
+                if (conv.model.isBlank()) throw AiException("No model is selected. Tap the model name in the message box to choose one.")
                 if (!cfg.effectiveBaseUrl().startsWith("http")) {
-                    throw AiException("Địa chỉ máy chủ của \"${cfg.name}\" chưa hợp lệ (phải bắt đầu bằng http:// hoặc https://).")
+                    throw AiException("The server address of \"${cfg.name}\" is not valid (it must start with http:// or https://).")
                 }
 
                 val toolDefs = tools.definitions()
@@ -148,7 +149,7 @@ class ChatEngine(
                     error != null -> msgDao.upsert(base.copy(text = text.toString(), status = "error", error = error))
                     text.isEmpty() && calls.isEmpty() ->
                         if (cancelled != null) msgDao.deleteById(assistantId)
-                        else msgDao.upsert(base.copy(status = "error", error = "AI không trả về nội dung nào."))
+                        else msgDao.upsert(base.copy(status = "error", error = "The AI returned no content."))
                     else -> msgDao.upsert(
                         base.copy(
                             text = text.toString(),
@@ -162,7 +163,7 @@ class ChatEngine(
             }
             cancelled?.let { throw it }
             if (error != null || calls.isEmpty()) {
-                notifyFinished(conversationId, conv.title, success = error == null && text.isNotEmpty(), answer = text.toString())
+                notifyFinished(conversationId, displayTitle(conv.title), success = error == null && text.isNotEmpty(), answer = text.toString())
                 return
             }
 
@@ -176,10 +177,10 @@ class ChatEngine(
                         status = "error",
                         text = "",
                         toolCallsJson = null,
-                        error = "Đã dừng vì AI gọi công cụ quá $MAX_TOOL_ROUNDS vòng liên tiếp.",
+                        error = "Stopped because the AI called tools for more than $MAX_TOOL_ROUNDS rounds in a row.",
                     )
                 )
-                notifyFinished(conversationId, conv.title, success = false, answer = "")
+                notifyFinished(conversationId, displayTitle(conv.title), success = false, answer = "")
                 return
             }
             for (call in calls) {
@@ -206,7 +207,7 @@ class ChatEngine(
     /** Báo cho người dùng khi AI trả lời xong (hoặc lỗi) mà app không đang hiện. Không gọi khi người dùng bấm Dừng. */
     private fun notifyFinished(conversationId: String, title: String, success: Boolean, answer: String) {
         if (AppVisibility.inForeground) return
-        val preview = if (success) answer.trim().replace("\n", " ").take(100) else "Không trả lời được. Mở app để xem lỗi."
+        val preview = if (success) answer.trim().replace("\n", " ").take(100) else "Couldn't answer. Open the app to see the error."
         notifier.notifyAnswer(conversationId, title, preview)
     }
 

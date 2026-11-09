@@ -8,6 +8,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,12 +41,15 @@ fun AppNav() {
     var focusMsg by rememberSaveable { mutableStateOf<String?>(null) }
     var initialQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var branchFrom by rememberSaveable { mutableStateOf<String?>(null) }
+    // Changes on every openChat() so that opening a search result in the conversation that is already shown still refreshes it.
+    var openNonce by rememberSaveable { mutableIntStateOf(0) }
 
     fun openChat(id: String, msg: String? = null, q: String? = null, from: String? = null) {
         chatId = id
         focusMsg = msg
         initialQuery = q
         branchFrom = from
+        openNonce++
     }
 
     fun newChat() {
@@ -85,24 +89,16 @@ fun AppNav() {
                         focusMessageId = focusMsg,
                         initialQuery = initialQuery,
                         branchFrom = branchFrom,
+                        openNonce = openNonce,
                         onOpenChat = { newId, from -> openChat(newId, from = from) },
+                        onOpenSearchResult = { cid, mid, q -> openChat(cid, msg = mid, q = q) },
                         onNewChat = { newChat() },
                         onBranchNoticeShown = { branchFrom = null },
                         onSettings = { nav.navigate("settings") },
-                        onSearch = { nav.navigate("search") },
                         onOnboarding = { nav.navigate("onboarding") },
                         onProvider = { pid -> nav.navigate(if (pid == null) "providers" else "provider?id=$pid") },
                     )
                 }
-            }
-            composable("search") {
-                SearchScreen(
-                    onBack = { nav.popBackStack() },
-                    onOpen = { cid, mid, q ->
-                        openChat(cid, msg = mid, q = q)
-                        nav.popBackStack("chat", inclusive = false)
-                    },
-                )
             }
             composable("settings") {
                 SettingsScreen(

@@ -50,7 +50,7 @@ class ChatOps(private val db: AppDatabase) {
      * Cuộc gốc giữ nguyên. overrideUser = (id tin nhắn của bạn, nội dung mới) nếu cần sửa bản sao.
      */
     suspend fun branchUpTo(conversationId: String, lastSeq: Long, overrideUser: Pair<String, String>? = null): BranchResult {
-        val conv = db.conversations().get(conversationId) ?: throw IllegalStateException("Không tìm thấy cuộc trò chuyện.")
+        val conv = db.conversations().get(conversationId) ?: throw IllegalStateException("Conversation not found.")
         val rows = db.messages().getAll(conversationId).filter { it.seq <= lastSeq }
         val newId = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
@@ -73,7 +73,7 @@ class ChatOps(private val db: AppDatabase) {
     /** Branch từ một tin nhắn (dùng cho menu của AI hoặc của bạn). Nếu là tin AI có công cụ thì lấy luôn kết quả công cụ đi kèm. */
     suspend fun branchAt(conversationId: String, messageId: String): BranchResult {
         val all = db.messages().getAll(conversationId)
-        val row = all.firstOrNull { it.id == messageId } ?: throw IllegalStateException("Không tìm thấy tin nhắn.")
+        val row = all.firstOrNull { it.id == messageId } ?: throw IllegalStateException("Message not found.")
         var last = row.seq
         for (r in all.filter { it.seq > row.seq }) {
             if (r.turnId == row.turnId && r.role == "tool") last = r.seq else break
@@ -84,7 +84,7 @@ class ChatOps(private val db: AppDatabase) {
     /** Tạo lại ở cuộc mới: sao chép đến hết tin nhắn của bạn ở lượt đó (có thể kèm nội dung sửa). */
     suspend fun branchForRegenerate(conversationId: String, turnId: String, newUserText: String?): BranchResult {
         val user = db.messages().getAll(conversationId).firstOrNull { it.turnId == turnId && it.role == "user" }
-            ?: throw IllegalStateException("Không tìm thấy tin nhắn của bạn ở lượt này.")
+            ?: throw IllegalStateException("Your message for this turn was not found.")
         return branchUpTo(conversationId, user.seq, newUserText?.let { user.id to it })
     }
 }

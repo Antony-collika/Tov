@@ -9,7 +9,16 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 
-const val DEFAULT_TITLE = "Cuộc trò chuyện mới"
+const val DEFAULT_TITLE = "New chat"
+
+/** Title used by older versions of the app (before the app was switched to English). */
+const val LEGACY_DEFAULT_TITLE = "Cuộc trò chuyện mới"
+
+/** True for the placeholder title of a conversation that has not been named yet (new or legacy). */
+fun isDefaultTitle(title: String): Boolean = title == DEFAULT_TITLE || title == LEGACY_DEFAULT_TITLE
+
+/** Title to show in the UI: old Vietnamese placeholder titles are shown as "New chat". */
+fun displayTitle(title: String): String = if (title == LEGACY_DEFAULT_TITLE) DEFAULT_TITLE else title
 
 @Entity(tableName = "conversations")
 data class ConversationEntity(

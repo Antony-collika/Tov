@@ -12,7 +12,7 @@ import com.example.byokchat.ai.ImageStore
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
-import com.example.byokchat.data.DEFAULT_TITLE
+import com.example.byokchat.data.isDefaultTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.encodeImages
@@ -118,7 +118,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 )
             )
             val conv = db.conversations().get(conversationId)
-            if (conv != null && conv.title == DEFAULT_TITLE) {
+            if (conv != null && isDefaultTitle(conv.title)) {
                 val title = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(40) ?: "Image"
                 db.conversations().rename(conversationId, title)
             }

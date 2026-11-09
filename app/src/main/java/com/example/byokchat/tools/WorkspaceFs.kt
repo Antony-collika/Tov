@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import com.example.byokchat.data.SettingsRepository
@@ -47,6 +48,19 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     fun rootName(): String? =
         runCatching { settings.workspaceUri.value?.let { DocumentFile.fromTreeUri(ctx, Uri.parse(it))?.name } }.getOrNull()
 
+    /**
+     * The chosen folder written the way the AI sees paths: relative, e.g. "./homework". Null if no folder is chosen.
+     * Blocking (reads from the document provider), so call it from a background thread.
+     */
+    fun displayPath(): String? {
+        val raw = settings.workspaceUri.value ?: return null
+        val uri = Uri.parse(raw)
+        val name = rootName()?.takeIf { it.isNotBlank() }
+            ?: runCatching { DocumentsContract.getTreeDocumentId(uri).substringAfterLast(':').substringAfterLast('/') }
+                .getOrNull()?.takeIf { it.isNotBlank() }
+        return "./" + (name ?: "")
+    }
+
     /** Gọi sau khi người dùng chọn thư mục bằng hộp chọn của hệ thống. */
     fun onFolderPicked(uri: Uri) {
         val old = settings.workspaceUri.value?.let { Uri.parse(it) }
@@ -72,34 +86,34 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     /** Thử tạo, ghi, đọc, xóa một file tạm để chắc chắn công cụ ghi đúng chỗ. */
     fun selfTest(): String {
-        if (!refresh()) return "Chưa có quyền truy cập thư mục làm việc."
+        if (!refresh()) return "No access to the workspace folder."
         return try {
             val name = ".byok_test.txt"
             writeText(name, "ok-" + System.currentTimeMillis(), createParents = false)
             val back = readText(name)
             requireFile(name).delete()
-            if (back.startsWith("ok-")) "Kiểm tra thành công: app đọc và ghi được trong thư mục '${rootName() ?: ""}'."
-            else "Kiểm tra thất bại: nội dung đọc lại không khớp."
+            if (back.startsWith("ok-")) "Check passed: the app can read and write in the folder '${rootName() ?: ""}'."
+            else "Check failed: the content read back does not match."
         } catch (e: Exception) {
-            "Kiểm tra thất bại: ${e.message}"
+            "Check failed: ${e.message}"
         }
     }
 
     // ---------- Đường dẫn ----------
 
     fun root(): DocumentFile {
-        val uri = settings.workspaceUri.value ?: throw ToolException("Chưa chọn thư mục làm việc.")
-        return DocumentFile.fromTreeUri(ctx, Uri.parse(uri)) ?: throw ToolException("Không mở được thư mục làm việc.")
+        val uri = settings.workspaceUri.value ?: throw ToolException("No workspace folder has been chosen.")
+        return DocumentFile.fromTreeUri(ctx, Uri.parse(uri)) ?: throw ToolException("Could not open the workspace folder.")
     }
 
     fun segments(path: String): List<String> {
         val p = path.trim().replace('\\', '/')
         val segs = p.split('/').filter { it.isNotEmpty() && it != "." }
         if (segs.any { it == ".." }) {
-            throw ToolException("Đường dẫn không được chứa '..' (không được ra ngoài thư mục làm việc).")
+            throw ToolException("The path must not contain '..' (it cannot leave the workspace folder).")
         }
         if (segs.any { it.contains(':') || it.contains('\u0000') }) {
-            throw ToolException("Đường dẫn chứa ký tự không hợp lệ. Hãy dùng đường dẫn tương đối như 'thu-muc/file.txt'.")
+            throw ToolException("The path contains invalid characters. Use a relative path such as 'folder/file.txt'.")
         }
         return segs
     }
@@ -115,17 +129,17 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return cur
     }
 
-    fun require(path: String): DocumentFile = find(path) ?: throw ToolException("Không tìm thấy '${display(path)}'.")
+    fun require(path: String): DocumentFile = find(path) ?: throw ToolException("Not found: '${display(path)}'.")
 
     fun requireDir(path: String): DocumentFile {
         val d = require(path)
-        if (!d.isDirectory) throw ToolException("'${display(path)}' không phải thư mục.")
+        if (!d.isDirectory) throw ToolException("'${display(path)}' is not a folder.")
         return d
     }
 
     fun requireFile(path: String): DocumentFile {
         val d = require(path)
-        if (d.isDirectory) throw ToolException("'${display(path)}' là thư mục, không phải file.")
+        if (d.isDirectory) throw ToolException("'${display(path)}' is a folder, not a file.")
         return d
     }
 
@@ -137,9 +151,9 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         for (seg in segs) {
             val next = cur.findFile(seg)
             cur = when {
-                next == null -> cur.createDirectory(seg) ?: throw ToolException("Không tạo được thư mục '$seg'.")
+                next == null -> cur.createDirectory(seg) ?: throw ToolException("Could not create the folder '$seg'.")
                 next.isDirectory -> next
-                else -> throw ToolException("'$seg' đã tồn tại và là một file, không thể dùng làm thư mục.")
+                else -> throw ToolException("'$seg' already exists and is a file, so it cannot be used as a folder.")
             }
         }
         return cur
@@ -148,10 +162,10 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     // ---------- Đọc / ghi ----------
 
     fun openIn(doc: DocumentFile): InputStream =
-        resolver.openInputStream(doc.uri) ?: throw ToolException("Không đọc được '${doc.name}'.")
+        resolver.openInputStream(doc.uri) ?: throw ToolException("Could not read '${doc.name}'.")
 
     fun openOut(doc: DocumentFile): OutputStream =
-        resolver.openOutputStream(doc.uri, "wt") ?: throw ToolException("Không ghi được '${doc.name}'.")
+        resolver.openOutputStream(doc.uri, "wt") ?: throw ToolException("Could not write '${doc.name}'.")
 
     private fun looksBinary(bytes: ByteArray): Boolean {
         val n = minOf(bytes.size, 8000)
@@ -161,9 +175,9 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     fun readDocText(doc: DocumentFile, label: String, maxBytes: Long = 5_000_000): String {
         val len = doc.length()
-        if (len > maxBytes) throw ToolException("File '$label' quá lớn (${humanSize(len)}); giới hạn đọc là ${humanSize(maxBytes)}.")
+        if (len > maxBytes) throw ToolException("File '$label' is too large (${humanSize(len)}); the read limit is ${humanSize(maxBytes)}.")
         val bytes = openIn(doc).use { it.readBytes() }
-        if (looksBinary(bytes)) throw ToolException("'$label' không phải file văn bản.")
+        if (looksBinary(bytes)) throw ToolException("'$label' is not a text file.")
         return String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
     }
 
@@ -186,7 +200,7 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     }
 
     fun createFileNamed(parent: DocumentFile, name: String): DocumentFile {
-        val created = parent.createFile(mimeFor(name), name) ?: throw ToolException("Không tạo được file '$name'.")
+        val created = parent.createFile(mimeFor(name), name) ?: throw ToolException("Could not create the file '$name'.")
         if (created.name != name) {
             created.renameTo(name)
             return parent.findFile(name) ?: created
@@ -196,12 +210,12 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     fun writeText(path: String, text: String, mustNotExist: Boolean = false, createParents: Boolean = true) {
         val segs = segments(path)
-        if (segs.isEmpty()) throw ToolException("Thiếu tên file.")
+        if (segs.isEmpty()) throw ToolException("Missing file name.")
         val parent = if (createParents) ensureDir(segs.dropLast(1)) else requireDir(segs.dropLast(1).joinToString("/"))
         val name = segs.last()
         var doc = parent.findFile(name)
-        if (doc != null && doc.isDirectory) throw ToolException("'${display(path)}' là thư mục.")
-        if (doc != null && mustNotExist) throw ToolException("File '${display(path)}' đã tồn tại. Dùng công cụ ghi đè nếu muốn thay thế.")
+        if (doc != null && doc.isDirectory) throw ToolException("'${display(path)}' is a folder.")
+        if (doc != null && mustNotExist) throw ToolException("File '${display(path)}' already exists. Use the overwrite tool to replace it.")
         if (doc == null) doc = createFileNamed(parent, name)
         openOut(doc).use { it.write(text.toByteArray(Charsets.UTF_8)) }
     }
@@ -235,7 +249,7 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     /** Xác định nơi đặt đích: nếu dest là thư mục có sẵn thì đặt bên trong, ngược lại dest là đường dẫn mới. */
     fun resolveTarget(srcPath: String, destPath: String): Triple<DocumentFile, String, List<String>> {
         val srcSegs = segments(srcPath)
-        if (srcSegs.isEmpty()) throw ToolException("Không thể thao tác trên thư mục gốc của workspace.")
+        if (srcSegs.isEmpty()) throw ToolException("Cannot operate on the workspace root folder.")
         val destSegs = segments(destPath)
         val existing = find(destPath)
         val finalSegs: List<String>
@@ -251,17 +265,17 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
             parentSegs = destSegs.dropLast(1)
         }
         if (find(finalSegs.joinToString("/")) != null) {
-            throw ToolException("Đích '${finalSegs.joinToString("/")}' đã tồn tại.")
+            throw ToolException("The destination '${finalSegs.joinToString("/")}' already exists.")
         }
         if (finalSegs.size >= srcSegs.size && finalSegs.take(srcSegs.size) == srcSegs) {
-            throw ToolException("Không thể sao chép/di chuyển một thư mục vào chính nó.")
+            throw ToolException("Cannot copy/move a folder into itself.")
         }
         return Triple(ensureDir(parentSegs), finalSegs.last(), finalSegs)
     }
 
     fun copyDoc(src: DocumentFile, destParent: DocumentFile, newName: String) {
         if (src.isDirectory) {
-            val d = destParent.createDirectory(newName) ?: throw ToolException("Không tạo được thư mục '$newName'.")
+            val d = destParent.createDirectory(newName) ?: throw ToolException("Could not create the folder '$newName'.")
             for (c in children(src)) copyDoc(c, d, c.name ?: continue)
         } else {
             val out = createFileNamed(destParent, newName)

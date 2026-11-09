@@ -32,16 +32,16 @@ fun NotesScreen(onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Ghi chú & việc cần làm") },
+                title = { Text("Notes & to-dos") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Quay lại") }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
             )
         },
     ) { padding ->
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
-            item { SectionTitle("Việc cần làm (${todos.size})") }
-            if (todos.isEmpty()) item { Text("Chưa có việc nào.", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            item { SectionTitle("To-dos (${todos.size})") }
+            if (todos.isEmpty()) item { Text("No to-dos yet.", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
             items(todos, key = { "t_" + it.id }) { t ->
                 ListItem(
                     leadingContent = {
@@ -49,19 +49,19 @@ fun NotesScreen(onBack: () -> Unit) {
                     },
                     headlineContent = { Text(t.text) },
                     trailingContent = {
-                        IconButton(onClick = { deleteTodo = t }) { Icon(Icons.Default.Delete, contentDescription = "Xóa việc") }
+                        IconButton(onClick = { deleteTodo = t }) { Icon(Icons.Default.Delete, contentDescription = "Delete to-do") }
                     },
                 )
             }
-            item { SectionTitle("Ghi chú nhớ lâu (${notes.size})") }
-            if (notes.isEmpty()) item { Text("Chưa có ghi chú nào.", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+            item { SectionTitle("Long-term notes (${notes.size})") }
+            if (notes.isEmpty()) item { Text("No notes yet.", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
             items(notes, key = { "n_" + it.id }) { n ->
                 ListItem(
                     modifier = Modifier.clickable { openNote = n },
                     headlineContent = { Text(n.title) },
                     supportingContent = { Text(n.content.replace("\n", " "), maxLines = 2, overflow = TextOverflow.Ellipsis) },
                     trailingContent = {
-                        IconButton(onClick = { deleteNote = n }) { Icon(Icons.Default.Delete, contentDescription = "Xóa ghi chú") }
+                        IconButton(onClick = { deleteNote = n }) { Icon(Icons.Default.Delete, contentDescription = "Delete note") }
                     },
                 )
             }
@@ -74,16 +74,16 @@ fun NotesScreen(onBack: () -> Unit) {
             onDismissRequest = { openNote = null },
             title = { Text(n.title) },
             text = { Text(n.content) },
-            confirmButton = { TextButton(onClick = { openNote = null }) { Text("Đóng") } },
+            confirmButton = { TextButton(onClick = { openNote = null }) { Text("Close") } },
         )
     }
     deleteNote?.let { n ->
-        ConfirmDialog("Xóa ghi chú?", "\"${n.title}\" sẽ bị xóa.", "Xóa",
+        ConfirmDialog("Delete note?", "\"${n.title}\" will be deleted.", "Delete",
             onConfirm = { scope.launch { db.notes().delete(n.id) }; deleteNote = null },
             onDismiss = { deleteNote = null })
     }
     deleteTodo?.let { t ->
-        ConfirmDialog("Xóa việc?", "\"${t.text}\" sẽ bị xóa.", "Xóa",
+        ConfirmDialog("Delete to-do?", "\"${t.text}\" will be deleted.", "Delete",
             onConfirm = { scope.launch { db.todos().delete(t.id) }; deleteTodo = null },
             onDismiss = { deleteTodo = null })
     }

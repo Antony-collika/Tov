@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 
-enum class ThemeMode(val label: String) { SYSTEM("Theo hệ thống"), LIGHT("Sáng"), DARK("Tối") }
+enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
 
 class SettingsRepository(context: Context) {
     private val appContext = context.applicationContext
