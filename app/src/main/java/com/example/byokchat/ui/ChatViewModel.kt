@@ -77,7 +77,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi (luôn theo nội dung đã sửa). */
     val tokenStats: StateFlow<TokenStats?> =
-        combine(conversation, messages, providers, app.settings.defaultSystemPrompt, app.settings.currentModelProviderId, app.settings.currentModel) { c, m, p, prompt, providerId, model ->
+        combine(conversation, messages, providers, app.settings.defaultSystemPrompt, app.settings.currentModelProviderId, app.settings.currentModel) { c: ConversationEntity?, m: List<MessageEntity>, p: List<ProviderConfig>, prompt: String, providerId: String?, model: String? ->
             StatsInput(c, m, p, prompt, providerId, model)
         }
             .debounce(400)
