@@ -278,7 +278,7 @@ fun ConversationDrawerContent(
                 val liveIds = remember(conversations) { conversations.map { it.id }.toSet() }
                 val upToDate = search.query == query
                 val results = remember(search, liveIds) { search.groups.filter { it.conversationId in liveIds } }
-                Box(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
                     when {
                         !upToDate -> CircularProgressIndicator(Modifier.align(Alignment.TopCenter).padding(24.dp).size(24.dp), strokeWidth = 2.dp)
                         results.isEmpty() -> Text(
@@ -304,7 +304,7 @@ fun ConversationDrawerContent(
                         Text("No conversations yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 24.dp)) {
                     groups.forEach { (bucket, list) ->
                         item(key = "h_" + bucket.name) {
                             Text(
@@ -342,6 +342,14 @@ fun ConversationDrawerContent(
                     }
                 }
             }
+            // Fixed footer: always visible at the bottom of the drawer, never
+            // scrolls with the conversation list. The header Settings icon stays.
+            HorizontalDivider()
+            ListItem(
+                modifier = Modifier.clickable { onSettings() },
+                headlineContent = { Text("Settings") },
+                leadingContent = { Icon(Icons.Default.Settings, contentDescription = null) },
+            )
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
