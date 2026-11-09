@@ -2,7 +2,9 @@ package com.example.byokchat.ui
 
 import android.graphics.Color as AColor
 import android.text.Spannable
+import android.text.method.LinkMovementMethod
 import android.text.style.BackgroundColorSpan
+import android.view.MotionEvent
 import android.widget.TextView
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,8 +41,30 @@ fun createMarkwon(context: Context): Markwon =
         .usePlugin(LinkifyPlugin.create())
         .build()
 
+/**
+ * LinkMovementMethod that still lets the TextView fire its long-click. It returns false for
+ * ACTION_DOWN so the View can schedule its long-press check, while link taps keep working
+ * (the UP event still goes through LinkMovementMethod and opens the link).
+ */
+private class LongPressFriendlyLinkMovementMethod : LinkMovementMethod() {
+    override fun onTouchEvent(widget: TextView, buffer: Spannable, event: MotionEvent): Boolean {
+        return if (event.action == MotionEvent.ACTION_DOWN) {
+            super.onTouchEvent(widget, buffer, event)
+            false
+        } else {
+            super.onTouchEvent(widget, buffer, event)
+        }
+    }
+}
+
 @Composable
-fun MarkdownText(markdown: String, color: Color, modifier: Modifier = Modifier, highlight: Highlight? = null) {
+fun MarkdownText(
+    markdown: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    highlight: Highlight? = null,
+    onLongPress: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
     val markwon = LocalMarkwon.current ?: remember(context) { createMarkwon(context) }
     val linkColor = MaterialTheme.colorScheme.primary.toArgb()
@@ -52,11 +76,18 @@ fun MarkdownText(markdown: String, color: Color, modifier: Modifier = Modifier, 
             TextView(ctx).apply {
                 textSize = 16f
                 setLineSpacing(0f, 1.15f)
+                isLongClickable = true
             }
         },
         update = { tv ->
             tv.setTextColor(textColor)
             tv.setLinkTextColor(linkColor)
+            // Keep the listener fresh on every recomposition so it always calls the latest callback.
+            if (onLongPress != null) {
+                tv.setOnLongClickListener { onLongPress(); true }
+            } else {
+                tv.setOnLongClickListener(null)
+            }
             if (tv.tag != key) {
                 tv.tag = key
                 markwon.setMarkdown(tv, markdown)
@@ -70,6 +101,12 @@ fun MarkdownText(markdown: String, color: Color, modifier: Modifier = Modifier, 
                         }
                     }
                 }
+                // Markwon installs LinkMovementMethod when the text contains links; it consumes
+                // ACTION_DOWN on link spans, which stops the View from firing its long-click.
+                val mm = tv.movementMethod
+                if (mm is LinkMovementMethod && mm !is LongPressFriendlyLinkMovementMethod) {
+                    tv.movementMethod = LongPressFriendlyLinkMovementMethod()
+                }
             }
         },
     )
@@ -80,20 +117,26 @@ fun MarkdownText(markdown: String, color: Color, modifier: Modifier = Modifier, 
  * để giữ cách đánh số chỗ khớp. Ngược lại, khối code được tách riêng để có nút Sao chép và cuộn ngang.
  */
 @Composable
-fun MarkdownBody(text: String, color: Color, highlight: Highlight?, modifier: Modifier = Modifier) {
+fun MarkdownBody(
+    text: String,
+    color: Color,
+    highlight: Highlight?,
+    modifier: Modifier = Modifier,
+    onLongPress: (() -> Unit)? = null,
+) {
     if (highlight != null) {
-        MarkdownText(text, color, modifier, highlight)
+        MarkdownText(text, color, modifier, highlight, onLongPress)
         return
     }
     val segs = remember(text) { parseMarkdownSegments(text) }
     if (segs.none { it is MdSegment.Code }) {
-        MarkdownText(text, color, modifier)
+        MarkdownText(text, color, modifier, onLongPress = onLongPress)
         return
     }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segs.forEach { seg ->
             when (seg) {
-                is MdSegment.Text -> MarkdownText(seg.markdown, color)
+                is MdSegment.Text -> MarkdownText(seg.markdown, color, onLongPress = onLongPress)
                 is MdSegment.Code -> CodeBlock(seg.language, seg.code)
             }
         }

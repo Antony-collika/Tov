@@ -6,6 +6,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -129,6 +130,22 @@ internal fun UserMessage(
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
     val haptic = LocalHapticFeedback.current
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+        // Zero-size anchor at the top-end of the message; the dropdown opens below it.
+        if (menuOpen) {
+            Box(Modifier.align(Alignment.End)) {
+                val items = buildList {
+                    if (m.text.isNotBlank()) {
+                        add(MenuAction(Icons.Default.ContentCopy, "Copy") { actions.copy(m.text) })
+                        add(MenuAction(Icons.Default.SelectAll, "Select text") { selectOpen = true })
+                    }
+                    add(MenuAction(Icons.Default.Edit, "Edit message", enabled = !generating) { actions.edit(m) })
+                    add(MenuAction(Icons.Default.Autorenew, "Edit & regenerate", enabled = !generating) { actions.editRegen(m) })
+                    if (canRegen) add(MenuAction(Icons.Default.Refresh, "Regenerate", enabled = !generating) { actions.regen(m) })
+                    add(MenuAction(Icons.Default.Delete, "Delete", enabled = !generating, destructive = true) { actions.delete(m) })
+                }
+                MessageMenuDropdown(items, LOCKED_NOTE) { menuOpen = false }
+            }
+        }
         if (edit != null) {
             MessageEditor(edit, if (edit.regen) "Save & regenerate" else "Save", onEditChange, onEditSave, onEditCancel)
         } else {
@@ -166,19 +183,6 @@ internal fun UserMessage(
             if (m.edited) EditedLabel()
         }
     }
-    if (menuOpen) {
-        val items = buildList {
-            if (m.text.isNotBlank()) {
-                add(MenuAction(Icons.Default.ContentCopy, "Copy") { actions.copy(m.text) })
-                add(MenuAction(Icons.Default.SelectAll, "Select text") { selectOpen = true })
-            }
-            add(MenuAction(Icons.Default.Edit, "Edit message", enabled = !generating) { actions.edit(m) })
-            add(MenuAction(Icons.Default.Autorenew, "Edit & regenerate", enabled = !generating) { actions.editRegen(m) })
-            if (canRegen) add(MenuAction(Icons.Default.Refresh, "Regenerate", enabled = !generating) { actions.regen(m) })
-            add(MenuAction(Icons.Default.Delete, "Delete", enabled = !generating, destructive = true) { actions.delete(m) })
-        }
-        MessageMenuSheet(items, LOCKED_NOTE) { menuOpen = false }
-    }
     viewerIndex?.let { idx -> ImageViewerDialog(m.images(), idx) { viewerIndex = null } }
     if (selectOpen) SelectTextSheet(m.text, onCopyAll = { actions.copy(m.text) }, onDismiss = { selectOpen = false })
 }
@@ -213,6 +217,14 @@ internal fun AssistantMessage(
     val haptic = LocalHapticFeedback.current
     // While streaming, the in-memory text is newer than what is in the database.
     val shownText = if (liveText != null && liveText.length >= m.text.length) liveText else m.text
+    // Opens the menu. Also handed to the markdown body so a long-press on the AI text
+    // itself (a real Android TextView, which swallows the Compose gesture) opens it too.
+    val openMenu = {
+        if (edit == null) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            menuOpen = true
+        }
+    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -221,21 +233,36 @@ internal fun AssistantMessage(
                 indication = null,
                 onClick = {},
                 onLongClickLabel = "Message options",
-                onLongClick = {
-                    if (edit == null) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menuOpen = true
-                    }
-                },
+                onLongClick = { openMenu() },
             ),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // Zero-size anchor at the top-end of the message; the dropdown opens below it.
+        if (menuOpen) {
+            Box(Modifier.align(Alignment.End)) {
+                val items = buildList {
+                    if (shownText.isNotBlank()) {
+                        add(MenuAction(Icons.Default.ContentCopy, "Copy") { actions.copy(shownText) })
+                        add(MenuAction(Icons.Default.SelectAll, "Select text") { selectText = shownText })
+                        if (m.status != "error") {
+                            add(MenuAction(Icons.Default.Edit, "Edit message", enabled = !generating) { actions.edit(m) })
+                        }
+                    }
+                    if (m.status != "error") {
+                        add(MenuAction(Icons.Default.CallSplit, "Branch in new chat", enabled = !generating) { actions.branch(m) })
+                    }
+                    add(MenuAction(Icons.Default.Refresh, "Regenerate", enabled = !generating) { actions.regen(m) })
+                    add(MenuAction(Icons.Default.Delete, "Delete", enabled = !generating, destructive = true) { actions.delete(m) })
+                }
+                MessageMenuDropdown(items, LOCKED_NOTE) { menuOpen = false }
+            }
+        }
         if (edit != null) {
             MessageEditor(edit, "Save", onEditChange, onEditSave, onEditCancel)
             return@Column
         }
         if (shownText.isNotEmpty()) {
-            MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl)
+            MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl, onLongPress = openMenu)
         } else if (m.status == "streaming") {
             CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
         }
@@ -281,23 +308,6 @@ internal fun AssistantMessage(
         } else if (m.edited) {
             EditedLabel()
         }
-    }
-    if (menuOpen) {
-        val items = buildList {
-            if (shownText.isNotBlank()) {
-                add(MenuAction(Icons.Default.ContentCopy, "Copy") { actions.copy(shownText) })
-                add(MenuAction(Icons.Default.SelectAll, "Select text") { selectText = shownText })
-                if (m.status != "error") {
-                    add(MenuAction(Icons.Default.Edit, "Edit message", enabled = !generating) { actions.edit(m) })
-                }
-            }
-            if (m.status != "error") {
-                add(MenuAction(Icons.Default.CallSplit, "Branch in new chat", enabled = !generating) { actions.branch(m) })
-            }
-            add(MenuAction(Icons.Default.Refresh, "Regenerate", enabled = !generating) { actions.regen(m) })
-            add(MenuAction(Icons.Default.Delete, "Delete", enabled = !generating, destructive = true) { actions.delete(m) })
-        }
-        MessageMenuSheet(items, LOCKED_NOTE) { menuOpen = false }
     }
     selectText?.let { snap -> SelectTextSheet(snap, onCopyAll = { actions.copy(snap) }, onDismiss = { selectText = null }) }
 }

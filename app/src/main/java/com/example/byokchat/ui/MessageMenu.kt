@@ -1,22 +1,14 @@
 package com.example.byokchat.ui
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
@@ -30,41 +22,40 @@ internal class MenuAction(
 )
 
 /**
- * The menu that opens when you press and hold a message: a bottom sheet with one row per action.
- * [lockedNote] explains why some rows are greyed out (e.g. the AI is still answering).
+ * The menu that opens when you press and hold a message: a floating dropdown with a white
+ * background and elevation, one row per action. [lockedNote] explains why some rows are
+ * greyed out (e.g. the AI is still answering). Place it inside a small Box anchored where
+ * the menu should appear (e.g. the top-end corner of the message); the dropdown is a popup
+ * and only exists in the tree while the menu is open.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MessageMenuSheet(actions: List<MenuAction>, lockedNote: String?, onDismiss: () -> Unit) {
-    val sheetState = rememberModalBottomSheetState()
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
-            if (lockedNote != null && actions.any { !it.enabled }) {
-                Text(
-                    lockedNote,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
-                )
+internal fun MessageMenuDropdown(actions: List<MenuAction>, lockedNote: String?, onDismiss: () -> Unit) {
+    DropdownMenu(
+        expanded = true,
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        shadowElevation = 8.dp,
+    ) {
+        if (lockedNote != null && actions.any { !it.enabled }) {
+            Text(
+                lockedNote,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+        actions.forEach { a ->
+            val color = when {
+                !a.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                a.destructive -> MaterialTheme.colorScheme.error
+                else -> MaterialTheme.colorScheme.onSurface
             }
-            actions.forEach { a ->
-                val color = when {
-                    !a.enabled -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                    a.destructive -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurface
-                }
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = a.enabled) { onDismiss(); a.onClick() }
-                        .padding(horizontal = 24.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(a.icon, contentDescription = null, tint = color)
-                    Spacer(Modifier.width(16.dp))
-                    Text(a.label, color = color, style = MaterialTheme.typography.bodyLarge)
-                }
-            }
+            DropdownMenuItem(
+                text = { Text(a.label, color = color) },
+                onClick = { onDismiss(); a.onClick() },
+                leadingIcon = { Icon(a.icon, contentDescription = null, tint = color) },
+                enabled = a.enabled,
+            )
         }
     }
 }
