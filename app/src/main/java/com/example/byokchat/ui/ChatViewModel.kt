@@ -144,7 +144,11 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     // ---------- Cài đặt cuộc trò chuyện ----------
 
     fun setModel(providerId: String, model: String) {
-        viewModelScope.launch { db.conversations().setModel(conversationId, providerId, model) }
+        viewModelScope.launch {
+            db.conversations().setModel(conversationId, providerId, model)
+            // Ghi nhớ lựa chọn để chat mới cũng dùng mô hình này.
+            app.settings.setCurrentModel(providerId, model)
+        }
     }
 
     /** Ghim / bỏ ghim một mô hình của nhà cung cấp (không đổi mô hình đang dùng). */

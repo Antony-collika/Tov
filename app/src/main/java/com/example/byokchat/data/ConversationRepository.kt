@@ -6,19 +6,25 @@ class ConversationRepository(
     private val db: AppDatabase,
     private val settings: SettingsRepository,
 ) {
-    /** Tạo cuộc trò chuyện mới với nhà cung cấp / mô hình / prompt mặc định. */
+    /** Tạo cuộc trò chuyện mới: dùng lựa chọn mô hình toàn cục nếu còn hợp lệ, nếu không thì nhà cung cấp mặc định và chưa chọn mô hình. */
     suspend fun create(): String {
         // Never let empty drafts pile up: drop any conversation that has no messages first.
         db.conversations().deleteEmpty()
         val p = settings.defaultProvider()
-        val model = p?.defaultModel?.takeIf { it.isNotBlank() } ?: p?.models?.firstOrNull() ?: ""
+        val selProvider = settings.currentModelProviderId.value?.let { settings.provider(it) }
+        val selModel = settings.currentModel.value
+        val (providerId, model) = if (selProvider != null && !selModel.isNullOrBlank() && selModel in selProvider.models) {
+            selProvider.id to selModel
+        } else {
+            (p?.id ?: "") to ""
+        }
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         db.conversations().insert(
             ConversationEntity(
                 id = id,
                 title = DEFAULT_TITLE,
-                providerId = p?.id ?: "",
+                providerId = providerId,
                 model = model,
                 createdAt = now,
                 updatedAt = now,

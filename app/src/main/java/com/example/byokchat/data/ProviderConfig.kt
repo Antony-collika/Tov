@@ -19,7 +19,6 @@ data class ProviderConfig(
     /** Để trống = dùng địa chỉ mặc định của nhà cung cấp. Bắt buộc với loại Tùy chỉnh. */
     val baseUrl: String = "",
     val models: List<String> = emptyList(),
-    val defaultModel: String = "",
     /** 0 = tự đoán theo tên mô hình. */
     val contextTokens: Int = 0,
     val maxOutputTokens: Int = 8192,

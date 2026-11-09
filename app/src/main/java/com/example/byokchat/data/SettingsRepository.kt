@@ -34,6 +34,19 @@ class SettingsRepository(context: Context) {
     private val _activeProviderId = MutableStateFlow(plain.getString("active_provider", null))
     val activeProviderId: StateFlow<String?> = _activeProviderId.asStateFlow()
 
+    /** Lựa chọn mô hình toàn cục: mô hình user chọn lần cuối ở màn hình chat. Chat mới dùng lựa chọn này nếu còn hợp lệ. */
+    private val _currentModelProviderId = MutableStateFlow(plain.getString("current_model_provider", null))
+    val currentModelProviderId: StateFlow<String?> = _currentModelProviderId.asStateFlow()
+
+    private val _currentModel = MutableStateFlow(plain.getString("current_model", null))
+    val currentModel: StateFlow<String?> = _currentModel.asStateFlow()
+
+    fun setCurrentModel(providerId: String?, model: String?) {
+        _currentModelProviderId.value = providerId
+        _currentModel.value = model
+        plain.edit().putString("current_model_provider", providerId).putString("current_model", model).apply()
+    }
+
     private val _workspaceUri = MutableStateFlow(plain.getString("workspace_uri", null))
     val workspaceUri: StateFlow<String?> = _workspaceUri.asStateFlow()
 
