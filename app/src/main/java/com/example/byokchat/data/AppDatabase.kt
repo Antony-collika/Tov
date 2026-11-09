@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,8 +30,10 @@ abstract class AppDatabase : RoomDatabase() {
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "byokchat.db")
                 .addMigrations(MIGRATION_1_2)
-                // v2 -> v3 drops the per-conversation systemPrompt column. No migration is
-                // written for it: the app is still being built and has no user chats to keep,
+                // v2 -> v3 drops the per-conversation systemPrompt column, and v3 -> v4 drops the
+                // per-conversation providerId/model columns (the provider/model choice is now a
+                // single global choice in Settings, shared by every conversation). No migration is
+                // written for either: the app is still being built and has no user chats to keep,
                 // so the database is recreated instead.
                 .fallbackToDestructiveMigration()
                 .build()

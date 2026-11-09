@@ -4,28 +4,17 @@ import java.util.UUID
 
 class ConversationRepository(
     private val db: AppDatabase,
-    private val settings: SettingsRepository,
 ) {
-    /** Tạo cuộc trò chuyện mới: dùng lựa chọn mô hình toàn cục nếu còn hợp lệ, nếu không thì nhà cung cấp mặc định và chưa chọn mô hình. */
+    /** Tạo cuộc trò chuyện mới. Nhà cung cấp và mô hình dùng cho cuộc này là lựa chọn toàn cục trong Settings — không lưu riêng theo cuộc nữa. */
     suspend fun create(): String {
         // Never let empty drafts pile up: drop any conversation that has no messages first.
         db.conversations().deleteEmpty()
-        val p = settings.defaultProvider()
-        val selProvider = settings.currentModelProviderId.value?.let { settings.provider(it) }
-        val selModel = settings.currentModel.value
-        val (providerId, model) = if (selProvider != null && !selModel.isNullOrBlank() && selModel in selProvider.models) {
-            selProvider.id to selModel
-        } else {
-            (p?.id ?: "") to ""
-        }
         val id = UUID.randomUUID().toString()
         val now = System.currentTimeMillis()
         db.conversations().insert(
             ConversationEntity(
                 id = id,
                 title = DEFAULT_TITLE,
-                providerId = providerId,
-                model = model,
                 createdAt = now,
                 updatedAt = now,
             )

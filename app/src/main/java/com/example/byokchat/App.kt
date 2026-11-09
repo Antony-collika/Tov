@@ -88,7 +88,7 @@ class AppContainer(val context: Context) {
 
     /** Lý do hệ thống từ chối bật dịch vụ nền (nếu có), để tra cứu khi báo cáo. */
     val foregroundServiceError = MutableStateFlow<String?>(null)
-    val conversations = ConversationRepository(db, settings)
+    val conversations = ConversationRepository(db)
     val ops = ChatOps(db)
 
     init {

@@ -24,8 +24,6 @@ fun displayTitle(title: String): String = if (title == LEGACY_DEFAULT_TITLE) DEF
 data class ConversationEntity(
     @PrimaryKey val id: String,
     val title: String,
-    val providerId: String,
-    val model: String,
     val createdAt: Long,
     val updatedAt: Long,
     /** Id of the conversation this one was branched from (null if it is not a branch). */

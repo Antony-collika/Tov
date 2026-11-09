@@ -38,12 +38,14 @@ import java.util.UUID
 
 data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int)
 
-/** Input gộp cho tokenStats: thêm system prompt mặc định để đổi prompt trong Settings thì số liệu cập nhật theo. */
+/** Input gộp cho tokenStats: thêm system prompt mặc định để đổi prompt trong Settings thì số liệu cập nhật theo, và lựa chọn mô hình toàn cục để đổi model ở chat nào thì số liệu cũng cập nhật theo. */
 private data class StatsInput(
     val conversation: ConversationEntity?,
     val messages: List<MessageEntity>,
     val providers: List<ProviderConfig>,
     val systemPrompt: String,
+    val currentProviderId: String?,
+    val currentModel: String?,
 )
 
 sealed interface ChatEvent {
@@ -69,19 +71,24 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     val providers: StateFlow<List<ProviderConfig>> = app.settings.providers
 
+    /** Lựa chọn mô hình toàn cục: mọi cuộc trò chuyện đều dùng mô hình này. */
+    val currentModelProviderId: StateFlow<String?> = app.settings.currentModelProviderId
+    val currentModel: StateFlow<String?> = app.settings.currentModel
+
     /** Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi (luôn theo nội dung đã sửa). */
     val tokenStats: StateFlow<TokenStats?> =
-        combine(conversation, messages, providers, app.settings.defaultSystemPrompt) { c, m, p, prompt ->
-            StatsInput(c, m, p, prompt)
+        combine(conversation, messages, providers, app.settings.defaultSystemPrompt, app.settings.currentModelProviderId, app.settings.currentModel) { c, m, p, prompt, providerId, model ->
+            StatsInput(c, m, p, prompt, providerId, model)
         }
             .debounce(400)
-            .map { (c, m, p, prompt) ->
-                val cfg = p.firstOrNull { it.id == c?.providerId }
+            .map { (c, m, p, prompt, providerId, model) ->
+                val cfg = p.firstOrNull { it.id == providerId }
                 if (c == null || cfg == null) null
                 else {
-                    val budget = ContextBuilder.budget(cfg, c.model, prompt, app.registry.estimateToolTokens())
+                    val modelName = model.orEmpty()
+                    val budget = ContextBuilder.budget(cfg, modelName, prompt, app.registry.estimateToolTokens())
                     val plan = ContextBuilder.plan(m, budget, app.registry::nameForUid)
-                    TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, c.model), plan.droppedTurns)
+                    TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, modelName), plan.droppedTurns)
                 }
             }
             .flowOn(Dispatchers.Default)
@@ -143,12 +150,9 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     // ---------- Cài đặt cuộc trò chuyện ----------
 
+    /** Chọn mô hình: lựa chọn toàn cục duy nhất — mọi cuộc trò chuyện đều dùng mô hình này. */
     fun setModel(providerId: String, model: String) {
-        viewModelScope.launch {
-            db.conversations().setModel(conversationId, providerId, model)
-            // Ghi nhớ lựa chọn để chat mới cũng dùng mô hình này.
-            app.settings.setCurrentModel(providerId, model)
-        }
+        app.settings.setCurrentModel(providerId, model)
     }
 
     /** Ghim / bỏ ghim một mô hình của nhà cung cấp (không đổi mô hình đang dùng). */

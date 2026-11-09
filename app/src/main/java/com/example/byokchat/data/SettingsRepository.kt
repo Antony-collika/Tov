@@ -47,6 +47,9 @@ class SettingsRepository(context: Context) {
         plain.edit().putString("current_model_provider", providerId).putString("current_model", model).apply()
     }
 
+    /** Nhà cung cấp của lựa chọn mô hình toàn cục (null nếu chưa chọn hoặc provider đã bị xóa). */
+    fun currentModelProvider(): ProviderConfig? = currentModelProviderId.value?.let { provider(it) }
+
     private val _workspaceUri = MutableStateFlow(plain.getString("workspace_uri", null))
     val workspaceUri: StateFlow<String?> = _workspaceUri.asStateFlow()
 

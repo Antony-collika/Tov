@@ -86,6 +86,8 @@ fun ChatScreen(
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()
     val providers by vm.providers.collectAsState()
+    val currentProviderId by vm.currentModelProviderId.collectAsState()
+    val currentModelName by vm.currentModel.collectAsState()
     val modelsRefreshing by vm.modelsRefreshing.collectAsState()
     val stats by vm.tokenStats.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()
@@ -248,8 +250,9 @@ fun ChatScreen(
         listState.interactionSource.interactions.collect { if (it is DragInteraction.Start) followNewest = false }
     }
 
-    val provider = providers.firstOrNull { it.id == conv?.providerId }
-    val modelName = conv?.model.orEmpty()
+    // Chip chọn mô hình và bảng chọn mô hình đều theo lựa chọn toàn cục, không theo từng cuộc nữa.
+    val provider = providers.firstOrNull { it.id == currentProviderId }
+    val modelName = currentModelName.orEmpty()
     val modelMissing = provider == null || modelName.isBlank()
     val chipLabel = when {
         provider == null || modelName.isBlank() -> "Select model"
@@ -427,8 +430,8 @@ fun ChatScreen(
     if (showModelPicker) {
         ModelPickerSheet(
             providers = providers,
-            providerId = conv?.providerId ?: "",
-            model = conv?.model ?: "",
+            providerId = currentProviderId ?: "",
+            model = currentModelName ?: "",
             refreshing = modelsRefreshing,
             onSelect = { pid, model -> vm.setModel(pid, model); showModelPicker = false },
             onTogglePin = { pid, model -> vm.togglePin(pid, model) },

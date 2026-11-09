@@ -38,9 +38,6 @@ interface ConversationDao {
     @Query("UPDATE conversations SET title = :title WHERE id = :id")
     suspend fun rename(id: String, title: String)
 
-    @Query("UPDATE conversations SET providerId = :providerId, model = :model WHERE id = :id")
-    suspend fun setModel(id: String, providerId: String, model: String)
-
     @Query("UPDATE conversations SET updatedAt = :time WHERE id = :id")
     suspend fun touch(id: String, time: Long)
 

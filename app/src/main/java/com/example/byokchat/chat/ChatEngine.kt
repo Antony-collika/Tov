@@ -95,12 +95,14 @@ class ChatEngine(
             var error: String? = null
             var cancelled: CancellationException? = null
             try {
-                val cfg = settings.provider(conv.providerId)
+                // Nhà cung cấp và mô hình dùng cho mọi cuộc trò chuyện đều là lựa chọn toàn cục trong Settings.
+                val cfg = settings.currentModelProvider()
                     ?: throw AiException("No AI provider is selected. Go to Settings → AI providers to add one, then tap the model name in the message box to choose a model.")
                 if (cfg.apiKey.isBlank() && cfg.type != ProviderType.CUSTOM) {
                     throw AiException("The provider \"${cfg.name}\" has no API key yet. Enter the key in Settings.")
                 }
-                if (conv.model.isBlank()) throw AiException("No model is selected. Tap the model name in the message box to choose one.")
+                val model = settings.currentModel.value.orEmpty()
+                if (model.isBlank()) throw AiException("No model is selected. Tap the model name in the message box to choose one.")
                 if (!cfg.effectiveBaseUrl().startsWith("http")) {
                     throw AiException("The server address of \"${cfg.name}\" is not valid (it must start with http:// or https://).")
                 }
@@ -109,13 +111,13 @@ class ChatEngine(
                 // Chỉ còn một system prompt duy nhất: mặc định trong Settings.
                 val system = settings.defaultSystemPrompt.value
                 val budget = ContextBuilder.budget(
-                    cfg, conv.model, system,
+                    cfg, model, system,
                     toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
                 )
                 val history = ContextBuilder
                     .plan(msgDao.getAll(conversationId).filter { it.id != assistantId }, budget, tools::nameForUid)
                     .messages
-                val request = AiRequest(conv.model, system, history, toolDefs, cfg.maxOutputTokens)
+                val request = AiRequest(model, system, history, toolDefs, cfg.maxOutputTokens)
 
                 var lastFlush = System.currentTimeMillis()
                 var lastLive = 0L
