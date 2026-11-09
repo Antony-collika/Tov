@@ -77,8 +77,7 @@ fun ProvidersScreen(onBack: () -> Unit, onAdd: (ProviderType) -> Unit, onEdit: (
                         headlineContent = { Text(p.name + if (p.id == activeId) "  (default)" else "") },
                         supportingContent = {
                             Text(
-                                p.type.label + " · " +
-                                    (p.defaultModel.ifBlank { "no model selected" }) +
+                                p.type.label +
                                     if (p.apiKey.isBlank() && p.type != ProviderType.CUSTOM) " · missing API key" else ""
                             )
                         },

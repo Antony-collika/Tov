@@ -153,7 +153,7 @@ class OnboardingViewModel(private val app: AppContainer) : ViewModel() {
                     if (list.isEmpty()) {
                         check = CheckState.Failed(
                             "Connected, but the server has no models to choose from. " +
-                                "You can tap \"Skip\" and add a model manually in Settings → AI providers."
+                                "You can tap \"Skip\" and connect an AI later from the chat screen."
                         )
                     } else {
                         models = list
@@ -188,9 +188,10 @@ class OnboardingViewModel(private val app: AppContainer) : ViewModel() {
                 apiKey = apiKey.trim(),
                 baseUrl = if (t == ProviderType.CUSTOM) baseUrl.trim() else "",
                 models = list,
-                defaultModel = list.first(),
             )
             app.settings.saveProvider(cfg, makeDefault = true)
+            // Chat đầu tiên sau onboarding đã có model: chọn model đầu tiên user đã tick.
+            app.settings.setCurrentModel(cfg.id, list.first())
             app.settings.setOnboardingDone(true)
             return app.conversations.create()
         } finally {
@@ -333,7 +334,7 @@ private fun StepPickModels(vm: OnboardingViewModel) {
     val shown = remember(vm.models, vm.filter) { vm.models.filter { it.contains(vm.filter, ignoreCase = true) } }
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Choose a model", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 8.dp))
-        Text("Tick at least one model. The first model you tick becomes the default.", style = MaterialTheme.typography.bodyMedium)
+        Text("Tick at least one model.", style = MaterialTheme.typography.bodyMedium)
         OutlinedTextField(
             value = vm.filter,
             onValueChange = { vm.filter = it },
@@ -348,9 +349,6 @@ private fun StepPickModels(vm: OnboardingViewModel) {
                     Text(m, modifier = Modifier.padding(start = 8.dp))
                 }
             }
-        }
-        if (vm.picked.isNotEmpty()) {
-            Text("Default model: ${vm.picked.first()}", style = MaterialTheme.typography.labelLarge)
         }
         Text(
             "You can add more models later in Settings → AI providers.",

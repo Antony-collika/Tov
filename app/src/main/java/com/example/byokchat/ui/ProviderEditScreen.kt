@@ -1,7 +1,6 @@
 package com.example.byokchat.ui
 
 import android.widget.Toast
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,7 +15,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -27,7 +25,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -70,13 +67,13 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     var showKey by remember { mutableStateOf(false) }
     var baseUrl by remember { mutableStateOf(existing?.baseUrl ?: "") }
     val models = remember { mutableStateListOf<String>().apply { addAll(existing?.models ?: emptyList()) } }
-    var defaultModel by remember { mutableStateOf(existing?.defaultModel ?: "") }
-    var newModel by remember { mutableStateOf("") }
     var contextText by remember { mutableStateOf(existing?.contextTokens?.takeIf { it > 0 }?.toString() ?: "") }
     var maxOutText by remember { mutableStateOf((existing?.maxOutputTokens ?: 8192).toString()) }
     var makeDefault by remember { mutableStateOf(existing == null || existing.id == activeId) }
     var fetching by remember { mutableStateOf(false) }
-    var fetched by remember { mutableStateOf<List<String>?>(null) }
+    /** Kết quả lần fetch gần nhất: null = chưa fetch. */
+    var fetchMessage by remember { mutableStateOf<String?>(null) }
+    var fetchFailed by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
@@ -90,7 +87,6 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
             apiKey = apiKey.trim(),
             baseUrl = baseUrl.trim(),
             models = list,
-            defaultModel = defaultModel.takeIf { it in list } ?: list.firstOrNull() ?: "",
             contextTokens = contextText.trim().toIntOrNull() ?: 0,
             maxOutputTokens = maxOutText.trim().toIntOrNull()?.coerceAtLeast(256) ?: 8192,
         )
@@ -159,41 +155,6 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            Text("Models", style = MaterialTheme.typography.titleSmall)
-            Text(
-                "Choose one model as the default for new conversations.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            models.toList().forEach { m ->
-                Row(Modifier.fillMaxWidth().clickable { defaultModel = m }, verticalAlignment = Alignment.CenterVertically) {
-                    RadioButton(selected = defaultModel == m, onClick = { defaultModel = m })
-                    Text(m, modifier = Modifier.weight(1f))
-                    IconButton(onClick = {
-                        models.remove(m)
-                        if (defaultModel == m) defaultModel = models.firstOrNull() ?: ""
-                    }) { Icon(Icons.Default.Close, contentDescription = "Remove model") }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = newModel,
-                    onValueChange = { newModel = it },
-                    label = { Text("Add a model name") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedButton(
-                    onClick = {
-                        val m = newModel.trim()
-                        if (m.isNotEmpty() && m !in models) {
-                            models.add(m)
-                            if (defaultModel.isBlank()) defaultModel = m
-                        }
-                        newModel = ""
-                    },
-                ) { Text("Add") }
-            }
             Button(
                 enabled = !fetching,
                 onClick = {
@@ -205,9 +166,14 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     scope.launch {
                         fetching = true
                         try {
-                            fetched = ProviderFactory.create(cfg).listModels()
+                            val list = ProviderFactory.create(cfg).listModels().distinct()
+                            models.clear()
+                            models.addAll(list)
+                            fetchFailed = false
+                            fetchMessage = "Fetched ${list.size} models. Pick a model in the chat input bar."
                         } catch (e: Exception) {
-                            toast("Couldn't fetch the list: ${e.message}")
+                            fetchFailed = true
+                            fetchMessage = "Failed to fetch models" + (e.message?.let { ": $it" } ?: "")
                         } finally {
                             fetching = false
                         }
@@ -216,6 +182,13 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
             ) {
                 if (fetching) CircularProgressIndicator(Modifier.padding(end = 8.dp).heightIn(max = 18.dp), strokeWidth = 2.dp)
                 Text("Fetch the model list from the server")
+            }
+            fetchMessage?.let { msg ->
+                Text(
+                    msg,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (fetchFailed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                )
             }
 
             OutlinedTextField(
@@ -245,19 +218,6 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 ) { Text("Delete this provider", color = MaterialTheme.colorScheme.error) }
             }
         }
-    }
-
-    fetched?.let { all ->
-        FetchedModelsDialog(
-            all = all,
-            alreadyAdded = models.toList(),
-            onAdd = { picked ->
-                picked.forEach { if (it !in models) models.add(it) }
-                if (defaultModel.isBlank()) defaultModel = models.firstOrNull() ?: ""
-                fetched = null
-            },
-            onDismiss = { fetched = null },
-        )
     }
 
     if (confirmDelete && existing != null) {
