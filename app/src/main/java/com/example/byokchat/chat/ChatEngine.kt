@@ -106,14 +106,16 @@ class ChatEngine(
                 }
 
                 val toolDefs = tools.definitions()
+                // Chỉ còn một system prompt duy nhất: mặc định trong Settings.
+                val system = settings.defaultSystemPrompt.value
                 val budget = ContextBuilder.budget(
-                    cfg, conv.model, conv.systemPrompt,
+                    cfg, conv.model, system,
                     toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
                 )
                 val history = ContextBuilder
                     .plan(msgDao.getAll(conversationId).filter { it.id != assistantId }, budget, tools::nameForUid)
                     .messages
-                val request = AiRequest(conv.model, conv.systemPrompt, history, toolDefs, cfg.maxOutputTokens)
+                val request = AiRequest(conv.model, system, history, toolDefs, cfg.maxOutputTokens)
 
                 var lastFlush = System.currentTimeMillis()
                 var lastLive = 0L

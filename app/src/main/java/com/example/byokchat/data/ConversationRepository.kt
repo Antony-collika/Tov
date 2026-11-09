@@ -20,7 +20,6 @@ class ConversationRepository(
                 title = DEFAULT_TITLE,
                 providerId = p?.id ?: "",
                 model = model,
-                systemPrompt = settings.defaultSystemPrompt.value,
                 createdAt = now,
                 updatedAt = now,
             )

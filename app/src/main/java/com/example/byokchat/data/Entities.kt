@@ -26,7 +26,6 @@ data class ConversationEntity(
     val title: String,
     val providerId: String,
     val model: String,
-    val systemPrompt: String,
     val createdAt: Long,
     val updatedAt: Long,
     /** Id of the conversation this one was branched from (null if it is not a branch). */

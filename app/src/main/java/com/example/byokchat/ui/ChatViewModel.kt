@@ -38,6 +38,14 @@ import java.util.UUID
 
 data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int)
 
+/** Input gộp cho tokenStats: thêm system prompt mặc định để đổi prompt trong Settings thì số liệu cập nhật theo. */
+private data class StatsInput(
+    val conversation: ConversationEntity?,
+    val messages: List<MessageEntity>,
+    val providers: List<ProviderConfig>,
+    val systemPrompt: String,
+)
+
 sealed interface ChatEvent {
     data class Deleted(val backup: List<MessageEntity>) : ChatEvent
     /** A branch was created; the screen should switch to it (and offer a way back to the original). */
@@ -63,13 +71,15 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi (luôn theo nội dung đã sửa). */
     val tokenStats: StateFlow<TokenStats?> =
-        combine(conversation, messages, providers) { c, m, p -> Triple(c, m, p) }
+        combine(conversation, messages, providers, app.settings.defaultSystemPrompt) { c, m, p, prompt ->
+            StatsInput(c, m, p, prompt)
+        }
             .debounce(400)
-            .map { (c, m, p) ->
+            .map { (c, m, p, prompt) ->
                 val cfg = p.firstOrNull { it.id == c?.providerId }
                 if (c == null || cfg == null) null
                 else {
-                    val budget = ContextBuilder.budget(cfg, c.model, c.systemPrompt, app.registry.estimateToolTokens())
+                    val budget = ContextBuilder.budget(cfg, c.model, prompt, app.registry.estimateToolTokens())
                     val plan = ContextBuilder.plan(m, budget, app.registry::nameForUid)
                     TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, c.model), plan.droppedTurns)
                 }
@@ -177,10 +187,6 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 _modelsRefreshing.value = false
             }
         }
-    }
-
-    fun setSystemPrompt(prompt: String) {
-        viewModelScope.launch { db.conversations().setSystemPrompt(conversationId, prompt) }
     }
 
     fun rename(title: String) {

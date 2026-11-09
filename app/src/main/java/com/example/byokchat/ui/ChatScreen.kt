@@ -20,7 +20,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -102,7 +101,6 @@ fun ChatScreen(
     val pickFolder = rememberFolderPicker()
 
     var showModelPicker by remember { mutableStateOf(false) }
-    var showPrompt by remember { mutableStateOf(false) }
     var showMemory by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<EditState?>(null) }
@@ -333,7 +331,6 @@ fun ChatScreen(
                     },
                     actions = {
                         IconButton(onClick = { searchOpen = true }) { Icon(Icons.Default.Search, contentDescription = "Search") }
-                        val hasPrompt = conv?.systemPrompt?.isNotBlank() == true
                         Box {
                             IconButton(onClick = { showMenu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "More")
@@ -341,13 +338,6 @@ fun ChatScreen(
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(text = { Text("New chat") }, onClick = { showMenu = false; onNewChat() })
                                 DropdownMenuItem(text = { Text("Chat memory") }, onClick = { showMenu = false; showMemory = true })
-                                DropdownMenuItem(
-                                    text = { Text("System prompt") },
-                                    trailingIcon = if (hasPrompt) {
-                                        { Icon(Icons.Default.Check, contentDescription = "Has a system prompt", modifier = Modifier.size(18.dp)) }
-                                    } else null,
-                                    onClick = { showMenu = false; showPrompt = true },
-                                )
                                 DropdownMenuItem(text = { Text("Settings") }, onClick = { showMenu = false; onOpenSettings() })
                             }
                         }
@@ -444,16 +434,6 @@ fun ChatScreen(
             onTogglePin = { pid, model -> vm.togglePin(pid, model) },
             onConnect = { showModelPicker = false; onOnboarding() },
             onDismiss = { showModelPicker = false },
-        )
-    }
-    if (showPrompt) {
-        TextEditDialog(
-            title = "System prompt",
-            initial = conv?.systemPrompt ?: "",
-            multiline = true,
-            hint = "Fixed instructions for the AI in this chat (for example: role, tone, language of the replies).",
-            onConfirm = { vm.setSystemPrompt(it); showPrompt = false },
-            onDismiss = { showPrompt = false },
         )
     }
     stats?.let { st ->
