@@ -365,7 +365,7 @@ fun ChatScreen(
                     ChatEmptyState(
                         noProvider = providers.isEmpty(),
                         noModel = providers.isNotEmpty() && conv != null && modelName.isBlank(),
-                        onConnect = onOnboarding,
+                        onConnect = { onOpenProvider(null) },
                         onPickModel = { showModelPicker = true },
                         modifier = Modifier.align(Alignment.Center),
                     )
