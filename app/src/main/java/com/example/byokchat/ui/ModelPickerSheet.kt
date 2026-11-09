@@ -2,7 +2,6 @@ package com.example.byokchat.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,17 +9,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +48,7 @@ fun ModelPickerSheet(
     providers: List<ProviderConfig>,
     providerId: String,
     model: String,
+    refreshing: Boolean,
     onSelect: (providerId: String, model: String) -> Unit,
     onTogglePin: (providerId: String, model: String) -> Unit,
     onConnect: () -> Unit,
@@ -66,7 +66,7 @@ fun ModelPickerSheet(
                 Button(onClick = onConnect) { Text("Connect AI") }
             }
         } else {
-            PickerBody(providers, providerId, model, onSelect, onTogglePin)
+            PickerBody(providers, providerId, model, refreshing, onSelect, onTogglePin)
         }
     }
 }
@@ -76,27 +76,28 @@ private fun PickerBody(
     providers: List<ProviderConfig>,
     providerId: String,
     model: String,
+    refreshing: Boolean,
     onSelect: (String, String) -> Unit,
     onTogglePin: (String, String) -> Unit,
 ) {
-    var pid by remember { mutableStateOf(providerId.takeIf { id -> providers.any { it.id == id } } ?: providers.first().id) }
     var query by remember { mutableStateOf("") }
     var manual by remember { mutableStateOf(false) }
-    val cur = providers.firstOrNull { it.id == pid } ?: providers.first()
     val q = query.trim()
-    val pinned = cur.pinnedModels.filter { q.isEmpty() || it.contains(q, ignoreCase = true) }
-    val all = cur.models.filter { q.isEmpty() || it.contains(q, ignoreCase = true) }
+    fun matches(m: String) = q.isEmpty() || m.contains(q, ignoreCase = true)
+    // Ghim ở trên cùng, gom từ mọi provider (mỗi hàng ghi rõ provider của nó).
+    val pinned = providers.flatMap { p -> p.pinnedModels.filter(::matches).map { p to it } }
+    // Nhập tay một tên mô hình thì áp cho provider của cuộc trò chuyện hiện tại.
+    val manualProvider = providers.firstOrNull { it.id == providerId } ?: providers.first()
 
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp).navigationBarsPadding(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text("Choose a model", style = MaterialTheme.typography.titleMedium)
-        if (providers.size >= 2) {
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                providers.forEach { p ->
-                    FilterChip(selected = p.id == cur.id, onClick = { pid = p.id }, label = { Text(p.name) })
-                }
+        if (refreshing) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                Text("Updating model list…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         OutlinedTextField(
@@ -109,26 +110,29 @@ private fun PickerBody(
         LazyColumn(Modifier.heightIn(max = 420.dp)) {
             if (pinned.isNotEmpty()) {
                 item(key = "h-pin") { SectionLabel("Pinned") }
-                items(pinned, key = { "pin:$it" }) { m ->
-                    ModelRow(m, selected = cur.id == providerId && m == model, pinned = true,
-                        onClick = { onSelect(cur.id, m) }, onTogglePin = { onTogglePin(cur.id, m) })
+                items(pinned, key = { (p, m) -> "pin:${p.id}:$m" }) { (p, m) ->
+                    ModelRow(m, subtitle = p.name, selected = p.id == providerId && m == model, pinned = true,
+                        onClick = { onSelect(p.id, m) }, onTogglePin = { onTogglePin(p.id, m) })
                 }
             }
-            item(key = "h-all") { SectionLabel("All") }
-            if (all.isEmpty()) {
-                item(key = "empty") {
-                    Text(
-                        if (q.isEmpty()) "This provider has no models yet. Enter a model name in the row below."
-                        else "No models match.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
+            providers.forEach { p ->
+                val list = p.models.filter(::matches)
+                item(key = "h:${p.id}") { SectionLabel(p.name) }
+                if (list.isEmpty()) {
+                    item(key = "empty:${p.id}") {
+                        Text(
+                            if (q.isEmpty()) "No models saved yet. You can enter a model name in the row at the bottom."
+                            else "No models match.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    }
                 }
-            }
-            items(all, key = { "all:$it" }) { m ->
-                ModelRow(m, selected = cur.id == providerId && m == model, pinned = m in cur.pinnedModels,
-                    onClick = { onSelect(cur.id, m) }, onTogglePin = { onTogglePin(cur.id, m) })
+                items(list, key = { m -> "all:${p.id}:$m" }) { m ->
+                    ModelRow(m, subtitle = null, selected = p.id == providerId && m == model, pinned = m in p.pinnedModels,
+                        onClick = { onSelect(p.id, m) }, onTogglePin = { onTogglePin(p.id, m) })
+                }
             }
             item(key = "manual") {
                 Text(
@@ -142,7 +146,7 @@ private fun PickerBody(
     }
 
     if (manual) {
-        var typed by remember { mutableStateOf(if (cur.id == providerId) model else "") }
+        var typed by remember { mutableStateOf(if (manualProvider.id == providerId) model else "") }
         AlertDialog(
             onDismissRequest = { manual = false },
             title = { Text("Enter a model name") },
@@ -157,7 +161,7 @@ private fun PickerBody(
             },
             confirmButton = {
                 TextButton(
-                    onClick = { manual = false; onSelect(cur.id, typed.trim()) },
+                    onClick = { manual = false; onSelect(manualProvider.id, typed.trim()) },
                     enabled = typed.isNotBlank(),
                 ) { Text("Select") }
             },
@@ -177,7 +181,7 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun ModelRow(model: String, selected: Boolean, pinned: Boolean, onClick: () -> Unit, onTogglePin: () -> Unit) {
+private fun ModelRow(model: String, subtitle: String?, selected: Boolean, pinned: Boolean, onClick: () -> Unit, onTogglePin: () -> Unit) {
     Row(
         Modifier.fillMaxWidth()
             .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, RoundedCornerShape(12.dp))
@@ -185,13 +189,17 @@ private fun ModelRow(model: String, selected: Boolean, pinned: Boolean, onClick:
             .padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            model,
-            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            fontWeight = if (selected) FontWeight.Bold else null,
-        )
+        Column(Modifier.weight(1f).padding(vertical = 12.dp)) {
+            Text(
+                model,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                fontWeight = if (selected) FontWeight.Bold else null,
+            )
+            if (subtitle != null) {
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         IconButton(onClick = onTogglePin) {
             Icon(
                 if (pinned) Icons.Filled.Star else Icons.Filled.StarBorder,

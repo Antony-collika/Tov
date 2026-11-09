@@ -87,6 +87,7 @@ fun ChatScreen(
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()
     val providers by vm.providers.collectAsState()
+    val modelsRefreshing by vm.modelsRefreshing.collectAsState()
     val stats by vm.tokenStats.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()
     val toolPrefs by container.toolPrefs.prefs.collectAsState()
@@ -160,6 +161,11 @@ fun ChatScreen(
                 is ChatEvent.Error -> Toast.makeText(context, ev.message, Toast.LENGTH_LONG).show()
             }
         }
+    }
+
+    // Mở ModelPickerSheet thì làm mới danh sách mô hình từ máy chủ của từng provider.
+    LaunchedEffect(showModelPicker) {
+        if (showModelPicker) vm.refreshModels()
     }
 
     // Just arrived from "Branch": tell the user what happened and offer a way back to the original chat.
@@ -433,6 +439,7 @@ fun ChatScreen(
             providers = providers,
             providerId = conv?.providerId ?: "",
             model = conv?.model ?: "",
+            refreshing = modelsRefreshing,
             onSelect = { pid, model -> vm.setModel(pid, model); showModelPicker = false },
             onTogglePin = { pid, model -> vm.togglePin(pid, model) },
             onConnect = { showModelPicker = false; onOnboarding() },

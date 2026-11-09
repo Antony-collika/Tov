@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.byokchat.AppContainer
 import com.example.byokchat.ai.ImageStore
+import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
@@ -20,7 +21,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -139,6 +142,41 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         val cfg = app.settings.provider(providerId) ?: return
         val pinned = if (model in cfg.pinnedModels) cfg.pinnedModels - model else cfg.pinnedModels + model
         app.settings.saveProvider(cfg.copy(pinnedModels = pinned))
+    }
+
+    /** Đang làm mới danh sách mô hình (hiện trong ModelPickerSheet). */
+    private val _modelsRefreshing = MutableStateFlow(false)
+    val modelsRefreshing: StateFlow<Boolean> = _modelsRefreshing.asStateFlow()
+
+    /**
+     * Làm mới danh sách mô hình của mọi nhà cung cấp từ máy chủ của họ rồi lưu lại,
+     * để ModelPickerSheet luôn hiện danh sách mới nhất thay vì danh sách lưu từ lúc thêm provider.
+     * Lỗi của một provider không chặn các provider khác và không chặn việc chọn mô hình:
+     * danh sách đã lưu được giữ nguyên, chỉ hiện một thông báo lỗi.
+     */
+    fun refreshModels() {
+        if (_modelsRefreshing.value) return
+        viewModelScope.launch {
+            _modelsRefreshing.value = true
+            try {
+                val failed = mutableListOf<String>()
+                for (cfg in providers.value) {
+                    // Chưa có key hoặc địa chỉ máy chủ thì không lấy được gì: bỏ qua, không báo lỗi.
+                    if (cfg.apiKey.isBlank() || cfg.effectiveBaseUrl().isBlank()) continue
+                    try {
+                        val models = ProviderFactory.create(cfg).listModels()
+                        app.settings.saveProvider(cfg.copy(models = models))
+                    } catch (e: Exception) {
+                        failed += cfg.name
+                    }
+                }
+                if (failed.isNotEmpty()) {
+                    _events.emit(ChatEvent.Error("Couldn't fetch the model list for ${failed.joinToString(", ")}. Showing the saved list."))
+                }
+            } finally {
+                _modelsRefreshing.value = false
+            }
+        }
     }
 
     fun setSystemPrompt(prompt: String) {
