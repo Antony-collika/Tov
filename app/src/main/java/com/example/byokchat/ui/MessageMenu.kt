@@ -10,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 
 /** One row of the message menu. A disabled row is shown greyed out (used while the AI is answering). */
@@ -25,14 +26,17 @@ internal class MenuAction(
  * The menu that opens when you press and hold a message: a floating dropdown with a white
  * background and elevation, one row per action. [lockedNote] explains why some rows are
  * greyed out (e.g. the AI is still answering). Place it inside a small Box anchored where
- * the menu should appear (e.g. the top-end corner of the message); the dropdown is a popup
- * and only exists in the tree while the menu is open.
+ * the menu should appear; the dropdown is a popup and only exists in the tree while the
+ * menu is open. [offset] shifts the menu from its default position (top aligned to the
+ * anchor's bottom, start aligned to the anchor's start) — with a zero-size anchor at the
+ * message's top-start, pass the press position here and the menu opens at the finger.
  */
 @Composable
-internal fun MessageMenuDropdown(actions: List<MenuAction>, lockedNote: String?, onDismiss: () -> Unit) {
+internal fun MessageMenuDropdown(actions: List<MenuAction>, lockedNote: String?, offset: DpOffset = DpOffset.Zero, onDismiss: () -> Unit) {
     DropdownMenu(
         expanded = true,
         onDismissRequest = onDismiss,
+        offset = offset,
         containerColor = Color.White,
         shadowElevation = 8.dp,
     ) {

@@ -15,8 +15,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -63,15 +66,25 @@ fun MarkdownText(
     color: Color,
     modifier: Modifier = Modifier,
     highlight: Highlight? = null,
-    onLongPress: (() -> Unit)? = null,
+    onLongPress: ((Offset?) -> Unit)? = null,
+    // Coordinates of the outer Box that anchors the long-press menu (see
+    // AssistantMessage). The TextView's own touch position is converted into that
+    // space so the menu opens where the finger is, not at a fixed corner.
+    anchorCoordinates: LayoutCoordinates? = null,
 ) {
     val context = LocalContext.current
     val markwon = LocalMarkwon.current ?: remember(context) { createMarkwon(context) }
     val linkColor = MaterialTheme.colorScheme.primary.toArgb()
     val textColor = color.toArgb()
     val key = markdown + "\u0000" + (highlight?.query ?: "") + "\u0000" + (highlight?.currentOccurrence ?: -1)
+    // Layout coordinates of this TextView, for converting a touch position into
+    // the anchor Box's space. Set after layout, before any user interaction.
+    var textCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // Last ACTION_DOWN position, already converted into the anchor Box's space
+    // (null when the conversion was not possible, e.g. before first layout).
+    var lastDownInBox by remember { mutableStateOf<Offset?>(null) }
     AndroidView(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().onGloballyPositioned { textCoords = it },
         factory = { ctx ->
             TextView(ctx).apply {
                 textSize = 16f
@@ -82,10 +95,23 @@ fun MarkdownText(
         update = { tv ->
             tv.setTextColor(textColor)
             tv.setLinkTextColor(linkColor)
-            // Keep the listener fresh on every recomposition so it always calls the latest callback.
+            // Keep the listeners fresh on every recomposition so they always call the latest callback.
             if (onLongPress != null) {
-                tv.setOnLongClickListener { onLongPress(); true }
+                // The View swallows the touch before Compose's pointer input, so the
+                // press position must be recorded here. Returning false lets the
+                // TextView still handle the touch (links, long-press scheduling).
+                tv.setOnTouchListener { _, event ->
+                    if (event.action == MotionEvent.ACTION_DOWN) {
+                        val raw = Offset(event.x, event.y)
+                        lastDownInBox = anchorCoordinates?.let { box ->
+                            textCoords?.let { text -> box.windowToLocal(text.localToWindow(raw)) }
+                        }
+                    }
+                    false
+                }
+                tv.setOnLongClickListener { onLongPress(lastDownInBox); true }
             } else {
+                tv.setOnTouchListener(null)
                 tv.setOnLongClickListener(null)
             }
             if (tv.tag != key) {
@@ -122,21 +148,22 @@ fun MarkdownBody(
     color: Color,
     highlight: Highlight?,
     modifier: Modifier = Modifier,
-    onLongPress: (() -> Unit)? = null,
+    onLongPress: ((Offset?) -> Unit)? = null,
+    anchorCoordinates: LayoutCoordinates? = null,
 ) {
     if (highlight != null) {
-        MarkdownText(text, color, modifier, highlight, onLongPress)
+        MarkdownText(text, color, modifier, highlight, onLongPress, anchorCoordinates)
         return
     }
     val segs = remember(text) { parseMarkdownSegments(text) }
     if (segs.none { it is MdSegment.Code }) {
-        MarkdownText(text, color, modifier, onLongPress = onLongPress)
+        MarkdownText(text, color, modifier, onLongPress = onLongPress, anchorCoordinates = anchorCoordinates)
         return
     }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         segs.forEach { seg ->
             when (seg) {
-                is MdSegment.Text -> MarkdownText(seg.markdown, color, onLongPress = onLongPress)
+                is MdSegment.Text -> MarkdownText(seg.markdown, color, onLongPress = onLongPress, anchorCoordinates = anchorCoordinates)
                 is MdSegment.Code -> CodeBlock(seg.language, seg.code)
             }
         }

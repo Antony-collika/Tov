@@ -3,6 +3,7 @@ package com.example.byokchat.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -46,14 +47,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.byokchat.data.MessageEntity
@@ -129,10 +136,26 @@ internal fun UserMessage(
     var selectOpen by remember { mutableStateOf(false) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
     val haptic = LocalHapticFeedback.current
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-        // Zero-size anchor at the top-end of the message; the dropdown opens below it.
+    // Position of the last finger-down inside this message (px, relative to the
+    // outer Column). combinedClickable's onLongClick does not report where the
+    // finger is, so pointerInput records it; it only observes, never consumes.
+    var pressOffset by remember { mutableStateOf<Offset?>(null) }
+    val density = LocalDensity.current
+    val menuOffset = with(density) { pressOffset?.let { DpOffset(it.x.toDp(), it.y.toDp()) } ?: DpOffset.Zero }
+    Column(
+        Modifier.fillMaxWidth().pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    pressOffset = awaitFirstDown().position
+                }
+            }
+        },
+        horizontalAlignment = Alignment.End,
+    ) {
+        // Zero-size anchor at the top-start of the message; the dropdown opens at
+        // the recorded press point (offset from the anchor).
         if (menuOpen) {
-            Box(Modifier.align(Alignment.End)) {
+            Box(Modifier.align(Alignment.Start)) {
                 val items = buildList {
                     if (m.text.isNotBlank()) {
                         add(MenuAction(Icons.Default.ContentCopy, "Copy") { actions.copy(m.text) })
@@ -143,7 +166,7 @@ internal fun UserMessage(
                     if (canRegen) add(MenuAction(Icons.Default.Refresh, "Regenerate", enabled = !generating) { actions.regen(m) })
                     add(MenuAction(Icons.Default.Delete, "Delete", enabled = !generating, destructive = true) { actions.delete(m) })
                 }
-                MessageMenuDropdown(items, LOCKED_NOTE) { menuOpen = false }
+                MessageMenuDropdown(items, LOCKED_NOTE, offset = menuOffset) { menuOpen = false }
             }
         }
         if (edit != null) {
@@ -215,12 +238,25 @@ internal fun AssistantMessage(
     // Snapshot of the text taken when "Select text" is chosen, so it does not change under your finger while the AI is still typing.
     var selectText by remember { mutableStateOf<String?>(null) }
     val haptic = LocalHapticFeedback.current
+    // Position of the last finger-down inside this message (px, relative to the
+    // outer Box below). Presses on Compose parts are recorded by pointerInput on
+    // the Box; presses on the markdown TextView are recorded by its
+    // OnTouchListener and converted into this same space (see MarkdownText).
+    var pressOffset by remember { mutableStateOf<Offset?>(null) }
+    // Coordinates of the outer Box, passed down so the TextView can convert a
+    // touch position into this Box's space.
+    var boxCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val density = LocalDensity.current
+    val menuOffset = with(density) { pressOffset?.let { DpOffset(it.x.toDp(), it.y.toDp()) } ?: DpOffset.Zero }
     // While streaming, the in-memory text is newer than what is in the database.
     val shownText = if (liveText != null && liveText.length >= m.text.length) liveText else m.text
-    // Opens the menu. Also handed to the markdown body so a long-press on the AI text
-    // itself (a real Android TextView, which swallows the Compose gesture) opens it too.
-    val openMenu = {
+    // Opens the menu at [offset] (px, relative to the outer Box). Also handed to
+    // the markdown body so a long-press on the AI text itself (a real Android
+    // TextView, which swallows the Compose gesture) opens it too. A null offset
+    // keeps the last recorded press position.
+    val openMenu: (Offset?) -> Unit = { offset ->
         if (edit == null) {
+            if (offset != null) pressOffset = offset
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
             menuOpen = true
         }
@@ -229,7 +265,17 @@ internal fun AssistantMessage(
     // adding it as a child of the Column would insert an extra 8.dp gap and push
     // the whole message down when the menu opens. A Box stacks its children, so
     // toggling the menu never moves the message content.
-    Box(Modifier.fillMaxWidth()) {
+    Box(
+        Modifier.fillMaxWidth()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        pressOffset = awaitFirstDown().position
+                    }
+                }
+            }
+            .onGloballyPositioned { boxCoords = it },
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -238,7 +284,7 @@ internal fun AssistantMessage(
                     indication = null,
                     onClick = {},
                     onLongClickLabel = "Message options",
-                    onLongClick = { openMenu() },
+                    onLongClick = { openMenu(pressOffset) },
                 ),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -247,7 +293,7 @@ internal fun AssistantMessage(
                 return@Column
             }
             if (shownText.isNotEmpty()) {
-                MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl, onLongPress = openMenu)
+                MarkdownBody(shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl, onLongPress = openMenu, anchorCoordinates = boxCoords)
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
@@ -294,9 +340,10 @@ internal fun AssistantMessage(
                 EditedLabel()
             }
         }
-        // Zero-size anchor at the top-end of the message; the dropdown opens below it.
+        // Zero-size anchor at the top-start of the message; the dropdown opens at
+        // the recorded press point (offset from the anchor).
         if (menuOpen) {
-            Box(Modifier.align(Alignment.TopEnd)) {
+            Box(Modifier.align(Alignment.TopStart)) {
                 val items = buildList {
                     if (shownText.isNotBlank()) {
                         add(MenuAction(Icons.Default.ContentCopy, "Copy") { actions.copy(shownText) })
@@ -311,7 +358,7 @@ internal fun AssistantMessage(
                     add(MenuAction(Icons.Default.Refresh, "Regenerate", enabled = !generating) { actions.regen(m) })
                     add(MenuAction(Icons.Default.Delete, "Delete", enabled = !generating, destructive = true) { actions.delete(m) })
                 }
-                MessageMenuDropdown(items, LOCKED_NOTE) { menuOpen = false }
+                MessageMenuDropdown(items, LOCKED_NOTE, offset = menuOffset) { menuOpen = false }
             }
         }
     }
