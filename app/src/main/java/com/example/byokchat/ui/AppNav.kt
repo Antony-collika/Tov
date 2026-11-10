@@ -108,6 +108,8 @@ fun AppNav() {
                         onSettings = { nav.navigate("settings") },
                         onOnboarding = { nav.navigate("onboarding") },
                         onProvider = { pid -> nav.navigate(if (pid == null) "providers" else "provider?id=$pid") },
+                        onInspector = { nav.navigate("inspector/$id") },
+                        onRequestLog = { nav.navigate("request-log") },
                     )
                 }
             }
@@ -126,6 +128,13 @@ fun AppNav() {
                 ToolDetailScreen(uid = entry.arguments?.getString("uid") ?: "", onBack = { nav.popBackStack() })
             }
             composable("notes") { NotesScreen(onBack = { nav.popBackStack() }) }
+            composable("inspector/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                RequestInspectorScreen(
+                    conversationId = entry.arguments?.getString("id") ?: "",
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable("request-log") { RequestLogScreen(onBack = { nav.popBackStack() }) }
             composable("providers") {
                 ProvidersScreen(
                     onBack = { nav.popBackStack() },

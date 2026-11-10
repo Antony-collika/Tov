@@ -75,6 +75,10 @@ fun ChatScreen(
     onOpenProvider: (String?) -> Unit,
     /** Starts a fresh chat (used by the "context almost full" hint). */
     onNewChat: () -> Unit,
+    /** Opens the "What the AI will see" Inspector for this chat. */
+    onOpenInspector: () -> Unit,
+    /** Opens the request log. */
+    onOpenRequestLog: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -352,6 +356,8 @@ fun ChatScreen(
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(text = { Text("New chat") }, onClick = { showMenu = false; onNewChat() })
                                 DropdownMenuItem(text = { Text("Chat memory") }, onClick = { showMenu = false; showMemory = true })
+                                DropdownMenuItem(text = { Text("What the AI will see") }, onClick = { showMenu = false; onOpenInspector() })
+                                DropdownMenuItem(text = { Text("Request log") }, onClick = { showMenu = false; onOpenRequestLog() })
                                 DropdownMenuItem(text = { Text("Settings") }, onClick = { showMenu = false; onOpenSettings() })
                             }
                         }
@@ -458,6 +464,7 @@ fun ChatScreen(
             open = true,
             onDismiss = { showMemory = false; memoryStats = null },
             onNewChat = onNewChat,
+            onOpenInspector = onOpenInspector,
         )
     }
     regenPrompt?.let { rp ->

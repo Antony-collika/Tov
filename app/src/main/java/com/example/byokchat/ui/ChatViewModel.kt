@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.byokchat.AppContainer
 import com.example.byokchat.ai.ImageStore
 import com.example.byokchat.ai.ProviderFactory
+import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.RequestAssembler
 import com.example.byokchat.chat.TokenEstimator
@@ -68,32 +69,45 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     val currentModel: StateFlow<String?> = app.settings.currentModel
 
     /**
-     * Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi. Chỉ gọi khi người dùng mở hộp «Chat memory»
-     * (trước đây chạy liên tục nên mỗi lần AI viết thêm chữ lại duyệt cả lịch sử).
+     * Ghép request cho lần gửi kế tiếp, đúng đường như ChatEngine.run (kể cả
+     * danh sách công cụ đã lọc). Dùng chung cho hộp «Chat memory» (chỉ lấy
+     * số liệu) và màn Inspector (lấy toàn bộ), nên hai chỗ không lệch nhau.
      */
-    suspend fun computeTokenStats(): TokenStats? = withContext(Dispatchers.Default) {
+    suspend fun previewAssembled(): AssembledRequest? = withContext(Dispatchers.Default) {
         val c = conversation.value
         val cfg = providers.value.firstOrNull { it.id == currentModelProviderId.value }
         if (c == null || cfg == null) null
         else {
             val modelName = currentModel.value.orEmpty()
             val system = app.settings.defaultSystemPrompt.value
-            // Cùng một đường ghép request như ChatEngine.run (kể cả danh sách
-            // công cụ đã lọc), để số đếm trong hộp Chat memory khớp với thứ gửi thật.
             val toolDefs = app.registry.definitions()
             val budget = ContextBuilder.budget(
                 cfg, modelName, system,
                 toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
             )
-            val assembled = RequestAssembler.assemble(
+            RequestAssembler.assemble(
                 systemPrompt = system,
                 rows = messages.value,
                 toolDefs = toolDefs,
                 budget = budget,
                 nameForUid = app.registry::nameForUid,
             )
-            TokenStats(assembled.historyTokens, ContextLimits.forModel(cfg, modelName), assembled.droppedTurnIds.size, assembled.droppedTurnIds)
         }
+    }
+
+    /**
+     * Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi. Chỉ gọi khi người dùng mở hộp «Chat memory»
+     * (trước đây chạy liên tục nên mỗi lần AI viết thêm chữ lại duyệt cả lịch sử).
+     */
+    suspend fun computeTokenStats(): TokenStats? {
+        val assembled = previewAssembled() ?: return null
+        val cfg = providers.value.firstOrNull { it.id == currentModelProviderId.value } ?: return null
+        return TokenStats(
+            assembled.historyTokens,
+            ContextLimits.forModel(cfg, currentModel.value.orEmpty()),
+            assembled.droppedTurnIds.size,
+            assembled.droppedTurnIds,
+        )
     }
 
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)

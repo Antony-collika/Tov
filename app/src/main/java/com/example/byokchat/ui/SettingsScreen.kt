@@ -36,6 +36,8 @@ fun SettingsScreen(
     val scope = rememberCoroutineScope()
     val theme by settings.themeMode.collectAsState()
     val providers by settings.providers.collectAsState()
+    val logEnabled by settings.requestLogEnabled.collectAsState()
+    val openAiIncludeUsage by settings.openAiIncludeUsage.collectAsState()
     val workspaceUri by settings.workspaceUri.collectAsState()
     val accessible by container.fs.accessible.collectAsState()
     val searchProvider by settings.searchProvider.collectAsState()
@@ -78,6 +80,20 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+            ListItem(
+                headlineContent = { Text("Request log") },
+                supportingContent = { Text("Records every request sent to the AI, with the real token counts. Stored only on this device.") },
+                trailingContent = {
+                    Switch(checked = logEnabled, onCheckedChange = { settings.setRequestLogEnabled(it) })
+                },
+            )
+            ListItem(
+                headlineContent = { Text("Ask OpenAI for real token counts") },
+                supportingContent = { Text("Sends stream_options.include_usage so the log shows real counts. Some self-hosted servers reject this — turn it off if requests fail.") },
+                trailingContent = {
+                    Switch(checked = openAiIncludeUsage, onCheckedChange = { settings.setOpenAiIncludeUsage(it) })
+                },
+            )
 
             // ---------- Tools ----------
             HorizontalDivider(Modifier.padding(vertical = 8.dp))

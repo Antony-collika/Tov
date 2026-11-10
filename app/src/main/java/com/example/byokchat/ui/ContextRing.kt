@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -19,6 +20,8 @@ fun ChatMemoryDialog(
     open: Boolean,
     onDismiss: () -> Unit,
     onNewChat: () -> Unit,
+    /** Opens the "What the AI will see" Inspector for this chat (null = no button). */
+    onOpenInspector: (() -> Unit)? = null,
 ) {
     if (!open || limit <= 0) return
     val fraction = (used.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
@@ -35,10 +38,15 @@ fun ChatMemoryDialog(
         title = { Text("Chat memory") },
         text = { Text(message) },
         confirmButton = {
-            if (nearlyFull) {
-                TextButton(onClick = { onDismiss(); onNewChat() }) { Text("New chat") }
-            } else {
-                TextButton(onClick = onDismiss) { Text("Close") }
+            Row {
+                if (onOpenInspector != null) {
+                    TextButton(onClick = { onDismiss(); onOpenInspector() }) { Text("What the AI will see") }
+                }
+                if (nearlyFull) {
+                    TextButton(onClick = { onDismiss(); onNewChat() }) { Text("New chat") }
+                } else {
+                    TextButton(onClick = onDismiss) { Text("Close") }
+                }
             }
         },
         dismissButton = if (nearlyFull) {
