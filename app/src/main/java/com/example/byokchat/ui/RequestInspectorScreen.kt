@@ -16,11 +16,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +72,8 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
     })
     var assembled by remember { mutableStateOf<AssembledRequest?>(null) }
     var loading by remember { mutableStateOf(true) }
+    // Bố cục không hợp lệ thì Inspector hiện request của bố cục mặc định + báo lỗi.
+    val layoutError by container.layoutStore.layoutError.collectAsState()
     LaunchedEffect(conversationId) {
         assembled = vm.previewAssembled()
         loading = false
@@ -96,7 +100,21 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
             assembled == null -> Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
                 Text("No provider or model is selected yet, so there is nothing to send.")
             }
-            else -> InspectorContent(assembled!!, Modifier.fillMaxSize().padding(padding))
+            else -> Column(Modifier.fillMaxSize().padding(padding)) {
+                if (layoutError != null) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            "Request panel problem: $layoutError Showing the default layout instead.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
+                InspectorContent(assembled!!, Modifier.weight(1f))
+            }
         }
     }
 }

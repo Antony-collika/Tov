@@ -79,6 +79,8 @@ fun ChatScreen(
     onOpenInspector: () -> Unit,
     /** Opens the request log. */
     onOpenRequestLog: () -> Unit,
+    /** Opens the Request panel for this chat. */
+    onOpenRequestPanel: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -358,6 +360,7 @@ fun ChatScreen(
                                 DropdownMenuItem(text = { Text("Chat memory") }, onClick = { showMenu = false; showMemory = true })
                                 DropdownMenuItem(text = { Text("What the AI will see") }, onClick = { showMenu = false; onOpenInspector() })
                                 DropdownMenuItem(text = { Text("Request log") }, onClick = { showMenu = false; onOpenRequestLog() })
+                                DropdownMenuItem(text = { Text("Request panel") }, onClick = { showMenu = false; onOpenRequestPanel() })
                                 DropdownMenuItem(text = { Text("Settings") }, onClick = { showMenu = false; onOpenSettings() })
                             }
                         }

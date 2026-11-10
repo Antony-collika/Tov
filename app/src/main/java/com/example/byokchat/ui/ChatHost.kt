@@ -44,6 +44,7 @@ fun ChatHost(
     onProvider: (String?) -> Unit,
     onInspector: () -> Unit,
     onRequestLog: () -> Unit,
+    onPanel: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -121,6 +122,7 @@ fun ChatHost(
                 onNewChat = onNewChat,
                 onOpenInspector = onInspector,
                 onOpenRequestLog = onRequestLog,
+                onOpenRequestPanel = onPanel,
             )
         }
     }

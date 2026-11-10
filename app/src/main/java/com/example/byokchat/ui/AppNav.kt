@@ -110,6 +110,7 @@ fun AppNav() {
                         onProvider = { pid -> nav.navigate(if (pid == null) "providers" else "provider?id=$pid") },
                         onInspector = { nav.navigate("inspector/$id") },
                         onRequestLog = { nav.navigate("request-log") },
+                        onPanel = { nav.navigate("panel?id=$id") },
                     )
                 }
             }
@@ -119,6 +120,27 @@ fun AppNav() {
                     onProviders = { nav.navigate("providers") },
                     onTools = { nav.navigate("tools") },
                     onNotes = { nav.navigate("notes") },
+                    onRequestPanel = { nav.navigate("panel") },
+                )
+            }
+            composable(
+                "panel?id={id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { entry ->
+                val id = entry.arguments?.getString("id")
+                RequestPanelScreen(
+                    conversationId = id,
+                    onBack = { nav.popBackStack() },
+                    onEditCard = { cardId -> nav.navigate("card-edit/$cardId") },
+                    onOpenTools = { nav.navigate("tools") },
+                    onOpenInspector = id?.let { { nav.navigate("inspector/$id") } },
+                )
+            }
+            composable("card-edit/{cardId}", arguments = listOf(navArgument("cardId") { type = NavType.StringType })) { entry ->
+                CardEditScreen(
+                    cardId = entry.arguments?.getString("cardId") ?: "",
+                    onBack = { nav.popBackStack() },
+                    onOpenTools = { nav.navigate("tools") },
                 )
             }
             composable("tools") {

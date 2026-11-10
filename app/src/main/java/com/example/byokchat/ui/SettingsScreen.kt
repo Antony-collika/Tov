@@ -29,6 +29,7 @@ fun SettingsScreen(
     onProviders: () -> Unit,
     onTools: () -> Unit,
     onNotes: () -> Unit,
+    onRequestPanel: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -41,7 +42,6 @@ fun SettingsScreen(
     val workspaceUri by settings.workspaceUri.collectAsState()
     val accessible by container.fs.accessible.collectAsState()
     val searchProvider by settings.searchProvider.collectAsState()
-    var prompt by remember { mutableStateOf(settings.defaultSystemPrompt.value) }
     var searchKey by remember { mutableStateOf(settings.searchApiKey.value) }
     var showKey by remember { mutableStateOf(false) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -69,17 +69,11 @@ fun SettingsScreen(
                 headlineContent = { Text("AI providers") },
                 supportingContent = { Text(if (providers.isEmpty()) "No providers yet" else providers.joinToString(", ") { it.name }) },
             )
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                OutlinedTextField(
-                    value = prompt,
-                    onValueChange = { prompt = it; settings.setDefaultSystemPrompt(it) },
-                    label = { Text("Default system prompt") },
-                    supportingText = { Text("Used for new conversations. Each conversation can still change its own.") },
-                    minLines = 3,
-                    maxLines = 8,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            ListItem(
+                modifier = Modifier.clickable(onClick = onRequestPanel),
+                headlineContent = { Text("System prompt & request panel") },
+                supportingContent = { Text("What the AI sees, and in which order — system prompt, time tool, history and tools") },
+            )
             ListItem(
                 headlineContent = { Text("Request log") },
                 supportingContent = { Text("Records every request sent to the AI, with the real token counts. Stored only on this device.") },
