@@ -83,7 +83,7 @@ class AppContainer(val context: Context) {
     val registry = ToolRegistry(env, toolPrefs, confirmations)
     val notifier = ChatNotifier(context)
     /** Nhật ký request/response (Đợt B): ghi ra file trong bộ nhớ riêng của app. */
-    val requestLog = RequestLog(java.io.File(context.filesDir, "request-log")) { settings.requestLogEnabled.value }
+    val requestLog = RequestLog(java.io.File(context.filesDir, "request-log"), enabled = { settings.requestLogEnabled.value })
     val engine = ChatEngine(db, settings, registry, notifier, requestLog)
 
     /** Mở cuộc trò chuyện được yêu cầu từ thông báo (MainActivity ghi vào, AppNav đọc rồi xóa). */

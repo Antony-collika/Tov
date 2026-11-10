@@ -125,7 +125,7 @@ fun RequestLogScreen(onBack: () -> Unit) {
 
 @Composable
 private fun EntryCard(entry: RequestLogEntry, expanded: Boolean, onToggle: () -> Unit, onCopyRequest: () -> Unit) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp), onClick = onToggle) {
+    Card(onClick = onToggle, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp)) {
             Text(
                 "${fmtTime(entry.timeMillis)} · ${entry.provider} · ${entry.model}",
