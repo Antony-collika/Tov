@@ -55,6 +55,12 @@ object ContextBuilder {
         maxTurns: Int? = null,
         /** Lý do ghi cho các lượt bị cắt. */
         dropReason: String = "over budget",
+        /**
+         * Luôn giữ lượt mới nhất dù vượt ngân sách (mặc định đúng — lượt đang
+         * trả lời không bao giờ bị cắt). Khi ghép lịch sử riêng (Đợt C), lượt
+         * mới nhất đã nằm ở Last turn nên lịch sử cắt nghiêm theo ngân sách.
+         */
+        keepNewest: Boolean = true,
     ): ContextPlan {
         val turns = LinkedHashMap<String, MutableList<MessageEntity>>()
         rows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
@@ -73,7 +79,7 @@ object ContextBuilder {
         var used = 0
         for ((turnId, turn) in compacted.asReversed()) {
             val cost = turn.sumOf { TokenEstimator.message(it) }
-            if (keep.isNotEmpty() && used + cost > budget) break
+            if (used + cost > budget && (keep.isNotEmpty() || !keepNewest)) break
             keep.addFirst(turnId to turn)
             used += cost
         }

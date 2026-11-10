@@ -88,6 +88,8 @@ object RequestAssembler {
         // Tách lượt mới nhất (Last turn) khỏi lịch sử: lượt mới nhất luôn được
         // giữ, ngân sách còn lại dành cho lịch sử — đúng như một lần gọi
         // plan() trên toàn bộ trước đây (lượt mới nhất luôn được thêm trước).
+        // Lịch sử cắt nghiêm theo ngân sách (keepNewest=false) vì lượt mới
+        // nhất đã được giữ ở Last turn.
         val turnIds = rows.map { it.turnId }.distinct()
         val lastTurnId = turnIds.lastOrNull()
         val historyRows = if (lastTurnId == null) emptyList() else rows.filter { it.turnId != lastTurnId }
@@ -111,16 +113,19 @@ object RequestAssembler {
                 includeErrorTurns = historyCard.includeErrorTurns,
                 maxTurns = historyCard.lastTurns.coerceAtLeast(1),
                 dropReason = "outside last ${historyCard.lastTurns.coerceAtLeast(1)} turns",
+                keepNewest = false,
             )
             HistoryPolicy.NO_CUT -> ContextBuilder.plan(
                 historyRows, Int.MAX_VALUE, nameForUid,
                 compactToolResults = historyCard.compactToolResults,
                 includeErrorTurns = historyCard.includeErrorTurns,
+                keepNewest = false,
             )
             HistoryPolicy.BUDGET -> ContextBuilder.plan(
                 historyRows, historyBudget, nameForUid,
                 compactToolResults = historyCard.compactToolResults,
                 includeErrorTurns = historyCard.includeErrorTurns,
+                keepNewest = false,
             )
         }
 
