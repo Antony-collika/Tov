@@ -109,16 +109,9 @@ class ChatEngine(
 
                 val toolDefs = tools.definitions()
                 // Chỉ còn một system prompt duy nhất: mặc định trong Settings.
-                // Date/time goes first, when the time tool is on — computed
-                // fresh for every request, never stored in the saved prompt.
-                // No time zone or location is included.
-                val timeLine = tools.currentTimeLine()
-                val savedPrompt = settings.defaultSystemPrompt.value
-                val system = when {
-                    timeLine == null -> savedPrompt
-                    savedPrompt.isBlank() -> timeLine
-                    else -> "$timeLine\n\n$savedPrompt"
-                }
+                // Ngày giờ không chèn vào đây nữa: `time.now` là công cụ như
+                // trước, để system prompt ổn định và giữ được bộ nhớ đệm.
+                val system = settings.defaultSystemPrompt.value
                 val budget = ContextBuilder.budget(
                     cfg, model, system,
                     toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },

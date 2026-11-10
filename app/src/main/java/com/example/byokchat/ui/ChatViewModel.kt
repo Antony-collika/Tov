@@ -75,13 +75,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         if (c == null || cfg == null) null
         else {
             val modelName = currentModel.value.orEmpty()
-            val savedPrompt = app.settings.defaultSystemPrompt.value
-            val timeLine = app.registry.currentTimeLine()
-            val prompt = when {
-                timeLine == null -> savedPrompt
-                savedPrompt.isBlank() -> timeLine
-                else -> "$timeLine\n\n$savedPrompt"
-            }
+            val prompt = app.settings.defaultSystemPrompt.value
             val budget = ContextBuilder.budget(cfg, modelName, prompt, app.registry.estimateToolTokens())
             val plan = ContextBuilder.plan(messages.value, budget, app.registry::nameForUid)
             TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, modelName), plan.droppedTurns)
