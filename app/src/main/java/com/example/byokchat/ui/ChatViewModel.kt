@@ -80,8 +80,13 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         if (c == null || cfg == null) null
         else {
             val modelName = currentModel.value.orEmpty()
-            val layout = app.layoutStore.effectiveLayout.value
+            val baseLayout = app.layoutStore.effectiveLayout.value
             val vars = RequestLayout.requestVars(modelName, cfg.name)
+            // Đợt D: thẻ System/Free trỏ file được đọc lại mỗi lần xem trước.
+            val (layout, fileErrors) = withContext(Dispatchers.IO) {
+                baseLayout.resolveFiles { path -> runCatching { app.fs.readText(path) } }
+            }
+            app.layoutStore.setFileErrors(fileErrors)
             val toolDefs = layout.effectiveToolDefs(app.registry.definitions(), app.registry.nameForUid(RequestLayout.TIME_NOW_UID))
             val system = layout.systemText(vars)
             val budget = ContextBuilder.budget(

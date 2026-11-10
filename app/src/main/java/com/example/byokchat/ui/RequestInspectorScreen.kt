@@ -74,6 +74,7 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
     var loading by remember { mutableStateOf(true) }
     // Bố cục không hợp lệ thì Inspector hiện request của bố cục mặc định + báo lỗi.
     val layoutError by container.layoutStore.layoutError.collectAsState()
+    val fileErrors by container.layoutStore.fileErrors.collectAsState()
     LaunchedEffect(conversationId) {
         assembled = vm.previewAssembled()
         loading = false
@@ -108,6 +109,18 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
                     ) {
                         Text(
                             "Request panel problem: $layoutError Showing the default layout instead.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                }
+                if (fileErrors.isNotEmpty()) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            fileErrors.joinToString("\n"),
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.padding(12.dp),
                         )

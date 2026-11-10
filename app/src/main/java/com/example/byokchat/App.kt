@@ -87,7 +87,7 @@ class AppContainer(val context: Context) {
     val layoutStore = RequestLayoutStore(context, settings)
     /** Nhật ký request/response (Đợt B): ghi ra file trong bộ nhớ riêng của app. */
     val requestLog = RequestLog(java.io.File(context.filesDir, "request-log"), enabled = { settings.requestLogEnabled.value })
-    val engine = ChatEngine(db, settings, registry, notifier, requestLog, layoutStore)
+    val engine = ChatEngine(db, settings, registry, notifier, requestLog, layoutStore, fs)
 
     /** Mở cuộc trò chuyện được yêu cầu từ thông báo (MainActivity ghi vào, AppNav đọc rồi xóa). */
     val pendingConversation = MutableStateFlow<String?>(null)

@@ -123,6 +123,33 @@ class RequestLayoutTest {
     }
 
     @Test
+    fun resolveFilesReplacesTextAndReportsErrors() {
+        val layout = RequestLayout.defaultLayout("typed").copy(
+            cards = RequestLayout.defaultLayout("typed").cards.map {
+                if (it.kind == CardKind.SYSTEM) it.copy(file = "Tov/prompts/system.md") else it
+            } + RequestCard("free-1", CardKind.FREE, text = "old", file = "Tov/prompts/missing.md")
+        )
+        val (resolved, errors) = layout.resolveFiles { path ->
+            if (path == "Tov/prompts/system.md") Result.success("from file")
+            else Result.failure(Exception("Not found: $path"))
+        }
+        assertEquals("from file", resolved.systemCard()?.text)
+        assertEquals("old", resolved.card("free-1")?.text)
+        assertEquals(1, errors.size)
+        assertTrue(errors[0].contains("missing.md"))
+    }
+
+    @Test
+    fun fileMustEndWithMd() {
+        val layout = RequestLayout.defaultLayout("x").copy(
+            cards = RequestLayout.defaultLayout("x").cards.map {
+                if (it.kind == CardKind.SYSTEM) it.copy(file = "Tov/prompts/system.txt") else it
+            }
+        )
+        assertTrue(layout.validate().any { it.contains(".md") })
+    }
+
+    @Test
     fun freeSystemCardSitsInOrderWithSystem() {
         val layout = RequestLayout.defaultLayout("Base").copy(
             cards = listOf(

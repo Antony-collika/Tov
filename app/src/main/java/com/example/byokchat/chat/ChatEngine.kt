@@ -13,6 +13,7 @@ import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.RequestLayout
 import com.example.byokchat.data.RequestLayoutStore
 import com.example.byokchat.data.SettingsRepository
+import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -43,6 +44,8 @@ class ChatEngine(
     private val requestLog: RequestLog? = null,
     /** Bố cục Request panel (Đợt C); null = bố cục mặc định từ Settings. */
     private val layoutStore: RequestLayoutStore? = null,
+    /** Workspace để đọc file của thẻ (Đợt D) và xuất history.md; null = bỏ qua. */
+    private val fs: WorkspaceFs? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -117,9 +120,14 @@ class ChatEngine(
                 // thay ô "Default system prompt"; ngày giờ KHÔNG chèn vào
                 // system nữa — `time.now` là công cụ như trước, để system
                 // prompt ổn định và giữ được bộ nhớ đệm.
-                val layout = layoutStore?.effectiveLayout?.value
+                val baseLayout = layoutStore?.effectiveLayout?.value
                     ?: RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value)
                 val vars = RequestLayout.requestVars(model, cfg.name)
+                // Đợt D: thẻ System/Free trỏ file được đọc lại mỗi lần gửi.
+                val (layout, fileErrors) = if (fs == null) baseLayout to emptyList() else withContext(Dispatchers.IO) {
+                    baseLayout.resolveFiles { path -> runCatching { fs.readText(path) } }
+                }
+                layoutStore?.setFileErrors(fileErrors)
                 val toolDefs = layout.effectiveToolDefs(tools.definitions(), tools.nameForUid(RequestLayout.TIME_NOW_UID))
                 val system = layout.systemText(vars)
                 val budget = ContextBuilder.budget(

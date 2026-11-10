@@ -1,5 +1,7 @@
 package com.example.byokchat.ui
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +38,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +51,9 @@ import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.RequestLayout
 import com.example.byokchat.tools.ToolMode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val VARS_HELP = "You can use {date}, {time}, {model} and {provider} — they are replaced when sending. " +
     "Note: {time} changes every minute, so the AI's cache is not reused while it is in the prompt."
@@ -70,15 +76,21 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenTools: () -> Unit) 
     var compact by remember(cardId) { mutableStateOf(card?.compactToolResults ?: false) }
     var turnTags by remember(cardId) { mutableStateOf(card?.turnTags ?: false) }
     var includeErrors by remember(cardId) { mutableStateOf(card?.includeErrorTurns ?: false) }
+    // Đợt D: file .md mà thẻ trỏ tới (trống = không trỏ file).
+    var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
+    var fileError by remember(cardId) { mutableStateOf<String?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val lastTurnsValid = lastTurns.toIntOrNull()?.let { it in 1..100 } == true
+    val fileValid = file.isBlank() || file.trim().endsWith(".md")
     val dirty = card != null && (
         text != card.text || label != card.label || role != card.role || policy != card.policy ||
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
-            turnTags != card.turnTags || includeErrors != card.includeErrorTurns
+            turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
+            file.trim() != (card.file ?: "")
         )
-    val saveValid = card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid
+    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && fileValid
     // Thẻ Time/Tools/Last turn không có gì để Save (sửa trực tiếp hoặc chỉ đọc).
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.TOOLS && card.kind != CardKind.LAST_TURN
 
@@ -96,9 +108,62 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenTools: () -> Unit) 
                 compactToolResults = compact,
                 turnTags = turnTags,
                 includeErrorTurns = includeErrors,
+                file = file.trim().ifEmpty { null },
             )
         }
         onBack()
+    }
+
+    /** Tạo file mẫu (nếu chưa có) rồi trỏ thẻ tới file đó. */
+    fun createTemplate() {
+        val c = card ?: return
+        val path = file.trim().ifBlank {
+            when (c.kind) {
+                CardKind.SYSTEM -> "Tov/prompts/system.md"
+                else -> "Tov/prompts/" + label.trim().lowercase()
+                    .replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "free-card" } + ".md"
+            }
+        }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                if (container.fs.find(path) == null) {
+                    container.fs.writeText(path, templateText(c.kind))
+                }
+            }.onSuccess {
+                withContext(Dispatchers.Main) { file = path; fileError = null }
+            }.onFailure { e ->
+                withContext(Dispatchers.Main) { fileError = e.message ?: "Could not create the file." }
+            }
+        }
+    }
+
+    /** Mở file đã trỏ bằng app ngoài (trình soạn .md). */
+    fun openFile() {
+        val path = file.trim()
+        if (path.isEmpty()) return
+        try {
+            val doc = container.fs.find(path)
+            if (doc == null) {
+                fileError = "File not found: $path"
+                return
+            }
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(doc.uri, "text/markdown")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val doc = container.fs.find(path) ?: return
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(doc.uri, "text/plain")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                context.startActivity(intent)
+            } catch (e2: Exception) {
+                Toast.makeText(context, "No app can open this file.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     Scaffold(
@@ -135,6 +200,14 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenTools: () -> Unit) 
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FileSection(
+                        file = file,
+                        onFileChange = { file = it; fileError = null },
+                        fileValid = fileValid,
+                        fileError = fileError,
+                        onCreateTemplate = ::createTemplate,
+                        onOpenFile = ::openFile,
+                    )
                 }
                 CardKind.FREE -> {
                     OutlinedTextField(
@@ -170,6 +243,14 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenTools: () -> Unit) 
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    FileSection(
+                        file = file,
+                        onFileChange = { file = it; fileError = null },
+                        fileValid = fileValid,
+                        fileError = fileError,
+                        onCreateTemplate = ::createTemplate,
+                        onOpenFile = ::openFile,
+                    )
                 }
                 CardKind.TIME -> TimeCardEditor()
                 CardKind.HISTORY -> {
@@ -320,4 +401,46 @@ private fun TimeCardEditor() {
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+}
+
+/** Nội dung mẫu cho file .md mới của thẻ (Đợt D). */
+private fun templateText(kind: CardKind): String = when (kind) {
+    CardKind.SYSTEM -> "# System prompt\n\nWrite the instructions for the AI here. This file is read again on every send, so edits take effect immediately.\n\nYou can use {date}, {time}, {model} and {provider}.\n"
+    else -> "# Note for the AI\n\nWrite here what the AI should know. This file is read again on every send.\n"
+}
+
+/** Mục "File" trong màn sửa thẻ System/Free (Đợt D). */
+@Composable
+private fun FileSection(
+    file: String,
+    onFileChange: (String) -> Unit,
+    fileValid: Boolean,
+    fileError: String?,
+    onCreateTemplate: () -> Unit,
+    onOpenFile: () -> Unit,
+) {
+    Text("File (.md in the workspace)", style = MaterialTheme.typography.labelLarge)
+    OutlinedTextField(
+        value = file,
+        onValueChange = onFileChange,
+        label = { Text("File path, e.g. Tov/prompts/system.md") },
+        singleLine = true,
+        isError = !fileValid,
+        supportingText = { if (!fileValid) Text("The file must end with .md.") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        "When a file is linked, its content is read again on every send, replacing the text above. " +
+            "Edit the file in any editor and the next send uses the new text. " +
+            "If the file cannot be read, the text above is used instead and an error is shown.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = onCreateTemplate) { Text("Create template") }
+        OutlinedButton(enabled = file.isNotBlank(), onClick = onOpenFile) { Text("Open file") }
+    }
+    if (fileError != null) {
+        Text(fileError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    }
 }

@@ -61,6 +61,7 @@ fun RequestPanelScreen(
     val store = container.layoutStore
     val layout by store.storedLayout.collectAsState()
     val layoutError by store.layoutError.collectAsState()
+    val fileErrors by store.fileErrors.collectAsState()
     // Đọc prefs để dòng tóm tắt thẻ Time hiện đúng mode khi mode đổi.
     val toolPrefs by container.toolPrefs.prefs.collectAsState()
     val timeMode = remember(toolPrefs) {
@@ -111,6 +112,21 @@ fun RequestPanelScreen(
                     Spacer(Modifier.height(4.dp))
                 }
             }
+            if (fileErrors.isNotEmpty()) {
+                item {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    ) {
+                        Text(
+                            fileErrors.joinToString("\n"),
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(12.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+            }
             items(layout.cards, key = { it.id }) { card ->
                 val index = layout.cards.indexOf(card)
                 CardRow(
@@ -148,13 +164,15 @@ fun RequestPanelScreen(
 
 /** Một dòng tóm tắt cho từng thẻ. */
 private fun cardSummary(card: RequestCard, timeMode: String?): String = when (card.kind) {
-    CardKind.SYSTEM -> card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(no system prompt)" }
+    CardKind.SYSTEM -> card.file?.let { "From file: $it" }
+        ?: card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(no system prompt)" }
         ?: "(no system prompt)"
     CardKind.TIME -> {
         "Offers the time tool to the AI (mode: ${timeMode ?: "?"}). Its position changes nothing — time is a tool, not a message."
     }
     CardKind.FREE -> (if (card.role.name == "USER") "User" else "System") + " · " +
-        (card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(empty)" } ?: "(empty)")
+        (card.file?.let { "From file: $it" }
+            ?: card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(empty)" } ?: "(empty)")
     CardKind.HISTORY -> {
         val base = when (card.policy) {
             HistoryPolicy.BUDGET -> "Cut the oldest turns to fit the token budget"

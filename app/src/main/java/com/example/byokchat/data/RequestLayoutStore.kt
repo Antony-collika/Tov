@@ -30,6 +30,14 @@ class RequestLayoutStore(context: Context, private val settings: SettingsReposit
     private val _layoutError = MutableStateFlow<String?>(errorOf(_stored.value))
     val layoutError: StateFlow<String?> = _layoutError.asStateFlow()
 
+    /** Lỗi đọc file của thẻ System/Free ở lần gửi/xem trước gần nhất (Đợt D). */
+    private val _fileErrors = MutableStateFlow<List<String>>(emptyList())
+    val fileErrors: StateFlow<List<String>> = _fileErrors.asStateFlow()
+
+    fun setFileErrors(errors: List<String>) {
+        _fileErrors.value = errors
+    }
+
     private fun effectiveOf(layout: RequestLayout): RequestLayout {
         if (layout.isValid()) return layout
         return RequestLayout.defaultLayout(currentSystemText(layout))

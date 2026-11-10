@@ -41,6 +41,13 @@ data class RequestCard(
     val turnTags: Boolean = false,
     /** Thẻ History: có gửi lượt lỗi hay không. */
     val includeErrorTurns: Boolean = false,
+    /**
+     * Thẻ System/Free: đường dẫn file .md trong workspace (vd
+     * "Tov/prompts/system.md"). Khi có file, nội dung file được đọc lại MỖI
+     * LẦN GỬI và thay văn bản trong thẻ; đọc lỗi thì giữ văn bản cũ và báo
+     * lỗi (xem RequestLayout.resolveFiles). Null = chỉ dùng văn bản trong thẻ.
+     */
+    val file: String? = null,
 ) {
     /** Tên hiển thị trên Panel. */
     fun displayName(): String = when (kind) {
@@ -133,8 +140,11 @@ data class RequestLayout(val cards: List<RequestCard>) {
         if (cards.count { it.kind == CardKind.SYSTEM } > 1) errors += "The System card must appear at most once."
         if (cards.count { it.kind == CardKind.TIME } > 1) errors += "The Time card must appear at most once."
         if (cards.count { it.kind == CardKind.TOOLS } > 1) errors += "The Tools card must appear at most once."
-        cards.filter { it.kind == CardKind.FREE && it.text.isBlank() }.forEach {
-            errors += "The Free card \"${it.displayName()}\" is empty — write something or delete it."
+        cards.filter { it.kind == CardKind.FREE && it.text.isBlank() && it.file.isNullOrBlank() }.forEach {
+            errors += "The Free card \"${it.displayName()}\" is empty — write something, link a file, or delete it."
+        }
+        cards.filter { (it.kind == CardKind.SYSTEM || it.kind == CardKind.FREE) && it.file != null && !it.file.endsWith(".md") }.forEach {
+            errors += "The ${it.displayName()} card links to '${it.file}' — the file must end with .md."
         }
         return errors
     }
@@ -167,6 +177,31 @@ data class RequestLayout(val cards: List<RequestCard>) {
     }
 
     fun systemText(vars: Map<String, String>): String = systemParts(vars).joinToString("\n\n") { it.text }
+
+    /**
+     * Đợt D: thay văn bản của thẻ System/Free trỏ file bằng nội dung file
+     * (đọc lại mỗi lần gửi). Trả về bố cục đã thay + danh sách lỗi; thẻ nào
+     * đọc lỗi thì giữ văn bản cũ trong thẻ để chat vẫn chạy, lỗi hiện ở
+     * Panel/Inspector (xem RequestLayoutStore.fileErrors). Không ghi lại
+     * vào bộ nhớ: văn bản trong thẻ là bản gõ tay gần nhất, file là nguồn
+     * mới mỗi lần gửi.
+     */
+    fun resolveFiles(readFile: (String) -> Result<String>): Pair<RequestLayout, List<String>> {
+        val errors = mutableListOf<String>()
+        val cards = this.cards.map { card ->
+            val file = card.file
+            if ((card.kind == CardKind.SYSTEM || card.kind == CardKind.FREE) && !file.isNullOrBlank()) {
+                readFile(file).fold(
+                    onSuccess = { content -> card.copy(text = content) },
+                    onFailure = { e ->
+                        errors += "Could not read the ${card.displayName()} card from '$file': ${e.message}"
+                        card
+                    },
+                )
+            } else card
+        }
+        return copy(cards = cards) to errors
+    }
 
     /**
      * Lọc danh sách công cụ đã resolve theo thẻ Time/Tools.
