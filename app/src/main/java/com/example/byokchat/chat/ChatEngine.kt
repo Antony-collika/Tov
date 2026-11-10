@@ -5,6 +5,7 @@ import com.example.byokchat.ai.AiException
 import com.example.byokchat.ai.AiRequest
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.ai.ProviderFactory
+import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
@@ -37,6 +38,7 @@ class ChatEngine(
     private val settings: SettingsRepository,
     private val tools: ToolRuntime,
     private val notifier: ChatNotifier,
+    private val requestLog: RequestLog? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -127,7 +129,7 @@ class ChatEngine(
 
                 var lastFlush = System.currentTimeMillis()
                 var lastLive = 0L
-                ProviderFactory.create(cfg).stream(request).collect { ev ->
+                ProviderFactory.create(cfg, requestLog, settings.openAiIncludeUsage.value).stream(request).collect { ev ->
                     when (ev) {
                         is AiEvent.Text -> {
                             text.append(ev.delta)

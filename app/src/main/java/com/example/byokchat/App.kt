@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.example.byokchat.chat.AppVisibility
+import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.chat.ChatEngine
 import com.example.byokchat.chat.ChatNotifier
 import com.example.byokchat.chat.GenerationService
@@ -81,7 +82,9 @@ class AppContainer(val context: Context) {
     private val env = ToolEnv(context, fs, db, settings, permissions)
     val registry = ToolRegistry(env, toolPrefs, confirmations)
     val notifier = ChatNotifier(context)
-    val engine = ChatEngine(db, settings, registry, notifier)
+    /** Nhật ký request/response (Đợt B): ghi ra file trong bộ nhớ riêng của app. */
+    val requestLog = RequestLog(java.io.File(context.filesDir, "request-log")) { settings.requestLogEnabled.value }
+    val engine = ChatEngine(db, settings, registry, notifier, requestLog)
 
     /** Mở cuộc trò chuyện được yêu cầu từ thông báo (MainActivity ghi vào, AppNav đọc rồi xóa). */
     val pendingConversation = MutableStateFlow<String?>(null)

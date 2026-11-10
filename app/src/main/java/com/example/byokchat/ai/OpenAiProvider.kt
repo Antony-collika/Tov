@@ -1,6 +1,7 @@
 package com.example.byokchat.ai
 
 import com.example.byokchat.data.ProviderConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -11,7 +12,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
 
 /** Dùng cho OpenAI và mọi dịch vụ tương thích OpenAI (mục Tùy chỉnh). */
-class OpenAiProvider(private val cfg: ProviderConfig) : AiProvider {
+class OpenAiProvider(
+    private val cfg: ProviderConfig,
+    private val log: RequestLog? = null,
+    /** Xin thêm số token thật trong luồng stream; tắt đi nếu máy chủ tự dựng từ chối trường này. */
+    private val includeUsage: Boolean = true,
+) : AiProvider {
     private val base: String get() = cfg.effectiveBaseUrl().trimEnd('/')
 
     private fun Request.Builder.withAuth(): Request.Builder =
@@ -27,6 +33,7 @@ class OpenAiProvider(private val cfg: ProviderConfig) : AiProvider {
         val body = buildJsonObject {
             put("model", request.model)
             put("stream", true)
+            if (includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
             put("messages", buildMessages(request))
             if (request.tools.isNotEmpty()) {
                 put("tools", buildJsonArray {
@@ -43,6 +50,9 @@ class OpenAiProvider(private val cfg: ProviderConfig) : AiProvider {
                 })
             }
         }
+        val logId = log?.beginRequest("OpenAI", request.model, body) ?: -1
+        val raw = StringBuilder()
+        var usage: Usage? = null
         val req = Request.Builder()
             .url("$base/chat/completions")
             .withAuth()
@@ -50,23 +60,34 @@ class OpenAiProvider(private val cfg: ProviderConfig) : AiProvider {
             .build()
 
         val partial = sortedMapOf<Int, Partial>()
-        Http.client.sseFlow(req).collect { ev ->
-            if (ev.data == "[DONE]") return@collect
-            val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
-            obj["error"]?.let { throw AiException(errorText(it)) }
-            val delta = obj["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("delta")?.jsonObject
-                ?: return@collect
-            delta["content"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
-            delta["tool_calls"]?.jsonArray?.forEach { tc ->
-                val t = tc.jsonObject
-                val idx = t["index"]?.jsonPrimitive?.intOrNull ?: 0
-                val p = partial.getOrPut(idx) { Partial() }
-                t["id"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) p.id = it }
-                val fn = t["function"]?.jsonObject
-                fn?.get("name")?.jsonPrimitive?.contentOrNull?.let { if (p.name.isEmpty()) p.name = it }
-                fn?.get("arguments")?.jsonPrimitive?.contentOrNull?.let { p.args.append(it) }
+        try {
+            Http.client.sseFlow(req).collect { ev ->
+                if (ev.data == "[DONE]") return@collect
+                raw.append(ev.data).append('\n')
+                if (raw.length > 1_000_000) raw.setLength(1_000_000)
+                val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
+                obj["error"]?.let { throw AiException(errorText(it)) }
+                // Số token thật nằm ở chunk cuối (khi stream_options.include_usage bật).
+                obj["usage"]?.jsonObject?.let { usage = Usage.merge(usage, Usage.fromOpenAi(it)) }
+                val delta = obj["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("delta")?.jsonObject
+                    ?: return@collect
+                delta["content"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
+                delta["tool_calls"]?.jsonArray?.forEach { tc ->
+                    val t = tc.jsonObject
+                    val idx = t["index"]?.jsonPrimitive?.intOrNull ?: 0
+                    val p = partial.getOrPut(idx) { Partial() }
+                    t["id"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) p.id = it }
+                    val fn = t["function"]?.jsonObject
+                    fn?.get("name")?.jsonPrimitive?.contentOrNull?.let { if (p.name.isEmpty()) p.name = it }
+                    fn?.get("arguments")?.jsonPrimitive?.contentOrNull?.let { p.args.append(it) }
+                }
             }
+        } catch (e: Exception) {
+            val err = if (e is CancellationException) "cancelled" else e.message
+            log?.finishRequest(logId, httpStatus = null, responseText = raw.toString(), usage = usage, error = err)
+            throw e
         }
+        log?.finishRequest(logId, httpStatus = 200, responseText = raw.toString(), usage = usage, error = null)
         val calls = partial.values.filter { it.name.isNotEmpty() }.map {
             AiToolCall(
                 id = it.id.ifEmpty { "call_" + UUID.randomUUID().toString().take(12) },

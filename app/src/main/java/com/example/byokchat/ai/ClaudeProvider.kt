@@ -2,6 +2,7 @@ package com.example.byokchat.ai
 
 import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.data.ProviderConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -10,7 +11,7 @@ import kotlinx.serialization.json.*
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
-class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
+class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLog? = null) : AiProvider {
     private val base: String get() = cfg.effectiveBaseUrl().trimEnd('/')
 
     private companion object {
@@ -64,6 +65,9 @@ class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
                 })
             }
         }
+        val logId = log?.beginRequest("Claude", request.model, body) ?: -1
+        val raw = StringBuilder()
+        var usage: Usage? = null
         val req = Request.Builder()
             .url("$base/v1/messages")
             .withAuth()
@@ -71,32 +75,46 @@ class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
             .build()
 
         val partial = sortedMapOf<Int, Partial>()
-        Http.client.sseFlow(req).collect { ev ->
-            val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
-            when (obj["type"]?.jsonPrimitive?.contentOrNull) {
-                "content_block_start" -> {
-                    val idx = obj["index"]?.jsonPrimitive?.intOrNull ?: return@collect
-                    val cb = obj["content_block"]?.jsonObject ?: return@collect
-                    if (cb["type"]?.jsonPrimitive?.contentOrNull == "tool_use") {
-                        partial[idx] = Partial(
-                            cb["id"]?.jsonPrimitive?.contentOrNull ?: "",
-                            cb["name"]?.jsonPrimitive?.contentOrNull ?: "",
-                        )
+        try {
+            Http.client.sseFlow(req).collect { ev ->
+                raw.append(ev.data).append('\n')
+                if (raw.length > 1_000_000) raw.setLength(1_000_000)
+                val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
+                when (obj["type"]?.jsonPrimitive?.contentOrNull) {
+                    // Số token thật: đầu lượt gửi input (+ cache), cuối lượt gửi output.
+                    "message_start" -> obj["message"]?.jsonObject?.get("usage")?.jsonObject
+                        ?.let { usage = Usage.merge(usage, Usage.fromClaude(it)) }
+                    "message_delta" -> obj["usage"]?.jsonObject
+                        ?.let { usage = Usage.merge(usage, Usage.fromClaude(it)) }
+                    "content_block_start" -> {
+                        val idx = obj["index"]?.jsonPrimitive?.intOrNull ?: return@collect
+                        val cb = obj["content_block"]?.jsonObject ?: return@collect
+                        if (cb["type"]?.jsonPrimitive?.contentOrNull == "tool_use") {
+                            partial[idx] = Partial(
+                                cb["id"]?.jsonPrimitive?.contentOrNull ?: "",
+                                cb["name"]?.jsonPrimitive?.contentOrNull ?: "",
+                            )
+                        }
                     }
-                }
-                "content_block_delta" -> {
-                    val idx = obj["index"]?.jsonPrimitive?.intOrNull ?: return@collect
-                    val d = obj["delta"]?.jsonObject ?: return@collect
-                    when (d["type"]?.jsonPrimitive?.contentOrNull) {
-                        "text_delta" -> d["text"]?.jsonPrimitive?.contentOrNull
-                            ?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
-                        "input_json_delta" -> d["partial_json"]?.jsonPrimitive?.contentOrNull
-                            ?.let { partial[idx]?.args?.append(it) }
+                    "content_block_delta" -> {
+                        val idx = obj["index"]?.jsonPrimitive?.intOrNull ?: return@collect
+                        val d = obj["delta"]?.jsonObject ?: return@collect
+                        when (d["type"]?.jsonPrimitive?.contentOrNull) {
+                            "text_delta" -> d["text"]?.jsonPrimitive?.contentOrNull
+                                ?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
+                            "input_json_delta" -> d["partial_json"]?.jsonPrimitive?.contentOrNull
+                                ?.let { partial[idx]?.args?.append(it) }
+                        }
                     }
+                    "error" -> throw AiException(errorText(obj["error"] ?: obj))
                 }
-                "error" -> throw AiException(errorText(obj["error"] ?: obj))
             }
+        } catch (e: Exception) {
+            val err = if (e is CancellationException) "cancelled" else e.message
+            log?.finishRequest(logId, httpStatus = null, responseText = raw.toString(), usage = usage, error = err)
+            throw e
         }
+        log?.finishRequest(logId, httpStatus = 200, responseText = raw.toString(), usage = usage, error = null)
         val calls = partial.values.filter { it.name.isNotEmpty() }.map {
             AiToolCall(it.id, it.name, it.args.toString().ifBlank { "{}" })
         }

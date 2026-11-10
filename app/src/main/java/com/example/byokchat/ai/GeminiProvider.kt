@@ -1,6 +1,7 @@
 package com.example.byokchat.ai
 
 import com.example.byokchat.data.ProviderConfig
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
@@ -10,7 +11,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
 
-class GeminiProvider(private val cfg: ProviderConfig) : AiProvider {
+class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLog? = null) : AiProvider {
     private val base: String get() = cfg.effectiveBaseUrl().trimEnd('/')
 
     private fun Request.Builder.withAuth(): Request.Builder = header("x-goog-api-key", cfg.apiKey)
@@ -45,6 +46,9 @@ class GeminiProvider(private val cfg: ProviderConfig) : AiProvider {
             }
             put("generationConfig", buildJsonObject { put("maxOutputTokens", request.maxOutputTokens) })
         }
+        val logId = log?.beginRequest("Gemini", request.model, body) ?: -1
+        val raw = StringBuilder()
+        var usage: Usage? = null
         val req = Request.Builder()
             .url("$base/v1beta/models/$model:streamGenerateContent?alt=sse")
             .withAuth()
@@ -52,28 +56,39 @@ class GeminiProvider(private val cfg: ProviderConfig) : AiProvider {
             .build()
 
         val calls = mutableListOf<AiToolCall>()
-        Http.client.sseFlow(req).collect { ev ->
-            val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
-            obj["error"]?.let { throw AiException(errorText(it)) }
-            obj["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitive?.contentOrNull
-                ?.let { throw AiException("Request blocked: $it") }
-            val cand = obj["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@collect
-            cand["content"]?.jsonObject?.get("parts")?.jsonArray?.forEach { p ->
-                val po = p.jsonObject
-                if (po["thought"]?.jsonPrimitive?.booleanOrNull == true) return@forEach
-                po["text"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
-                po["functionCall"]?.jsonObject?.let { fc ->
-                    calls += AiToolCall(
-                        id = "call_" + UUID.randomUUID().toString().take(12),
-                        name = fc["name"]?.jsonPrimitive?.contentOrNull ?: "",
-                        argsJson = (fc["args"] ?: JsonObject(emptyMap())).toString(),
-                        signature = po["thoughtSignature"]?.jsonPrimitive?.contentOrNull,
-                    )
+        try {
+            Http.client.sseFlow(req).collect { ev ->
+                raw.append(ev.data).append('\n')
+                if (raw.length > 1_000_000) raw.setLength(1_000_000)
+                val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
+                // Số token thật nằm ở usageMetadata trong mỗi chunk (số cộng dồn, lần cuối là số đúng).
+                obj["usageMetadata"]?.jsonObject?.let { usage = Usage.merge(usage, Usage.fromGemini(it)) }
+                obj["error"]?.let { throw AiException(errorText(it)) }
+                obj["promptFeedback"]?.jsonObject?.get("blockReason")?.jsonPrimitive?.contentOrNull
+                    ?.let { throw AiException("Request blocked: $it") }
+                val cand = obj["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@collect
+                cand["content"]?.jsonObject?.get("parts")?.jsonArray?.forEach { p ->
+                    val po = p.jsonObject
+                    if (po["thought"]?.jsonPrimitive?.booleanOrNull == true) return@forEach
+                    po["text"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
+                    po["functionCall"]?.jsonObject?.let { fc ->
+                        calls += AiToolCall(
+                            id = "call_" + UUID.randomUUID().toString().take(12),
+                            name = fc["name"]?.jsonPrimitive?.contentOrNull ?: "",
+                            argsJson = (fc["args"] ?: JsonObject(emptyMap())).toString(),
+                            signature = po["thoughtSignature"]?.jsonPrimitive?.contentOrNull,
+                        )
+                    }
                 }
+                val finish = cand["finishReason"]?.jsonPrimitive?.contentOrNull
+                if (finish != null && finish in blockedReasons) throw AiException("The response was blocked by Gemini's safety filter ($finish).")
             }
-            val finish = cand["finishReason"]?.jsonPrimitive?.contentOrNull
-            if (finish != null && finish in blockedReasons) throw AiException("The response was blocked by Gemini's safety filter ($finish).")
+        } catch (e: Exception) {
+            val err = if (e is CancellationException) "cancelled" else e.message
+            log?.finishRequest(logId, httpStatus = null, responseText = raw.toString(), usage = usage, error = err)
+            throw e
         }
+        log?.finishRequest(logId, httpStatus = 200, responseText = raw.toString(), usage = usage, error = null)
         val valid = calls.filter { it.name.isNotEmpty() }
         if (valid.isNotEmpty()) emit(AiEvent.ToolCalls(valid))
     }.flowOn(Dispatchers.IO)
