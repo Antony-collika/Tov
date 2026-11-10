@@ -15,6 +15,8 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Danh sách toàn bộ công cụ + cầu nối với vòng chat.
@@ -57,6 +59,44 @@ class ToolRegistry(
         prefs.update(t.uid) { it.copy(name = null, description = null) }
     }
 
+    /** Mô tả gốc của một tham số trong code (null nếu tham số không có mô tả). */
+    fun defaultParamDescription(t: Tool, param: String): String? {
+        val props = t.schema["properties"] as? JsonObject ?: return null
+        val p = props[param] as? JsonObject ?: return null
+        return (p["description"] as? JsonPrimitive)?.contentOrNull
+    }
+
+    /** Mô tả tham số mà AI nhìn thấy: bản sửa của user, nếu không thì bản gốc. */
+    fun paramDescription(t: Tool, param: String): String =
+        prefs.get(t.uid).paramDescriptions[param] ?: defaultParamDescription(t, param).orEmpty()
+
+    /** Schema thật sự gửi cho AI: mô tả tham số đã sửa (nếu có) thay mô tả gốc. */
+    fun effectiveSchema(t: Tool): JsonObject {
+        val overrides = prefs.get(t.uid).paramDescriptions
+        if (overrides.isEmpty()) return t.schema
+        val props = t.schema["properties"] as? JsonObject ?: return t.schema
+        val newProps = JsonObject(props.entries.associate { (k, v) ->
+            val desc = overrides[k]
+            if (desc == null || v !is JsonObject) k to v
+            else k to JsonObject(v.toMap() + ("description" to JsonPrimitive(desc)))
+        })
+        return JsonObject(t.schema.toMap() + ("properties" to newProps))
+    }
+
+    /** Sửa mô tả một tham số; về lại đúng mô tả gốc thì xóa bản sửa. */
+    fun setParamDescription(t: Tool, param: String, desc: String) {
+        val d = desc.trim()
+        prefs.update(t.uid) { pref ->
+            val map = pref.paramDescriptions.toMutableMap()
+            if (d.isEmpty() || d == defaultParamDescription(t, param)) map.remove(param) else map[param] = d
+            pref.copy(paramDescriptions = map)
+        }
+    }
+
+    fun restoreParamDescriptions(t: Tool) {
+        prefs.update(t.uid) { it.copy(paramDescriptions = emptyMap()) }
+    }
+
     /** Trả về thông báo lỗi nếu tên không hợp lệ, null nếu ổn. */
     fun validateName(t: Tool, name: String): String? {
         val n = name.trim()
@@ -86,7 +126,7 @@ class ToolRegistry(
     override suspend fun definitions(): List<ToolDef> {
         withContext(Dispatchers.IO) { env.fs.refreshIfStale() }
         return all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
-            .map { ToolDef(effectiveName(it), effectiveDescription(it), it.schema) }
+            .map { ToolDef(effectiveName(it), effectiveDescription(it), effectiveSchema(it)) }
     }
 
     override fun uidForName(name: String): String? = all.firstOrNull { effectiveName(it) == name }?.uid
@@ -95,7 +135,7 @@ class ToolRegistry(
 
     override fun estimateToolTokens(): Int =
         all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
-            .sumOf { TokenEstimator.text(effectiveName(it) + effectiveDescription(it) + it.schema.toString()) }
+            .sumOf { TokenEstimator.text(effectiveName(it) + effectiveDescription(it) + effectiveSchema(it).toString()) }
 
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
 

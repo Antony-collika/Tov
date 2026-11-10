@@ -15,6 +15,8 @@ data class ToolPref(
     val mode: String? = null,
     val name: String? = null,
     val description: String? = null,
+    /** Mô tả từng tham số đã sửa (Đợt C); rỗng = dùng mô tả gốc trong code. */
+    val paramDescriptions: Map<String, String> = emptyMap(),
 )
 
 class ToolPrefs(context: Context) {
@@ -30,7 +32,7 @@ class ToolPrefs(context: Context) {
     fun update(uid: String, change: (ToolPref) -> ToolPref) {
         val next = change(get(uid))
         val map = _prefs.value.toMutableMap()
-        if (next.mode == null && next.name == null && next.description == null) map.remove(uid) else map[uid] = next
+        if (next.mode == null && next.name == null && next.description == null && next.paramDescriptions.isEmpty()) map.remove(uid) else map[uid] = next
         _prefs.value = map
         plain.edit().putString("prefs", json.encodeToString(ser, map)).apply()
     }
