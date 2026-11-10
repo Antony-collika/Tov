@@ -100,6 +100,27 @@ class SettingsRepository(context: Context) {
         plain.edit().putBoolean("notif_permission_asked", asked).apply()
     }
 
+    /** Nhật ký request (Đợt B): ghi mỗi lần gọi model ra file, mặc định bật. */
+    private val _requestLogEnabled = MutableStateFlow(plain.getBoolean("request_log_enabled", true))
+    val requestLogEnabled: StateFlow<Boolean> = _requestLogEnabled.asStateFlow()
+
+    fun setRequestLogEnabled(enabled: Boolean) {
+        _requestLogEnabled.value = enabled
+        plain.edit().putBoolean("request_log_enabled", enabled).apply()
+    }
+
+    /**
+     * OpenAI: xin thêm số token thật trong luồng stream (`stream_options.include_usage`).
+     * Mặc định bật; máy chủ tự dựng có thể từ chối trường này thì tắt đi để gửi như cũ.
+     */
+    private val _openAiIncludeUsage = MutableStateFlow(plain.getBoolean("openai_include_usage", true))
+    val openAiIncludeUsage: StateFlow<Boolean> = _openAiIncludeUsage.asStateFlow()
+
+    fun setOpenAiIncludeUsage(enabled: Boolean) {
+        _openAiIncludeUsage.value = enabled
+        plain.edit().putBoolean("openai_include_usage", enabled).apply()
+    }
+
     fun provider(id: String?): ProviderConfig? = _providers.value.firstOrNull { it.id == id }
 
     fun defaultProvider(): ProviderConfig? = provider(_activeProviderId.value) ?: _providers.value.firstOrNull()
