@@ -10,6 +10,8 @@ import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.ProviderType
+import com.example.byokchat.data.RequestLayout
+import com.example.byokchat.data.RequestLayoutStore
 import com.example.byokchat.data.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -39,6 +41,8 @@ class ChatEngine(
     private val tools: ToolRuntime,
     private val notifier: ChatNotifier,
     private val requestLog: RequestLog? = null,
+    /** Bố cục Request panel (Đợt C); null = bố cục mặc định từ Settings. */
+    private val layoutStore: RequestLayoutStore? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -109,21 +113,26 @@ class ChatEngine(
                     throw AiException("The server address of \"${cfg.name}\" is not valid (it must start with http:// or https://).")
                 }
 
-                val toolDefs = tools.definitions()
-                // Chỉ còn một system prompt duy nhất: mặc định trong Settings.
-                // Ngày giờ không chèn vào đây nữa: `time.now` là công cụ như
-                // trước, để system prompt ổn định và giữ được bộ nhớ đệm.
-                val system = settings.defaultSystemPrompt.value
+                // Request đi theo bố cục Request panel (Đợt C): thẻ System
+                // thay ô "Default system prompt"; ngày giờ KHÔNG chèn vào
+                // system nữa — `time.now` là công cụ như trước, để system
+                // prompt ổn định và giữ được bộ nhớ đệm.
+                val layout = layoutStore?.effectiveLayout?.value
+                    ?: RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value)
+                val vars = RequestLayout.requestVars(model, cfg.name)
+                val toolDefs = layout.effectiveToolDefs(tools.definitions(), tools.nameForUid(RequestLayout.TIME_NOW_UID))
+                val system = layout.systemText(vars)
                 val budget = ContextBuilder.budget(
                     cfg, model, system,
                     toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
                 )
                 val assembled = RequestAssembler.assemble(
-                    systemPrompt = system,
+                    layout = layout,
                     rows = msgDao.getAll(conversationId).filter { it.id != assistantId },
                     toolDefs = toolDefs,
                     budget = budget,
                     nameForUid = tools::nameForUid,
+                    vars = vars,
                 )
                 val request = AiRequest(model, assembled.system, assembled.sentMessages, assembled.toolDefs, cfg.maxOutputTokens)
 

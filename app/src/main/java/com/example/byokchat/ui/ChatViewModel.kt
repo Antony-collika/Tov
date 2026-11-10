@@ -19,6 +19,7 @@ import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.isDefaultTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.ProviderConfig
+import com.example.byokchat.data.RequestLayout
 import com.example.byokchat.data.encodeImages
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -79,18 +80,21 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         if (c == null || cfg == null) null
         else {
             val modelName = currentModel.value.orEmpty()
-            val system = app.settings.defaultSystemPrompt.value
-            val toolDefs = app.registry.definitions()
+            val layout = app.layoutStore.effectiveLayout.value
+            val vars = RequestLayout.requestVars(modelName, cfg.name)
+            val toolDefs = layout.effectiveToolDefs(app.registry.definitions(), app.registry.nameForUid(RequestLayout.TIME_NOW_UID))
+            val system = layout.systemText(vars)
             val budget = ContextBuilder.budget(
                 cfg, modelName, system,
                 toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
             )
             RequestAssembler.assemble(
-                systemPrompt = system,
+                layout = layout,
                 rows = messages.value,
                 toolDefs = toolDefs,
                 budget = budget,
                 nameForUid = app.registry::nameForUid,
+                vars = vars,
             )
         }
     }

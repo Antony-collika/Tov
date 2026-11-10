@@ -82,9 +82,11 @@ class AppContainer(val context: Context) {
     private val env = ToolEnv(context, fs, db, settings, permissions)
     val registry = ToolRegistry(env, toolPrefs, confirmations)
     val notifier = ChatNotifier(context)
+    /** Bố cục Request panel (Đợt C): danh sách thẻ toàn cục, lưu SharedPreferences. */
+    val layoutStore = RequestLayoutStore(context, settings)
     /** Nhật ký request/response (Đợt B): ghi ra file trong bộ nhớ riêng của app. */
     val requestLog = RequestLog(java.io.File(context.filesDir, "request-log"), enabled = { settings.requestLogEnabled.value })
-    val engine = ChatEngine(db, settings, registry, notifier, requestLog)
+    val engine = ChatEngine(db, settings, registry, notifier, requestLog, layoutStore)
 
     /** Mở cuộc trò chuyện được yêu cầu từ thông báo (MainActivity ghi vào, AppNav đọc rồi xóa). */
     val pendingConversation = MutableStateFlow<String?>(null)
