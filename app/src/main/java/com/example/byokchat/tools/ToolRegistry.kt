@@ -137,6 +137,15 @@ class ToolRegistry(
         all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
             .sumOf { TokenEstimator.text(effectiveName(it) + effectiveDescription(it) + effectiveSchema(it).toString()) }
 
+    /** Ghi vào Tov/ luôn phải hỏi user, kể cả khi công cụ đang ở mode Auto (Đợt D). */
+    private fun targetsProtectedDir(tool: Tool, args: JsonObject): Boolean {
+        if (tool.risk == Risk.READ) return false
+        return listOf("path", "source", "dest").any { key ->
+            val p = args.str(key) ?: return@any false
+            isProtectedPath(p)
+        }
+    }
+
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
 
     override suspend fun execute(call: AiToolCall, turnId: String): ToolOutcome {
@@ -152,7 +161,10 @@ class ToolRegistry(
             return ToolOutcome(tool.uid, ModelFacingText.invalidArgsJson(e.message), true)
         }
 
-        if (mode(tool) == ToolMode.ASK) {
+        // Thư mục bảo vệ Tov/ (Đợt D): AI chỉ đọc được, ghi luôn phải hỏi
+        // user — kể cả khi công cụ đang ở mode Auto.
+        val protected = targetsProtectedDir(tool, args)
+        if (mode(tool) == ToolMode.ASK || protected) {
             val detail = try {
                 // Luồng công việc gắn kèm Job hiện tại: khi bấm Dừng, các vòng lặp của công cụ sẽ thoát sớm.
                 withContext(Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job])) { tool.preview(env, args) }
@@ -160,7 +172,7 @@ class ToolRegistry(
                 throw e
             } catch (e: Exception) {
                 ModelFacingText.previewFailed(e.message) + "\n" + args.toString().take(500)
-            }
+            } + if (protected) "\nThis is inside the protected Tov/ folder, so it always asks first." else ""
             val allowed = confirmations.ask(ConfirmRequest(displayName, tool.uid, tool.risk, detail, turnId))
             if (!allowed) return ToolOutcome(tool.uid, ModelFacingText.DENIED_ACTION, true)
         }
@@ -183,4 +195,14 @@ class ToolRegistry(
     companion object {
         private val NAME_RX = Regex("^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
     }
+}
+
+/**
+ * Đường dẫn có nằm trong thư mục bảo vệ Tov/ không (Đợt D): AI chỉ đọc
+ * được, ghi luôn phải hỏi user. So theo đoạn đầu tiên của đường dẫn tương
+ * đối trong workspace ("Tov/prompts/x.md" → true, "Tov2/x.md" → false).
+ */
+fun isProtectedPath(path: String): Boolean {
+    val first = path.trim().replace('\\', '/').split('/').firstOrNull { it.isNotEmpty() && it != "." }
+    return first == "Tov"
 }
