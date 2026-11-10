@@ -49,7 +49,7 @@ object HistoryExporter {
             appendLine("---")
             turns.entries.forEachIndexed { index, (_, rs) ->
                 appendLine()
-                renderTurn(this, index + 1, rs)
+                renderTurn(index + 1, rs)
             }
         }
     }
