@@ -201,6 +201,19 @@ private fun htmlToText(html: String): String {
 
 private fun noteId() = UUID.randomUUID().toString().take(8)
 
+/** Xuất một note ra Tov/notes/<id>.md (Đợt D). Best-effort: workspace chưa
+ * chọn hay lỗi ghi đều bỏ qua, không bao giờ làm lỗi tool. */
+private fun exportNote(env: ToolEnv, note: NoteEntity) {
+    runCatching {
+        env.fs.writeText("Tov/notes/${note.id}.md", "# ${note.title}\n\n${note.content}")
+    }
+}
+
+/** Xóa file .md của một note (Đợt D). Best-effort. */
+private fun deleteNoteFile(env: ToolEnv, id: String) {
+    runCatching { env.fs.find("Tov/notes/$id.md")?.delete() }
+}
+
 /** Nhóm 4: công cụ công việc hằng ngày. */
 object DailyTools {
     fun build(): List<Tool> = listOf(
@@ -314,7 +327,9 @@ object DailyTools {
             preview = { _, a -> "Save note \"${a.reqStr("title")}\":\n" + previewText(a.reqStr("content")) }) { env, a ->
             val now = System.currentTimeMillis()
             val id = noteId()
-            env.db.notes().upsert(NoteEntity(id, a.reqStr("title").trim(), a.reqStr("content"), now, now))
+            val note = NoteEntity(id, a.reqStr("title").trim(), a.reqStr("content"), now, now)
+            env.db.notes().upsert(note)
+            exportNote(env, note)
             "Note saved (id: $id)."
         },
 
@@ -345,15 +360,19 @@ object DailyTools {
             }) { env, a ->
             val n = env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("No note with id '${a.reqStr("id")}'.")
             val newContent = a.str("content")?.let { if (a.bool("append") == true) n.content.trimEnd() + "\n" + it else it } ?: n.content
-            env.db.notes().upsert(n.copy(title = a.str("title")?.trim() ?: n.title, content = newContent, updatedAt = System.currentTimeMillis()))
+            val updated = n.copy(title = a.str("title")?.trim() ?: n.title, content = newContent, updatedAt = System.currentTimeMillis())
+            env.db.notes().upsert(updated)
+            exportNote(env, updated)
             "Updated note ${n.id}."
         },
 
         dailyTool("note.delete", Risk.DELETE, "delete_note", "Delete a note. The user must always confirm.",
             schema { str("id", "Note id.", required = true) },
             preview = { env, a -> "DELETE note: " + (env.db.notes().get(a.reqStr("id").trim())?.let { "\"${it.title}\"" } ?: a.reqStr("id")) }) { env, a ->
-            env.db.notes().get(a.reqStr("id").trim()) ?: throw ToolException("No note with id '${a.reqStr("id")}'.")
-            env.db.notes().delete(a.reqStr("id").trim())
+            val id = a.reqStr("id").trim()
+            env.db.notes().get(id) ?: throw ToolException("No note with id '$id'.")
+            env.db.notes().delete(id)
+            deleteNoteFile(env, id)
             "Note deleted."
         },
 
