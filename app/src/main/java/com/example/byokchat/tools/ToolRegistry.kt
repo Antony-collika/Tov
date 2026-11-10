@@ -2,6 +2,7 @@ package com.example.byokchat.tools
 
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.ai.ToolDef
+import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.chat.ToolOutcome
 import com.example.byokchat.chat.ToolRuntime
@@ -102,13 +103,13 @@ class ToolRegistry(
         // Mỗi lần chạy công cụ bắt đầu với bộ nhớ đệm metadata sạch (xem WorkspaceFs).
         env.fs.clearMeta()
         val tool = all.firstOrNull { effectiveName(it) == call.name && mode(it) != ToolMode.OFF && isAvailable(it) }
-            ?: return ToolOutcome("", "There is no tool named '${call.name}', or it is turned off.", true)
+            ?: return ToolOutcome("", ModelFacingText.noSuchTool(call.name), true)
         val displayName = effectiveName(tool)
         val args: JsonObject = try {
             if (call.argsJson.isBlank()) JsonObject(emptyMap()) else Json.parseToJsonElement(call.argsJson) as? JsonObject
-                ?: return ToolOutcome(tool.uid, "The arguments must be a JSON object.", true)
+                ?: return ToolOutcome(tool.uid, ModelFacingText.ARGS_NOT_OBJECT, true)
         } catch (e: Exception) {
-            return ToolOutcome(tool.uid, "The arguments are not valid JSON: ${e.message?.lineSequence()?.firstOrNull()}", true)
+            return ToolOutcome(tool.uid, ModelFacingText.invalidArgsJson(e.message), true)
         }
 
         if (mode(tool) == ToolMode.ASK) {
@@ -118,10 +119,10 @@ class ToolRegistry(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                "(Could not build a preview: ${e.message})\n" + args.toString().take(500)
+                ModelFacingText.previewFailed(e.message) + "\n" + args.toString().take(500)
             }
             val allowed = confirmations.ask(ConfirmRequest(displayName, tool.uid, tool.risk, detail, turnId))
-            if (!allowed) return ToolOutcome(tool.uid, "The user denied this action. Do not try again unless they ask you to.", true)
+            if (!allowed) return ToolOutcome(tool.uid, ModelFacingText.DENIED_ACTION, true)
         }
 
         return try {
@@ -135,7 +136,7 @@ class ToolRegistry(
         } catch (e: ToolException) {
             ToolOutcome(tool.uid, e.message ?: "Unknown error.", true)
         } catch (e: Exception) {
-            ToolOutcome(tool.uid, "Error while running the tool: ${e.message ?: e.javaClass.simpleName}", true)
+            ToolOutcome(tool.uid, ModelFacingText.toolError(e.message ?: e.javaClass.simpleName), true)
         }
     }
 

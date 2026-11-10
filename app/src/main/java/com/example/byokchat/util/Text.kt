@@ -1,5 +1,6 @@
 package com.example.byokchat.util
 
+import com.example.byokchat.chat.ModelFacingText
 import java.text.SimpleDateFormat
 import java.text.Normalizer
 import java.util.Date
@@ -66,7 +67,7 @@ fun humanSize(bytes: Long): String = when {
 }
 
 fun String.cap(max: Int = 30000): String =
-    if (length <= max) this else take(max) + "\n…[truncated, ${length - max} more characters]"
+    if (length <= max) this else take(max) + ModelFacingText.truncatedNote(length - max)
 
 fun fmtTime(ms: Long): String =
     if (ms <= 0) "?" else SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(ms))

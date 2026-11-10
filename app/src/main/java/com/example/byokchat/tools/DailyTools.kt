@@ -11,6 +11,7 @@ import android.provider.CalendarContract
 import android.text.Html
 import com.example.byokchat.ai.Http
 import com.example.byokchat.ai.getJson
+import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.data.NoteEntity
 import com.example.byokchat.data.TodoEntity
 import com.example.byokchat.util.TextUtil
@@ -265,7 +266,7 @@ object DailyTools {
             val body = if (rawBody.length > MAX_PAGE_CHARS) rawBody.take(MAX_PAGE_CHARS) else rawBody
             val title = HTML_TITLE.find(body)?.groupValues?.get(1)?.let { Html.fromHtml(it, Html.FROM_HTML_MODE_LEGACY).toString().trim() }
             val text = if (type.contains("html", true) || body.trimStart().startsWith("<")) htmlToText(body) else body
-            val out = if (text.length > max) text.take(max) + "\n…[truncated, ${text.length - max} more characters]" else text
+            val out = if (text.length > max) text.take(max) + ModelFacingText.truncatedNote(text.length - max) else text
             (if (title != null) "Title: $title\n" else "") + "Source: $url\n\n" + out
         },
 

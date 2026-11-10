@@ -1,5 +1,6 @@
 package com.example.byokchat.ai
 
+import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.data.ProviderConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -144,7 +145,7 @@ class ClaudeProvider(private val cfg: ProviderConfig) : AiProvider {
                 Role.TOOL -> add("user", buildJsonObject {
                     put("type", "tool_result")
                     put("tool_use_id", m.toolCallId ?: "")
-                    put("content", m.text.ifEmpty { "(no result)" })
+                    put("content", m.text.ifEmpty { ModelFacingText.NO_RESULT })
                     if (m.isError) put("is_error", true)
                 })
             }
