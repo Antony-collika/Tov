@@ -34,4 +34,8 @@ object ModelFacingText {
 
     /** Tool chạy lỗi. */
     fun toolError(detail: String): String = "Error while running the tool: $detail"
+
+    /** Kết quả tool cũ trong lịch sử đã rút gọn thành một dòng (thẻ History, Đợt C). */
+    fun compactedToolResult(toolName: String, chars: Int, turn: Int): String =
+        "[Shortened result: $toolName, $chars characters, turn T$turn. Call the tool again for the full result.]"
 }

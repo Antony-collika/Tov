@@ -19,6 +19,8 @@ data class ContextPlan(
     val droppedTurnIds: List<String> = emptyList(),
     /** Tin của các lượt bị cắt (cũ nhất trước), để Inspector hiện cả phần bị cắt. */
     val droppedMessages: List<AiMessage> = emptyList(),
+    /** Lý do các lượt bị cắt (vd "over budget", "outside last 10 turns"). */
+    val dropReason: String = "over budget",
 )
 
 /**
@@ -32,43 +34,74 @@ object ContextBuilder {
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
 
+    /** Kết quả tool trong lịch sử dài hơn ngần này ký tự thì rút gọn thành một dòng (thẻ History). */
+    const val COMPACT_TOOL_RESULT_CHARS = 500
+
     fun budget(cfg: ProviderConfig, model: String, system: String, toolTokens: Int): Int {
         val limit = ContextLimits.forModel(cfg, model)
         val reserve = cfg.maxOutputTokens + TokenEstimator.text(system) + toolTokens + 400
         return maxOf(limit - reserve, limit / 4)
     }
 
-    fun plan(rows: List<MessageEntity>, budget: Int, nameForUid: (String) -> String?): ContextPlan {
+    fun plan(
+        rows: List<MessageEntity>,
+        budget: Int,
+        nameForUid: (String) -> String?,
+        /** Rút gọn kết quả tool dài trong các lượt nhận được (thẻ History, Đợt C). */
+        compactToolResults: Boolean = false,
+        /** Có gửi lượt lỗi (assistant status "error") hay không (thẻ History). */
+        includeErrorTurns: Boolean = false,
+        /** Chỉ giữ N lượt gần nhất (chính sách LAST_N của thẻ History). */
+        maxTurns: Int? = null,
+        /** Lý do ghi cho các lượt bị cắt. */
+        dropReason: String = "over budget",
+    ): ContextPlan {
         val turns = LinkedHashMap<String, MutableList<MessageEntity>>()
         rows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
         val converted = turns.entries
-            .map { (turnId, rs) -> turnId to sanitize(rs.mapNotNull { r -> toAi(r, nameForUid) }) }
+            .map { (turnId, rs) -> turnId to sanitize(rs.mapNotNull { r -> toAi(r, nameForUid, includeErrorTurns) }) }
             .filter { it.second.isNotEmpty() }
+        val compacted = if (!compactToolResults) converted else converted.mapIndexed { index, (turnId, msgs) ->
+            turnId to msgs.map { m ->
+                if (m.role == Role.TOOL && m.text.length > COMPACT_TOOL_RESULT_CHARS) {
+                    m.copy(text = ModelFacingText.compactedToolResult(m.toolName ?: "tool", m.text.length, index + 1))
+                } else m
+            }
+        }
 
         val keep = ArrayDeque<Pair<String, List<AiMessage>>>()
         var used = 0
-        for ((turnId, turn) in converted.asReversed()) {
+        for ((turnId, turn) in compacted.asReversed()) {
             val cost = turn.sumOf { TokenEstimator.message(it) }
             if (keep.isNotEmpty() && used + cost > budget) break
             keep.addFirst(turnId to turn)
             used += cost
         }
+        if (maxTurns != null) {
+            while (keep.size > maxTurns) {
+                val removed = keep.removeFirst()
+                used -= removed.second.sumOf { TokenEstimator.message(it) }
+            }
+        }
         val keptIds = keep.map { it.first }.toSet()
-        val dropped = converted.filter { (turnId, _) -> turnId !in keptIds }
+        val dropped = compacted.filter { (turnId, _) -> turnId !in keptIds }
         return ContextPlan(
             messages = keep.flatMap { it.second },
             usedTokens = used,
-            totalTurns = converted.size,
-            droppedTurns = converted.size - keep.size,
+            totalTurns = compacted.size,
+            droppedTurns = compacted.size - keep.size,
             droppedTurnIds = dropped.map { it.first },
             droppedMessages = dropped.flatMap { it.second },
+            dropReason = dropReason,
         )
     }
 
-    private fun toAi(m: MessageEntity, nameForUid: (String) -> String?): AiMessage? = when (m.role) {
+    private fun toAi(m: MessageEntity, nameForUid: (String) -> String?, includeErrorTurns: Boolean = false): AiMessage? = when (m.role) {
         "user" -> AiMessage(Role.USER, text = m.text, imagePaths = m.images())
         "assistant" -> {
-            if (m.status != "done") null
+            if (m.status == "error" && includeErrorTurns) {
+                AiMessage(Role.ASSISTANT, text = m.text.ifBlank { m.error ?: "" })
+            } else if (m.status != "done") null
             else {
                 val calls = m.toolCallsJson
                     ?.let { runCatching { json.decodeFromString(callsSer, it) }.getOrNull() }
