@@ -116,10 +116,14 @@ class ChatEngine(
                     cfg, model, system,
                     toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
                 )
-                val history = ContextBuilder
-                    .plan(msgDao.getAll(conversationId).filter { it.id != assistantId }, budget, tools::nameForUid)
-                    .messages
-                val request = AiRequest(model, system, history, toolDefs, cfg.maxOutputTokens)
+                val assembled = RequestAssembler.assemble(
+                    systemPrompt = system,
+                    rows = msgDao.getAll(conversationId).filter { it.id != assistantId },
+                    toolDefs = toolDefs,
+                    budget = budget,
+                    nameForUid = tools::nameForUid,
+                )
+                val request = AiRequest(model, assembled.system, assembled.sentMessages, assembled.toolDefs, cfg.maxOutputTokens)
 
                 var lastFlush = System.currentTimeMillis()
                 var lastLive = 0L

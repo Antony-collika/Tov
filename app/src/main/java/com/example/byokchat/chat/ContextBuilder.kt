@@ -15,6 +15,10 @@ data class ContextPlan(
     val usedTokens: Int,
     val totalTurns: Int,
     val droppedTurns: Int,
+    /** ID các lượt bị cắt (cũ nhất trước), để Đợt B hiện lượt nào bị cắt chứ không chỉ đếm số lượt. */
+    val droppedTurnIds: List<String> = emptyList(),
+    /** Tin của các lượt bị cắt (cũ nhất trước), để Inspector hiện cả phần bị cắt. */
+    val droppedMessages: List<AiMessage> = emptyList(),
 )
 
 /**
@@ -37,17 +41,28 @@ object ContextBuilder {
     fun plan(rows: List<MessageEntity>, budget: Int, nameForUid: (String) -> String?): ContextPlan {
         val turns = LinkedHashMap<String, MutableList<MessageEntity>>()
         rows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
-        val converted = turns.values.map { sanitize(it.mapNotNull { r -> toAi(r, nameForUid) }) }.filter { it.isNotEmpty() }
+        val converted = turns.entries
+            .map { (turnId, rs) -> turnId to sanitize(rs.mapNotNull { r -> toAi(r, nameForUid) }) }
+            .filter { it.second.isNotEmpty() }
 
-        val keep = ArrayDeque<List<AiMessage>>()
+        val keep = ArrayDeque<Pair<String, List<AiMessage>>>()
         var used = 0
-        for (turn in converted.asReversed()) {
+        for ((turnId, turn) in converted.asReversed()) {
             val cost = turn.sumOf { TokenEstimator.message(it) }
             if (keep.isNotEmpty() && used + cost > budget) break
-            keep.addFirst(turn)
+            keep.addFirst(turnId to turn)
             used += cost
         }
-        return ContextPlan(keep.flatten(), used, converted.size, converted.size - keep.size)
+        val keptIds = keep.map { it.first }.toSet()
+        val dropped = converted.filter { (turnId, _) -> turnId !in keptIds }
+        return ContextPlan(
+            messages = keep.flatMap { it.second },
+            usedTokens = used,
+            totalTurns = converted.size,
+            droppedTurns = converted.size - keep.size,
+            droppedTurnIds = dropped.map { it.first },
+            droppedMessages = dropped.flatMap { it.second },
+        )
     }
 
     private fun toAi(m: MessageEntity, nameForUid: (String) -> String?): AiMessage? = when (m.role) {

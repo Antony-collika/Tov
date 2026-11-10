@@ -11,6 +11,8 @@ import com.example.byokchat.AppContainer
 import com.example.byokchat.ai.ImageStore
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.chat.ContextBuilder
+import com.example.byokchat.chat.RequestAssembler
+import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.isDefaultTitle
@@ -33,7 +35,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
-data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int)
+data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int, val droppedTurnIds: List<String> = emptyList())
 
 /** Danh sách mô hình chỉ làm mới lại sau 5 phút kể từ lần thành công trước. */
 private const val MODELS_TTL_MS = 5 * 60 * 1000L
@@ -75,10 +77,22 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         if (c == null || cfg == null) null
         else {
             val modelName = currentModel.value.orEmpty()
-            val prompt = app.settings.defaultSystemPrompt.value
-            val budget = ContextBuilder.budget(cfg, modelName, prompt, app.registry.estimateToolTokens())
-            val plan = ContextBuilder.plan(messages.value, budget, app.registry::nameForUid)
-            TokenStats(plan.usedTokens, ContextLimits.forModel(cfg, modelName), plan.droppedTurns)
+            val system = app.settings.defaultSystemPrompt.value
+            // Cùng một đường ghép request như ChatEngine.run (kể cả danh sách
+            // công cụ đã lọc), để số đếm trong hộp Chat memory khớp với thứ gửi thật.
+            val toolDefs = app.registry.definitions()
+            val budget = ContextBuilder.budget(
+                cfg, modelName, system,
+                toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
+            )
+            val assembled = RequestAssembler.assemble(
+                systemPrompt = system,
+                rows = messages.value,
+                toolDefs = toolDefs,
+                budget = budget,
+                nameForUid = app.registry::nameForUid,
+            )
+            TokenStats(assembled.historyTokens, ContextLimits.forModel(cfg, modelName), assembled.droppedTurnIds.size, assembled.droppedTurnIds)
         }
     }
 
