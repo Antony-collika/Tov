@@ -24,6 +24,10 @@ import com.example.byokchat.tools.Tool
 import com.example.byokchat.tools.ToolGroup
 import com.example.byokchat.tools.ToolMode
 import com.example.byokchat.tools.ToolRegistry
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /** First sentence of a tool description, cut to [max] characters: the short line shown in the tool list. */
 fun shortDescription(description: String, max: Int = 110): String {
@@ -291,8 +295,17 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
                     desc = tool.defaultDescription
                 }) { Text("Restore defaults") }
             }
+
+            HorizontalDivider()
+            Text("Parameters", style = MaterialTheme.typography.labelLarge)
             Text(
-                "The technical parameters and the way the tool works are handled by the app; you only edit the name and description. When the AI calls a tool by its new name, the app maps it back to the UID, so older conversations keep working.",
+                "What each parameter means to the AI. Edit a description to change how the AI uses that parameter.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ParametersSection(tool)
+            Text(
+                "The way the tool works is handled by the app. You can edit the name, the description, and what each parameter means to the AI. When the AI calls a tool by its new name, the app maps it back to the UID, so older conversations keep working.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -308,5 +321,84 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
             onConfirm = { confirmDiscard = false; onBack() },
             onDismiss = { confirmDiscard = false },
         )
+    }
+}
+
+/** Danh sách tham số của công cụ, xem và sửa mô tả từng tham số (Đợt C). */
+@Composable
+private fun ParametersSection(tool: Tool) {
+    val container = LocalContext.current.container
+    val registry = container.registry
+    val prefs by container.toolPrefs.prefs.collectAsState()
+    val props = remember(tool) {
+        (tool.schema["properties"] as? JsonObject)?.entries?.toList().orEmpty()
+    }
+    if (props.isEmpty()) {
+        Text(
+            "This tool takes no parameters.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    val required = remember(tool) {
+        (tool.schema["required"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty().toSet()
+    }
+    val overrides = prefs[tool.uid]?.paramDescriptions.orEmpty()
+    var editingParam by remember(tool.uid) { mutableStateOf<String?>(null) }
+    var paramText by remember(tool.uid) { mutableStateOf("") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        props.forEach { (paramName, schemaEl) ->
+            val paramObj = schemaEl as? JsonObject
+            val type = (paramObj?.get("type") as? JsonPrimitive)?.contentOrNull
+            val effDesc = registry.paramDescription(tool, paramName)
+            val defDesc = registry.defaultParamDescription(tool, paramName)
+            val edited = overrides.containsKey(paramName)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    paramName + (if (paramName in required) " (required)" else "") + (type?.let { " · $it" } ?: ""),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    if (effDesc.isBlank()) "(no description)" else effDesc,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (edited) {
+                    Text(
+                        "Edited — original: ${defDesc.orEmpty()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (editingParam == paramName) {
+                    OutlinedTextField(
+                        value = paramText,
+                        onValueChange = { paramText = it },
+                        label = { Text("Description for the AI") },
+                        minLines = 2,
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = paramText.trim() != effDesc,
+                            onClick = { registry.setParamDescription(tool, paramName, paramText); editingParam = null },
+                        ) { Text("Save") }
+                        TextButton(onClick = { editingParam = null }) { Text("Cancel") }
+                    }
+                } else {
+                    TextButton(onClick = { paramText = effDesc; editingParam = paramName }) {
+                        Text("Edit description")
+                    }
+                }
+            }
+        }
+        if (overrides.isNotEmpty()) {
+            TextButton(onClick = { registry.restoreParamDescriptions(tool) }) {
+                Text("Restore parameter descriptions")
+            }
+        }
     }
 }
