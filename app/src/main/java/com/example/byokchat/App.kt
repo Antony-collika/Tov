@@ -13,6 +13,7 @@ import com.example.byokchat.chat.GenerationService
 import com.example.byokchat.chat.ChatOps
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.ConversationRepository
+import com.example.byokchat.data.RequestLayoutStore
 import com.example.byokchat.data.SettingsRepository
 import com.example.byokchat.tools.ConfirmationBroker
 import com.example.byokchat.tools.PermissionBroker
