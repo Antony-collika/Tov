@@ -193,6 +193,7 @@ class ChatEngine(
             cancelled?.let { throw it }
             if (error != null || calls.isEmpty()) {
                 notifyFinished(conversationId, displayTitle(conv.title), success = error == null && text.isNotEmpty(), answer = text.toString())
+                exportHistory(conversationId)
                 return
             }
 
@@ -210,6 +211,7 @@ class ChatEngine(
                     )
                 )
                 notifyFinished(conversationId, displayTitle(conv.title), success = false, answer = "")
+                exportHistory(conversationId)
                 return
             }
             for (call in calls) {
@@ -234,6 +236,12 @@ class ChatEngine(
     }
 
     /** Báo cho người dùng khi AI trả lời xong (hoặc lỗi) mà app không đang hiện. Không gọi khi người dùng bấm Dừng. */
+    /** Xuất lịch sử ra history.md trong workspace (Đợt D). Best-effort. */
+    suspend fun exportHistory(conversationId: String) {
+        val f = fs ?: return
+        HistoryExporter.exportHistory(f, db, conversationId)
+    }
+
     private fun notifyFinished(conversationId: String, title: String, success: Boolean, answer: String) {
         if (AppVisibility.inForeground) return
         val preview = if (success) answer.trim().replace("\n", " ").take(100) else "Couldn't answer. Open the app to see the error."

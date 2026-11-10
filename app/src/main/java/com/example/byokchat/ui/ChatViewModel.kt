@@ -239,7 +239,10 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     /** Edit message: chỉ lưu nội dung đã sửa, từ lần gửi sau dùng nội dung đó. */
     fun saveEdit(messageId: String, text: String) {
         if (generating.value) return
-        viewModelScope.launch { app.ops.editMessage(messageId, text) }
+        viewModelScope.launch {
+            app.ops.editMessage(messageId, text)
+            app.engine.exportHistory(conversationId)
+        }
     }
 
     /** Delete: xóa cả lượt (cặp hỏi-đáp), có thể Hoàn tác. */
@@ -247,12 +250,16 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         if (generating.value) return
         viewModelScope.launch {
             val backup = app.ops.deleteTurn(conversationId, turnId)
+            app.engine.exportHistory(conversationId)
             _events.emit(ChatEvent.Deleted(backup))
         }
     }
 
     fun undoDelete(backup: List<MessageEntity>) {
-        viewModelScope.launch { app.ops.restore(backup) }
+        viewModelScope.launch {
+            app.ops.restore(backup)
+            app.engine.exportHistory(conversationId)
+        }
     }
 
     suspend fun laterTurnCount(turnId: String): Int = app.ops.laterTurnCount(conversationId, turnId)
