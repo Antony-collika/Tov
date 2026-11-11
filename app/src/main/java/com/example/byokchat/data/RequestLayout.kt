@@ -272,10 +272,10 @@ data class RequestLayout(val cards: List<RequestCard>) {
     /**
      * Kết quả resolve nguồn tools.md của thẻ Tools (Đợt E; luật nguồn sửa
      * theo quyết định 11/11/2026).
-     * - exposed == null: CHỈ còn khi chưa chọn workspace (fs == null,
-     *   ChatEngine tự tạo) → đường "legacy": mọi tool Settings cho phép,
-     *   tên/mô tả gốc. Không có thẻ Tools KHÔNG còn cho null nữa (xóa thẻ
-     *   = 0 tool, xem resolveToolFiles).
+     * - exposed == null: đường "legacy" offer tất cả tool đã bỏ hẳn
+     *   (quyết định 13) — không còn chỗ nào tạo ra null nữa; giữ kiểu
+     *   nullable để tương thích với ToolRegistry. Không có thẻ Tools cho
+     *   danh sách rỗng (xóa thẻ = 0 tool, xem resolveToolFiles).
      * - exposed == danh sách rỗng: thẻ Tools tắt, nguồn Text để trống,
      *   hoặc file rỗng → 0 tool.
      * - errors rỗng = resolve được hết; có lỗi thì exposed rỗng và lần gửi
@@ -299,18 +299,16 @@ data class RequestLayout(val cards: List<RequestCard>) {
      *   nào và ở file nào, KHÔNG tự chọn một bên.
      * - Không có thẻ Tools → 0 tool, KHÔNG lỗi, vẫn gửi được (quyết định
      *   11/11/2026: xóa thẻ là ý định của user — không gửi tool; app không
-     *   tự fallback offer-all sau lưng user). Legacy offer-all chỉ còn khi
-     *   chưa chọn workspace (fs == null); thẻ Tools tắt → 0 tool.
+     *   tự fallback offer-all sau lưng user). Đường "legacy" offer tất cả
+     *   tool đã bỏ hẳn (quyết định 13); thẻ Tools tắt → 0 tool.
      */
     fun resolveToolFiles(
         readFile: (String) -> Result<String>,
         origins: Map<String, String>,
     ): ToolsResolution {
         // Không có thẻ Tools: user đã xóa thẻ = không muốn gửi tool nào.
-        // 0 tool, KHÔNG lỗi, vẫn gửi được (quyết định 11/11/2026). Không còn
-        // đường "legacy" offer tất cả tool ở đây — legacy chỉ còn khi chưa
-        // chọn workspace (fs == null, ChatEngine tự tạo
-        // ToolsResolution(null, ...)).
+        // 0 tool, KHÔNG lỗi, vẫn gửi được (quyết định 11/11/2026). Đường
+        // "legacy" offer tất cả tool đã bỏ hẳn (quyết định 13).
         val card = toolsCard() ?: return ToolsResolution(emptyList(), emptyList())
         if (!card.enabled) return ToolsResolution(emptyList(), emptyList())
         if (card.toolsSource == ToolsSource.TEXT) {
@@ -375,9 +373,8 @@ data class RequestLayout(val cards: List<RequestCard>) {
      * Lọc danh sách công cụ đã resolve theo thẻ Tools.
      * - Thẻ Tools tắt = không offer công cụ nào.
      * - Không có thẻ Tools = không offer công cụ nào (resolveToolFiles đã
-     *   trả danh sách rỗng nên defs vào đây cũng rỗng). Chỉ fs == null
-     *   (chưa chọn workspace) còn đi đường legacy offer-all, vì lúc đó
-     *   exposed == null.
+     *   trả danh sách rỗng nên defs vào đây cũng rỗng). Đường "legacy"
+     *   offer-all đã bỏ hẳn (quyết định 13).
      * - Thẻ Time KHÔNG lọc tool nữa (Đợt 2, quyết định 1): time.now luôn
      *   được offer như một tool bình thường; tắt time.now ở tầng quản lý
      *   tool thì xử lý như các tool khác (vẫn offer, chặn lúc gọi).

@@ -114,8 +114,7 @@ class ChatEngine(
             var error: String? = null
             var cancelled: CancellationException? = null
             // Danh sách tool đã parse từ file tools.md của lượt này (null =
-            // chưa resolve, hoặc legacy khi chưa chọn workspace — fs == null);
-            // vòng gọi tool sau khối try cũng cần nó để map tên.
+            // chưa resolve); vòng gọi tool sau khối try cũng cần nó để map tên.
             var exposed: List<com.example.byokchat.tools.ParsedTool>? = null
             try {
                 // Nhà cung cấp và mô hình dùng cho mọi cuộc trò chuyện đều là lựa chọn toàn cục trong Settings.
@@ -140,16 +139,20 @@ class ChatEngine(
                     ?: RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value)
                 val vars = RequestLayout.requestVars(model, cfg.name)
                 // Đợt D: thẻ System/Free trỏ file được đọc lại mỗi lần gửi.
-                val (layout, fileErrors) = if (fs == null) baseLayout to emptyList() else withContext(Dispatchers.IO) {
-                    baseLayout.resolveFiles { path -> runCatching { fs.readText(path) } }
+                // Đường RCP luôn chạy, kể cả khi chưa chọn workspace
+                // (fs == null, quyết định 13): reader trả về lỗi thay vì
+                // crash — nguồn Text resolve bình thường (không cần đọc
+                // file), nguồn File đọc lỗi thì đường lỗi đã có của RCP
+                // chặn gửi. Không còn đường "legacy" offer tất cả tool.
+                val readFile: (String) -> Result<String> = { path ->
+                    runCatching { fs?.readText(path) ?: error("No workspace folder has been chosen.") }
                 }
+                val (layout, fileErrors) = withContext(Dispatchers.IO) { baseLayout.resolveFiles(readFile) }
                 // Đợt E phần A: file tools.md của thẻ Tools cũng đọc + parse
                 // lại mỗi lần gửi. Parse lỗi thì CHẶN lần gửi và báo rõ lỗi
                 // (như FPilot) — không gửi với danh sách tool sai.
-                val toolsResolution = if (fs == null) {
-                    RequestLayout.ToolsResolution(null, emptyList())
-                } else withContext(Dispatchers.IO) {
-                    layout.resolveToolFiles({ path -> runCatching { fs.readText(path) } }, tools.originDescriptions())
+                val toolsResolution = withContext(Dispatchers.IO) {
+                    layout.resolveToolFiles(readFile, tools.originDescriptions())
                 }
                 layoutStore?.setFileErrors(fileErrors + toolsResolution.errors)
                 if (toolsResolution.errors.isNotEmpty()) {
