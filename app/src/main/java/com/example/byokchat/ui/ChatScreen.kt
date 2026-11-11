@@ -82,6 +82,8 @@ fun ChatScreen(
     onOpenRequestLog: () -> Unit,
     /** Opens the Request panel for this chat. */
     onOpenRequestPanel: () -> Unit,
+    /** Opens the Storage settings (used by the "no data storage" banner). */
+    onOpenStorage: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -97,6 +99,7 @@ fun ChatScreen(
     val currentModelName by vm.currentModel.collectAsState()
     val modelsRefreshing by vm.modelsRefreshing.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()
+    val sessionStorageUri by container.settings.sessionStorageUri.collectAsState()
     val toolPrefs by container.toolPrefs.prefs.collectAsState()
     // Text of the answer being streamed. Deliberately NOT read here (no `by`): only the streaming message reads it,
     // so only that message recomposes while the AI is typing.
@@ -383,6 +386,22 @@ fun ChatScreen(
                             modifier = Modifier.weight(1f),
                         )
                         TextButton(onClick = pickFolder) { Text("Choose folder") }
+                    }
+                }
+            }
+            // Đợt fix 11/11/2026 (C2): chưa chọn data storage thì không có chỗ
+            // lưu session — chat mới không có history.md/history.meta.json,
+            // không sửa ngoài app hay đồng bộ hai chiều được. Chat vẫn chạy,
+            // chỉ báo cho user biết hệ quả, không tự lấy workspace làm thay.
+            if (sessionStorageUri == null) {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "No data storage folder is chosen, so this chat has no history file and edits outside the app won't sync. Chat still works.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = onOpenStorage) { Text("Choose folder") }
                     }
                 }
             }

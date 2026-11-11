@@ -103,7 +103,7 @@ fun SettingsScreen(
                 title = "Select Storage and Playground folder",
                 summary = when {
                     workspaceUri == null -> "No folder chosen"
-                    sessionStorageUri == null -> "Workspace: ${workspacePath ?: "Folder selected"} · Sessions: same folder"
+                    sessionStorageUri == null -> "Workspace: ${workspacePath ?: "Folder selected"} · Sessions: not chosen"
                     else -> "Workspace: ${workspacePath ?: "Folder selected"} · Sessions: ${sessionPath ?: "Folder selected"}"
                 },
                 onClick = onStorage,

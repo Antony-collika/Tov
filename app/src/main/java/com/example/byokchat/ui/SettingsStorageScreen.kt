@@ -127,7 +127,7 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
             // ---------- Session storage ----------
             StorageSectionTitle("Session storage")
             ListItem(
-                headlineContent = { Text(sessionPath ?: "Not chosen — uses the workspace folder") },
+                headlineContent = { Text(sessionPath ?: "Not chosen") },
                 supportingContent = {
                     Text("Where the app saves each chat as sessions/<date>_<session-id>/history.md. Separate from the workspace where the AI plays.")
                 },

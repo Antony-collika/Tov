@@ -22,7 +22,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.byokchat.container
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun AppNav() {
@@ -105,22 +107,41 @@ fun AppNav() {
                         onOpenSearchResult = { cid, mid, q -> openChat(cid, msg = mid, q = q) },
                         onNewChat = { newChat() },
                         onBranchNoticeShown = { branchFrom = null },
-                        onSettings = { nav.navigate("settings") },
+                        onSettings = {
+                            // Đợt fix 11/11/2026 (B2): mang id session theo đường
+                            // Settings → panel, nhưng chỉ khi session đã có lượt
+                            // chat (session trống thì Preview/Messages cũng không
+                            // có gì để xem nên không cần mang id).
+                            scope.launch {
+                                val hasTurns = withContext(Dispatchers.IO) {
+                                    container.db.messages().maxSeq(id) != null
+                                }
+                                nav.navigate(if (hasTurns) "settings?id=$id" else "settings")
+                            }
+                        },
                         onOnboarding = { nav.navigate("onboarding") },
                         onProvider = { pid -> nav.navigate(if (pid == null) "providers" else "provider?id=$pid") },
                         onInspector = { nav.navigate("inspector/$id") },
                         onRequestLog = { nav.navigate("request-log") },
                         onPanel = { nav.navigate("panel?id=$id") },
+                        onOpenStorage = { nav.navigate("settings-storage") },
                     )
                 }
             }
-            composable("settings") {
+            composable(
+                "settings?id={id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { entry ->
+                // Đợt fix 11/11/2026 (B2): id session mang từ màn chat (chỉ có
+                // khi session đã có lượt chat) để mục Request panel mở đúng
+                // panel của session đó — Preview và Manage messages mới hiện.
+                val sid = entry.arguments?.getString("id")
                 SettingsScreen(
                     onBack = { nav.popBackStack() },
                     onProviders = { nav.navigate("providers") },
                     onTools = { nav.navigate("tools") },
                     onNotes = { nav.navigate("notes") },
-                    onRequestPanel = { nav.navigate("panel") },
+                    onRequestPanel = { nav.navigate(if (sid != null) "panel?id=$sid" else "panel") },
                     onWebSearch = { nav.navigate("settings-web-search") },
                     onStorage = { nav.navigate("settings-storage") },
                     onAppearance = { nav.navigate("settings-appearance") },

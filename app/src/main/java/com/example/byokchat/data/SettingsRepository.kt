@@ -85,9 +85,10 @@ class SettingsRepository(context: Context) {
     /**
      * Thư mục Session storage (Đợt E, quyết định 6 + mục 11): chỗ app lưu
      * sessions/<ngày>_<session-id>/history.md + history.meta.json, tách
-     * riêng khỏi Workspace (chỗ AI chơi). Chưa chọn thì dùng chung thư mục
-     * workspace (xem WorkspaceFs.sessionRoot). CHƯA CÓ UI — màn chi tiết
-     * chọn thư mục thuộc Đợt 7 (Settings dạng thẻ).
+     * riêng khỏi Workspace (chỗ AI chơi). Chưa chọn thì không có session
+     * storage: không ghi history.md, không đồng bộ ngoài app — chat vẫn
+     * chạy, màn chat hiện banner báo (đợt fix 11/11/2026, C2 — không tự
+     * lấy workspace làm thay).
      */
     private val _sessionStorageUri = MutableStateFlow(plain.getString("session_storage_uri", null))
     val sessionStorageUri: StateFlow<String?> = _sessionStorageUri.asStateFlow()

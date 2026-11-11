@@ -123,7 +123,11 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     // ---------- Thư mục Session storage (Đợt 7) ----------
     // Gương của onFolderPicked/clear/displayPath ở trên, nhưng cho thư mục
     // Session storage riêng (setting session_storage_uri, Đợt E). Chưa chọn
-    // thì sessionRoot() dùng chung workspace (xem sessionRoot).
+    // thì KHÔNG có session root — không tự lấy workspace làm thay (đợt fix
+    // 11/11/2026, C2: Duy chưa bao giờ nói chưa chọn thì lấy cùng thư mục;
+    // history.md mà mặc định nằm trong Playground thì mâu thuẫn nguyên tắc
+    // tách vai trò). Các chỗ đọc/ghi session đã bọc runCatching nên thiếu
+    // thư mục chỉ nghĩa là không có file session — chat vẫn chạy.
 
     fun sessionRootName(): String? =
         runCatching { settings.sessionStorageUri.value?.let { DocumentFile.fromTreeUri(ctx, Uri.parse(it))?.name } }.getOrNull()
@@ -184,12 +188,13 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     }
 
     /**
-     * Thư mục Session storage (Đợt E): đã chọn thư mục riêng thì dùng nó,
-     * chưa chọn thì dùng chung thư mục workspace (để xuất history vẫn chạy
-     * như trước khi user chưa vào Settings chọn thêm).
+     * Thư mục Session storage (Đợt E): chỉ dùng thư mục riêng đã chọn.
+     * Chưa chọn thì ném lỗi (không tự lấy workspace làm thay — đợt fix
+     * 11/11/2026, C2). Dùng [sessionRootOrNull] ở những chỗ chỉ cần biết
+     * có hay không.
      */
     fun sessionRoot(): DocumentFile =
-        rootFrom(settings.sessionStorageUri.value ?: settings.workspaceUri.value, "session storage")
+        rootFrom(settings.sessionStorageUri.value, "session storage")
 
     fun sessionRootOrNull(): DocumentFile? = runCatching { sessionRoot() }.getOrNull()
 
