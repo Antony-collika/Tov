@@ -81,6 +81,10 @@ interface MessageDao {
     @Query("SELECT MAX(seq) FROM messages WHERE conversationId = :cid")
     suspend fun maxSeq(cid: String): Long?
 
+    /** Số lượt lớn nhất hiện có trong một cuộc (Đợt 4): lượt mới lấy số này + 1. */
+    @Query("SELECT MAX(turnNo) FROM messages WHERE conversationId = :cid")
+    suspend fun maxTurnNo(cid: String): Int?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(m: MessageEntity)
 

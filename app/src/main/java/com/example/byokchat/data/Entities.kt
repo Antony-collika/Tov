@@ -52,6 +52,13 @@ data class MessageEntity(
     @PrimaryKey val id: String,
     val conversationId: String,
     val turnId: String,
+    /**
+     * Số lượt ổn định, không dùng lại (Đợt 4): gán khi tạo lượt mới bằng
+     * (số lớn nhất hiện có trong cuộc trò chuyện + 1), chỉ tăng không giảm.
+     * Tin assistant và kết quả tool dùng chung số của tin user cùng lượt.
+     * Hàng cũ (trước migration 4→5) được điền lại theo thứ tự lượt.
+     */
+    @ColumnInfo(defaultValue = "0") val turnNo: Int = 0,
     val seq: Long,
     val role: String,
     val text: String,
