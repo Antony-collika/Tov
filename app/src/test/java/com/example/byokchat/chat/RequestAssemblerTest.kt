@@ -41,10 +41,12 @@ class RequestAssemblerTest {
         toolCallId: String? = null,
         toolUid: String? = null,
         toolName: String? = null,
+        turnNo: Int = 0,
     ) = MessageEntity(
         id = id,
         conversationId = "c1",
         turnId = turnId,
+        turnNo = turnNo,
         seq = seq,
         role = role,
         text = text,
@@ -344,6 +346,32 @@ class RequestAssemblerTest {
     }
 
     @Test
+    fun compactToolResultNoteUsesStoredTurnNumber() {
+        // Đợt 4: ghi chú rút gọn ghi số lượt đã lưu (T3), không đếm theo vị trí.
+        val history = RequestCard(RequestLayout.HISTORY_ID, CardKind.HISTORY, compactToolResults = true)
+        val layout = layoutWith(
+            RequestCard(RequestLayout.SYSTEM_ID, CardKind.SYSTEM, text = ""),
+            history,
+            RequestCard(RequestLayout.LAST_TURN_ID, CardKind.LAST_TURN),
+        )
+        val calls1 = json.encodeToString(callsSer, listOf(AiToolCall("c1", "calculator", "{}", uid = "calc")))
+        val calls2 = json.encodeToString(callsSer, listOf(AiToolCall("c2", "calculator", "{}", uid = "calc")))
+        val longResult = "x".repeat(600)
+        val rows = listOf(
+            row("u1", "t1", 1, "user", "calc this", turnNo = 3),
+            row("a1", "t1", 2, "assistant", "calling", toolCallsJson = calls1),
+            row("r1", "t1", 3, "tool", longResult, toolCallId = "c1", toolUid = "calc", toolName = "calculator"),
+            row("u2", "t2", 4, "user", "again", turnNo = 7),
+            row("a2", "t2", 5, "assistant", "calling", toolCallsJson = calls2),
+            row("r2", "t2", 6, "tool", longResult, toolCallId = "c2", toolUid = "calc", toolName = "calculator"),
+        )
+        val out = assembleLayout(layout, rows)
+        val toolTexts = out.sentMessages.filter { it.role == Role.TOOL }.map { it.text }
+        assertEquals("[Shortened result: calculator, 600 characters, turn T3. Call the tool again for the full result.]", toolTexts[0])
+        assertEquals(longResult, toolTexts[1])
+    }
+
+    @Test
     fun turnTagsPrefixUserMessagesInOrder() {
         val history = RequestCard(RequestLayout.HISTORY_ID, CardKind.HISTORY, turnTags = true)
         val layout = layoutWith(
@@ -357,6 +385,24 @@ class RequestAssemblerTest {
         )
         val out = assembleLayout(layout, rows)
         assertEquals(listOf("[T1] hello", "[T2] thanks"), out.sentMessages.map { it.text })
+    }
+
+    @Test
+    fun turnTagsUseStoredTurnNumbers() {
+        // Đợt 4: T1 đã xóa, chỉ còn T2 và T5 — thẻ gắn số đã lưu, không đếm lại.
+        val history = RequestCard(RequestLayout.HISTORY_ID, CardKind.HISTORY, turnTags = true)
+        val layout = layoutWith(
+            RequestCard(RequestLayout.SYSTEM_ID, CardKind.SYSTEM, text = ""),
+            history,
+            RequestCard(RequestLayout.LAST_TURN_ID, CardKind.LAST_TURN),
+        )
+        val rows = listOf(
+            row("u1", "t1", 1, "user", "hello", turnNo = 2),
+            row("u2", "t2", 2, "user", "thanks", turnNo = 5),
+        )
+        val out = assembleLayout(layout, rows)
+        assertEquals(listOf("[T2] hello", "[T5] thanks"), out.sentMessages.map { it.text })
+        assertEquals(listOf(2, 5), out.turnNumbers)
     }
 
     @Test

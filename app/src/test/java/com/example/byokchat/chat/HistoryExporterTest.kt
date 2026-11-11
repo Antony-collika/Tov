@@ -72,4 +72,22 @@ class HistoryExporterTest {
             .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
         assertEquals("Tov/chats/${date}_conv-abc/history.md", HistoryExporter.historyPath(conv))
     }
+
+    @Test
+    fun stableTurnNumbersSurviveADeletedTurn() {
+        // Đợt 4: T1 đã xóa, chỉ còn T2 và T5 — số không dồn lại, next_turn = 6.
+        val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
+        val rows = listOf(
+            msg("m1", "t1", 1, "user", "Second turn", { copy(turnNo = 2) }),
+            msg("m2", "t1", 2, "assistant", "Answer two."),
+            msg("m3", "t2", 3, "user", "Fifth turn", { copy(turnNo = 5) }),
+            msg("m4", "t2", 4, "assistant", "Answer five."),
+        )
+        val out = HistoryExporter.renderHistory(conv, rows)
+
+        assertTrue(out.contains("next_turn: 6"))
+        assertTrue(out.contains("## T2 user\n{\"id\":\"m1\"}\nSecond turn"))
+        assertTrue(out.contains("## T5 user\n{\"id\":\"m3\"}\nFifth turn"))
+        assertTrue(!out.contains("## T1 "))
+    }
 }
