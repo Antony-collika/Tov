@@ -151,11 +151,17 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
 
 @Composable
 private fun InspectorContent(a: AssembledRequest, providerName: String, model: String, modifier: Modifier = Modifier) {
-    // Đánh số lượt: mỗi tin user mở một lượt mới. Lượt bị cắt (đứng đầu danh sách) giữ số của nó.
-    var turn = 0
+    // Nhãn lượt lấy từ số lượt ổn định (Đợt 4) mà RequestAssembler tính từ
+    // turnNo đã lưu, không đếm lại theo vị trí: tin user thứ k lấy số thứ k.
+    // Lượt bị cắt (đứng đầu danh sách) giữ số của nó.
+    var userIndex = 0
+    var current = 0
     val numbered = a.messages.map { m ->
-        if (m.message.role == Role.USER) turn++
-        turn to m
+        if (m.message.role == Role.USER) {
+            current = a.turnNumbers.getOrNull(userIndex)?.takeIf { it > 0 } ?: (userIndex + 1)
+            userIndex++
+        }
+        current to m
     }
     val sentGroups = numbered.filter { it.second.sent }.groupBy({ it.first }, { it.second })
     val droppedGroups = numbered.filter { !it.second.sent }.groupBy({ it.first }, { it.second })
@@ -288,9 +294,15 @@ private fun inspectorMarkdown(a: AssembledRequest, providerName: String, model: 
     }
     appendLine()
     appendLine("## Messages")
-    var turn = 0
+    // Nhãn lượt lấy từ số lượt ổn định (Đợt 4), cùng cách đánh số với màn hình.
+    var userIndex = 0
+    var current = 0
     a.messages.forEach { m ->
-        if (m.message.role == Role.USER) turn++
+        if (m.message.role == Role.USER) {
+            current = a.turnNumbers.getOrNull(userIndex)?.takeIf { it > 0 } ?: (userIndex + 1)
+            userIndex++
+        }
+        val turn = current
         val label = when (m.message.role) {
             Role.USER -> "user"
             Role.ASSISTANT -> "assistant"

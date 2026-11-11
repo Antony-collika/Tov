@@ -31,6 +31,14 @@ data class AssembledRequest(
     val messages: List<AssembledMessage>,
     val droppedTurnIds: List<String>,
     val totalTurns: Int,
+    /**
+     * Số lượt ổn định (Đợt 4), một số cho mỗi lượt khác nhau trong [rows] theo
+     * thứ tự seq: số thứ k (bắt đầu từ 0) là số của tin user thứ k trong
+     * [messages] (kể cả lượt bị cắt; thẻ Free vai user cũng chiếm một vị trí
+     * đếm như trước — hành vi cũ giữ nguyên, chỉ đổi số đếm thành số lưu).
+     * Inspector dùng danh sách này để ghi nhãn thay vì đếm lại.
+     */
+    val turnNumbers: List<Int> = emptyList(),
     val toolDefs: List<ToolDef>,
     /** Token ước lượng của toàn bộ request (system + công cụ + lịch sử giữ lại). */
     val estimatedTokens: Int,
@@ -162,15 +170,18 @@ object RequestAssembler {
             }
         }
 
-        // Gắn thẻ lượt [T7]: đếm tin user theo thứ tự trong danh sách cuối
-        // (kể cả lượt bị cắt), đúng cách Inspector đánh số, nhưng chỉ gắn
-        // vào tin thật sự gửi đi.
+        // Gắn thẻ lượt [T7] bằng số lượt ổn định (Đợt 4), không đếm theo vị
+        // trí: tin user thứ k lấy số thứ k trong turnNumbers. Chỉ gắn vào tin
+        // thật sự gửi đi; lượt bị cắt giữ số của nó để Inspector hiện đúng.
+        val numbers = TurnNumbers.effectiveTurnNumbers(rows)
+        val turnNumbers = rows.map { it.turnId }.distinct().map { numbers[it] ?: 0 }
         val tagged = if (historyCard.turnTags) {
             var turn = 0
             messages.map { am ->
                 if (am.message.role == Role.USER) {
+                    val n = turnNumbers.getOrNull(turn) ?: (turn + 1)
                     turn++
-                    if (am.sent) am.copy(message = am.message.copy(text = "[T$turn] ${am.message.text}")) else am
+                    if (am.sent) am.copy(message = am.message.copy(text = "[T$n] ${am.message.text}")) else am
                 } else am
             }
         } else messages
@@ -185,6 +196,7 @@ object RequestAssembler {
             messages = tagged,
             droppedTurnIds = historyPlan.droppedTurnIds + lastPlan.droppedTurnIds,
             totalTurns = historyPlan.totalTurns + lastPlan.totalTurns,
+            turnNumbers = turnNumbers,
             toolDefs = toolDefs,
             estimatedTokens = TokenEstimator.text(system) + toolTokens + historyTokens,
             historyTokens = historyTokens,
