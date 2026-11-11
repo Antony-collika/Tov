@@ -43,11 +43,16 @@ object Http {
 data class SseEvent(val event: String?, val data: String)
 
 /** Đọc luồng Server-Sent Events. Hủy coroutine thì kết nối cũng bị hủy ngay. */
-fun OkHttpClient.sseFlow(request: Request): Flow<SseEvent> = flow {
+fun OkHttpClient.sseFlow(
+    request: Request,
+    /** Gọi với mã HTTP thật ngay khi nhận phản hồi (cả khi lỗi HTTP), để request log ghi đúng mã. */
+    onStatus: (Int) -> Unit = {},
+): Flow<SseEvent> = flow {
     val call = newCall(request)
     val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
     try {
         call.execute().use { resp ->
+            onStatus(resp.code)
             if (!resp.isSuccessful) {
                 throw AiException(errorMessage(resp.code, resp.body?.string().orEmpty()))
             }
