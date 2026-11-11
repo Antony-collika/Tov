@@ -1,7 +1,6 @@
 package com.example.byokchat.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,21 +10,32 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
@@ -49,9 +59,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
@@ -62,9 +71,10 @@ import com.example.byokchat.data.ToolsSource
 import kotlinx.coroutines.launch
 
 /**
- * Màn "Request panel" (Đợt C): danh sách thẻ từ trên xuống — thứ tự thẻ là
- * thứ tự gửi. Mỗi thẻ có công tắc bật/tắt, nút đưa lên/xuống, nút sửa.
- * Nút Preview mở thẳng Inspector của Đợt B.
+ * Màn "Request Control Panel" (Đợt C): danh sách thẻ từ trên xuống — thứ tự
+ * thẻ là thứ tự gửi. Bố cục giống mẫu FPilot: nền trắng, thẻ ngăn cách bằng
+ * đường kẻ mỏng, mỗi thẻ có icon riêng. Preview / Request log / Reset nằm
+ * trong mục Advanced ở dưới cùng (Preview mở thẳng Inspector của Đợt B).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,7 +84,7 @@ fun RequestPanelScreen(
     onEditCard: (String) -> Unit,
     onOpenTools: () -> Unit,
     onOpenInspector: (() -> Unit)?,
-    /** Đợt 7: nút Request log dời từ Settings sang đây, cạnh nút Preview. */
+    /** Đợt 7: nút Request log dời từ Settings sang đây, vào mục Advanced. */
     onOpenRequestLog: (() -> Unit)?,
 ) {
     val context = LocalContext.current
@@ -89,10 +99,19 @@ fun RequestPanelScreen(
     val model by container.settings.currentModel.collectAsState()
     val currentProvider = container.settings.currentModelProvider()
     var confirmReset by remember { mutableStateOf(false) }
-    // Đợt 8: xóa thẻ — nút thùng rác hỏi xác nhận trước, vuốt xóa thì xóa
-    // ngay + snackbar Undo (hành vi xóa trước đây xóa ngay, không hỏi,
-    // không hoàn tác). Cả hai đường đều qua deleteWithUndo.
-    var confirmDelete by remember { mutableStateOf<RequestCard?>(null) }
+    // Mục Advanced ở dưới cùng (mặc định thu gọn): chứa Preview, Request
+    // log, Reset — dời từ top bar xuống đây cho đầu màn hình thoáng như mẫu.
+    var advancedExpanded by remember { mutableStateOf(false) }
+    // Menu "Add card" (theo FPilot): mở ra để chọn loại thẻ muốn thêm.
+    var showAddMenu by remember { mutableStateOf(false) }
+    // System/Time/Tools mỗi loại tối đa 1 thẻ — đã có thì không cho thêm
+    // nữa (menu ẩn mục đó đi); Free thì thêm bao nhiêu cũng được.
+    val hasSystem = layout.cards.any { it.kind == CardKind.SYSTEM }
+    val hasTime = layout.cards.any { it.kind == CardKind.TIME }
+    val hasTools = layout.cards.any { it.kind == CardKind.TOOLS }
+    // Xóa thẻ chỉ còn một đường duy nhất: vuốt sang trái để xóa, xóa ngay
+    // + snackbar Undo. Không còn nút thùng rác, nên không còn hộp xác nhận
+    // xóa riêng nữa.
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     fun deleteWithUndo(card: RequestCard) {
@@ -112,36 +131,24 @@ fun RequestPanelScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
+            // Top bar chỉ còn nút back + tiêu đề, như mẫu FPilot (chỉ có ⋮).
+            // Preview / Request log / Reset dời hết xuống mục Advanced ở
+            // dưới cùng. Lưu ý: Preview chỉ có khi mở panel từ một cuộc
+            // chat (onOpenInspector != null) — mở từ Settings thì không có
+            // cuộc nào để xem trước, nên nút Preview không hiện.
             TopAppBar(
-                title = { Text("Request panel") },
+                title = { Text("Request Control Panel") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                },
-                actions = {
-                    if (onOpenInspector != null) {
-                        TextButton(onClick = onOpenInspector) { Text("Preview") }
-                    }
-                    if (onOpenRequestLog != null) {
-                        TextButton(onClick = onOpenRequestLog) { Text("Request log") }
-                    }
-                    TextButton(onClick = { confirmReset = true }) { Text("Reset") }
                 },
             )
         },
     ) { padding ->
+        // Giống mẫu FPilot: không còn đoạn giới thiệu dài ở đầu màn hình.
+        // Nội dung đó đã có sẵn ở màn sửa thẻ (VARS_HELP trong
+        // CardEditScreen) và ở phần giúp đỡ của thẻ Time, nên bỏ ở đây
+        // cho màn hình thoáng, thẻ là nội dung chính ngay từ đầu.
         LazyColumn(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            item {
-                Text(
-                    "Cards are sent top to bottom. The layout applies to every chat. " +
-                        "You can use {date}, {time}, {model} and {provider} in card text — " +
-                        "they are replaced when sending. Note: {time} changes every minute, " +
-                        "so the AI's cache is not reused while it is in the prompt. " +
-                        "The Time card has the same effect when it is on: its time line changes every minute.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(8.dp))
-            }
             if (layoutError != null) {
                 item {
                     Surface(
@@ -184,9 +191,6 @@ fun RequestPanelScreen(
                         onMoveUp = { store.moveCard(card.id, up = true) },
                         onMoveDown = { store.moveCard(card.id, up = false) },
                         onEdit = { onEditCard(card.id) },
-                        onDelete = { confirmDelete = card },
-                        // Metadata phải luôn đầu tiên (luật kiểm tra): khóa nút di chuyển của nó.
-                        lockPosition = card.kind == CardKind.METADATA,
                     )
                 }
                 if (card.isFixed()) {
@@ -235,11 +239,73 @@ fun RequestPanelScreen(
                         },
                     ) { row() }
                 }
+                // Ngăn cách các thẻ bằng đường kẻ mỏng, như mẫu FPilot.
+                HorizontalDivider()
             }
             item {
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = { onEditCard(store.addFreeCard()) }) {
-                    Text("Add free card")
+                // "Add card" như FPilot: không phải chỉ thêm Free card.
+                // Bấm vào mở menu chọn loại thẻ — System / Time / Tools
+                // (chỉ khi chưa có) và Free card (chọn vai System/User ở màn
+                // sửa). Nhờ vậy thẻ đã xóa thêm lại được từ đây, không cần
+                // Reset toàn bộ panel.
+                Box {
+                    TextButton(onClick = { showAddMenu = true }) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(6.dp))
+                        Text("Add card")
+                    }
+                    DropdownMenu(expanded = showAddMenu, onDismissRequest = { showAddMenu = false }) {
+                        if (!hasSystem) {
+                            DropdownMenuItem(
+                                text = { Text("System card") },
+                                onClick = { showAddMenu = false; onEditCard(store.addCard(CardKind.SYSTEM)) },
+                            )
+                        }
+                        if (!hasTime) {
+                            DropdownMenuItem(
+                                text = { Text("Time card") },
+                                onClick = { showAddMenu = false; onEditCard(store.addCard(CardKind.TIME)) },
+                            )
+                        }
+                        if (!hasTools) {
+                            DropdownMenuItem(
+                                text = { Text("Tools card") },
+                                onClick = { showAddMenu = false; onEditCard(store.addCard(CardKind.TOOLS)) },
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text("Free card (you choose the role)") },
+                            onClick = { showAddMenu = false; onEditCard(store.addCard(CardKind.FREE)) },
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                // Mục Advanced ở dưới cùng, mặc định thu gọn.
+                HorizontalDivider()
+                Row(
+                    Modifier.fillMaxWidth().clickable { advancedExpanded = !advancedExpanded }
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Advanced",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        if (advancedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = if (advancedExpanded) "Collapse advanced" else "Expand advanced",
+                    )
+                }
+                if (advancedExpanded) {
+                    if (onOpenInspector != null) {
+                        AdvancedRow(label = "Preview", onClick = onOpenInspector)
+                    }
+                    if (onOpenRequestLog != null) {
+                        AdvancedRow(label = "Request log", onClick = onOpenRequestLog)
+                    }
+                    AdvancedRow(label = "Reset", onClick = { confirmReset = true })
                 }
                 Spacer(Modifier.height(24.dp))
             }
@@ -255,16 +321,16 @@ fun RequestPanelScreen(
             onDismiss = { confirmReset = false },
         )
     }
+}
 
-    val cardToDelete = confirmDelete
-    if (cardToDelete != null) {
-        ConfirmDialog(
-            title = "Delete this card?",
-            message = "The ${cardToDelete.displayName()} card will be removed from the panel.",
-            confirmLabel = "Delete",
-            onConfirm = { confirmDelete = null; deleteWithUndo(cardToDelete) },
-            onDismiss = { confirmDelete = null },
-        )
+/** Một dòng trong mục Advanced: chữ thường, chạm vào chạy hành động. */
+@Composable
+private fun AdvancedRow(label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 
@@ -329,12 +395,22 @@ private fun cardSummary(
 private fun fileName(path: String): String = path.substringAfterLast('/').ifEmpty { path }
 
 /**
- * Đợt 8: một thẻ trong Panel, bố cục kiểu FPilot — tên + một dòng tóm tắt
- * (tối đa 2 dòng, cắt bằng "…"), rồi MỘT hàng nút duy nhất, trái sang phải:
- * tay cầm kéo (nhấn giữ rồi kéo lên/xuống để di chuyển) · lên/xuống ·
- * switch · … · sửa (bút chì) · xóa (thùng rác, chỉ thẻ không cố định).
- * Chạm vào tên/tóm tắt mở màn sửa. Nút lên/xuống vẫn giữ làm dự phòng
- * khi kéo khó dùng. Không thêm trang trí: thoáng, tiết chế.
+ * Một thẻ trong Panel, bố cục giống mẫu FPilot (ảnh IMG_20261110_235313):
+ * nền trắng, các thẻ ngăn cách bằng đường kẻ mỏng (HorizontalDivider đặt ở
+ * chỗ gọi CardRow). Hàng trên: icon riêng của từng loại thẻ · tên + tóm tắt
+ * (tối đa 2 dòng, cắt bằng "…"), chạm vào mở màn sửa; vùng chữ chỉ chiếm
+ * phần trái, không lấn sang nút sửa bên phải. Hàng nút (trừ Metadata và
+ * Last turn): lên/xuống · switch nhỏ · … · sửa (bút chì). Không còn nút
+ * thùng rác — xóa bằng cách vuốt sang trái (SwipeToDismissBox ở chỗ gọi).
+ * Không còn tay cầm kéo — đã có nút lên/xuống để di chuyển. Không còn chữ
+ * "Always on" — như mẫu, History chỉ có lên/xuống + sửa, Last turn không
+ * có hàng nút nào.
+ *
+ * Theo từng loại thẻ (như mẫu):
+ * - Metadata: không có hàng nút; nút sửa nằm ở hàng trên, bên phải.
+ * - History: hàng nút chỉ có lên/xuống + sửa, không có switch.
+ * - Last turn: không có hàng nút (luôn gửi, luôn ở cuối).
+ * - Còn lại (System/Time/Tools/Free): lên/xuống + switch nhỏ + sửa.
  */
 @Composable
 private fun CardRow(
@@ -346,14 +422,21 @@ private fun CardRow(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit,
-    /** True = khóa vị trí thẻ (Metadata luôn đầu tiên): ẩn tay cầm kéo và nút lên/xuống. */
-    lockPosition: Boolean = false,
 ) {
-    Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-            // Cột chữ: chạm vào mở màn sửa. Tóm tắt tối đa 2 dòng, cắt bằng "…".
-            Column(Modifier.fillMaxWidth().clickable(onClick = onEdit)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        // Hàng trên: icon + tên/tóm tắt. Metadata có nút sửa ở đây.
+        Row(verticalAlignment = Alignment.Top) {
+            Icon(
+                cardIcon(card.kind),
+                contentDescription = null,
+                modifier = Modifier.padding(top = 2.dp).size(28.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            // Cột chữ: chạm vào mở màn sửa. Vùng chạm chỉ là cột chữ (phần
+            // trái), không lấn sang nút sửa bên phải.
+            Column(
+                Modifier.weight(1f).padding(start = 16.dp).clickable(onClick = onEdit),
+            ) {
                 Text(
                     card.displayName(),
                     style = MaterialTheme.typography.titleMedium,
@@ -368,44 +451,52 @@ private fun CardRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!lockPosition) {
-                    DragHandle(onMoveUp = onMoveUp, onMoveDown = onMoveDown)
-                    IconButton(enabled = !isFirst, onClick = onMoveUp) {
-                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
-                    }
-                    IconButton(enabled = !isLast, onClick = onMoveDown) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
-                    }
+            if (card.kind == CardKind.METADATA) {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit")
                 }
-                if (card.kind == CardKind.HISTORY || card.kind == CardKind.LAST_TURN) {
-                    // Thẻ cố định: không có switch, chỉ ghi "Always on".
-                    Text(
-                        "Always on",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp),
-                    )
-                } else if (card.kind != CardKind.METADATA) {
+            }
+        }
+        // Hàng nút — Metadata và Last turn không có hàng này (như mẫu).
+        // Thụt vào 44dp (rộng bằng icon + khoảng cách) để lên/xuống thẳng
+        // hàng với tên thẻ, như mẫu.
+        if (card.kind != CardKind.METADATA && card.kind != CardKind.LAST_TURN) {
+            Row(
+                Modifier.padding(start = 44.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(enabled = !isFirst, onClick = onMoveUp) {
+                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
+                }
+                IconButton(enabled = !isLast, onClick = onMoveDown) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
+                }
+                // History không có switch (như mẫu); các thẻ còn lại dùng
+                // switch nhỏ (SmallSwitch) cho cân với các icon.
+                if (card.kind != CardKind.HISTORY) {
                     // Switch thu NHỎ PHẦN HÌNH (scale 0.8) cho cân với các icon,
                     // nhưng đặt trong hộp 48dp và hộp cũng chạm được để bật/tắt,
                     // nên vùng chạm vẫn đủ 48dp (xem SmallSwitch).
                     SmallSwitch(checked = card.enabled, onToggle = onToggle)
                 }
-                // Metadata không có switch cũng không có chữ "Always on": nó
-                // luôn ở đầu và luôn bật, như FPilot.
                 Spacer(Modifier.weight(1f))
                 IconButton(onClick = onEdit) {
                     Icon(Icons.Default.Edit, contentDescription = "Edit")
                 }
-                if (!card.isFixed()) {
-                    IconButton(onClick = onDelete) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete")
-                    }
-                }
             }
         }
     }
+}
+
+/** Icon riêng của từng loại thẻ, như mẫu FPilot. */
+private fun cardIcon(kind: CardKind): ImageVector = when (kind) {
+    CardKind.METADATA -> Icons.Default.Layers
+    CardKind.SYSTEM -> Icons.Default.Settings
+    CardKind.TIME -> Icons.Default.Schedule
+    CardKind.TOOLS -> Icons.Default.Build
+    CardKind.HISTORY -> Icons.Default.History
+    CardKind.LAST_TURN -> Icons.Default.PlayArrow
+    CardKind.FREE -> Icons.Default.Description
 }
 
 /**
@@ -424,45 +515,6 @@ private fun SmallSwitch(checked: Boolean, onToggle: () -> Unit) {
             checked = checked,
             onCheckedChange = { onToggle() },
             modifier = Modifier.scale(0.8f),
-        )
-    }
-}
-
-/**
- * Tay cầm kéo để di chuyển thẻ. Kích hoạt: NHẤN GIỮ tay cầm rồi kéo lên
- * hoặc xuống (không phải kéo ngay — kéo ngay vẫn là cuộn danh sách).
- * Mỗi 64dp kéo thì thẻ dịch một nấc (dùng đúng moveCard của nút lên/xuống,
- * nên luật kiểm tra bố cục áp dụng y như cũ). Thả tay là xong; không cần
- * thao tác gì thêm. Nút lên/xuống vẫn ở đó cho trường hợp kéo khó dùng.
- */
-@Composable
-private fun DragHandle(onMoveUp: () -> Unit, onMoveDown: () -> Unit) {
-    val stepPx = with(LocalDensity.current) { 64.dp.toPx() }
-    Box(
-        Modifier.size(48.dp).pointerInput(Unit) {
-            // Biến cục bộ của khối pointerInput (không phải state): chỉ dùng
-            // trong lúc kéo, không cần recompose.
-            var dragged = 0f
-            detectDragGesturesAfterLongPress(
-                onDragStart = { dragged = 0f },
-                onDrag = { _, dragAmount ->
-                    dragged += dragAmount.y
-                    while (dragged >= stepPx) {
-                        onMoveDown()
-                        dragged -= stepPx
-                    }
-                    while (dragged <= -stepPx) {
-                        onMoveUp()
-                        dragged += stepPx
-                    }
-                },
-            )
-        },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            Icons.Default.DragHandle,
-            contentDescription = "Drag to reorder: long-press, then drag up or down",
         )
     }
 }

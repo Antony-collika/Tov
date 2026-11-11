@@ -93,14 +93,41 @@ class RequestLayoutStore(context: Context, private val settings: SettingsReposit
         }
     }
 
-    /** Thêm một thẻ Free mới, trả về id để mở thẳng màn sửa. */
-    fun addFreeCard(): String {
+    /**
+     * Thêm một thẻ mới (menu "Add card", theo FPilot): System / Time / Tools
+     * chỉ thêm được khi chưa có thẻ đó (luật kiểm tra: mỗi loại tối đa 1 thẻ);
+     * Free thì thêm bao nhiêu cũng được, vai mặc định System (đổi được ở màn
+     * sửa, vai User/System). Thẻ mới chèn trước thẻ History — như FPilot
+     * (thẻ mới nằm trên History; History vẫn trên Last turn) — nếu không có
+     * History thì chèn trước Last turn, nếu cũng không có thì thêm vào cuối.
+     * Trả về id để mở thẳng màn sửa. Nhờ vậy thẻ đã xóa (System/Time/Tools)
+     * thêm lại được từ menu này, không cần Reset toàn bộ panel.
+     */
+    fun addCard(kind: CardKind): String {
+        // System/Time/Tools mỗi loại tối đa 1 thẻ — đã có thì trả về id của
+        // thẻ đó (mở màn sửa của nó) thay vì tạo thẻ trùng rồi trả về id ảo.
+        if (kind == CardKind.SYSTEM || kind == CardKind.TIME || kind == CardKind.TOOLS) {
+            _stored.value.cards.firstOrNull { it.kind == kind }?.let { return it.id }
+        }
         val id = UUID.randomUUID().toString()
         update { layout ->
             val cards = layout.cards.toMutableList()
-            val free = RequestCard(id = id, kind = CardKind.FREE, label = "Free card")
+            val card = when (kind) {
+                // Thẻ System thêm lại lấy system prompt mặc định (như bố cục
+                // mặc định); nội dung cũ của thẻ đã xóa thì không lấy lại được.
+                CardKind.SYSTEM -> RequestCard(id = id, kind = kind, text = currentSystemText(layout))
+                CardKind.TIME -> RequestCard(id = id, kind = kind)
+                CardKind.TOOLS -> RequestCard(id = id, kind = kind)
+                else -> RequestCard(id = id, kind = CardKind.FREE, label = "Free card")
+            }
+            val historyIndex = cards.indexOfFirst { it.kind == CardKind.HISTORY }
             val lastTurnIndex = cards.indexOfFirst { it.kind == CardKind.LAST_TURN }
-            if (lastTurnIndex >= 0) cards.add(lastTurnIndex, free) else cards.add(free)
+            val at = when {
+                historyIndex >= 0 -> historyIndex
+                lastTurnIndex >= 0 -> lastTurnIndex
+                else -> cards.size
+            }
+            cards.add(at, card)
             layout.copy(cards = cards)
         }
         return id
