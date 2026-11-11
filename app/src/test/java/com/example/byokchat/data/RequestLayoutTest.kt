@@ -28,10 +28,15 @@ class RequestLayoutTest {
         assertTrue(layout.isValid())
         assertEquals(emptyList<String>(), layout.validate())
         assertEquals("Be helpful", layout.systemCard()?.text)
-        assertEquals("Be helpful", layout.systemText(emptyMap()))
+        // Đợt 2: thẻ Time mặc định BẬT nên dòng giờ được chèn vào cuối system.
+        val vars = mapOf("date" to "2026-11-10", "time" to "14:32")
+        assertEquals("Be helpful\n\nCurrent time: 2026-11-10 14:32", layout.systemText(vars))
         assertEquals(
-            listOf(SystemPart("Be helpful", SystemSource.USER_PROMPT)),
-            layout.systemParts(emptyMap()),
+            listOf(
+                SystemPart("Be helpful", SystemSource.USER_PROMPT),
+                SystemPart("Current time: 2026-11-10 14:32", SystemSource.APP_ADDED),
+            ),
+            layout.systemParts(vars),
         )
     }
 
@@ -78,14 +83,62 @@ class RequestLayoutTest {
     }
 
     @Test
-    fun timeCardOffRemovesTimeToolOnly() {
+    fun timeCardOffKeepsTimeTool() {
+        // Đợt 2: tắt thẻ Time chỉ ngừng chèn dòng giờ; time.now vẫn được offer.
         val layout = RequestLayout.defaultLayout("x").copy(
             cards = RequestLayout.defaultLayout("x").cards.map {
                 if (it.kind == CardKind.TIME) it.copy(enabled = false) else it
             }
         )
-        val out = layout.effectiveToolDefs(defs(), "current_time")
-        assertEquals(listOf("calculator"), out.map { it.name })
+        assertEquals(defs(), layout.effectiveToolDefs(defs()))
+    }
+
+    @Test
+    fun timeCardOnAppendsTimeLineAtEndOfSystem() {
+        val layout = RequestLayout.defaultLayout("Be helpful")
+        val vars = mapOf("date" to "2026-11-10", "time" to "14:32")
+        val parts = layout.systemParts(vars)
+        assertEquals(SystemPart("Current time: 2026-11-10 14:32", SystemSource.APP_ADDED), parts.last())
+        assertEquals("Be helpful\n\nCurrent time: 2026-11-10 14:32", layout.systemText(vars))
+    }
+
+    @Test
+    fun timeCardOffAddsNoTimeLine() {
+        val layout = RequestLayout.defaultLayout("Be helpful").copy(
+            cards = RequestLayout.defaultLayout("Be helpful").cards.map {
+                if (it.kind == CardKind.TIME) it.copy(enabled = false) else it
+            }
+        )
+        val vars = mapOf("date" to "2026-11-10", "time" to "14:32")
+        assertEquals(
+            listOf(SystemPart("Be helpful", SystemSource.USER_PROMPT)),
+            layout.systemParts(vars),
+        )
+        assertEquals("Be helpful", layout.systemText(vars))
+    }
+
+    @Test
+    fun noTimeCardAddsNoTimeLine() {
+        val layout = RequestLayout(
+            listOf(
+                RequestCard(RequestLayout.SYSTEM_ID, CardKind.SYSTEM, text = "Be helpful"),
+                RequestCard(RequestLayout.HISTORY_ID, CardKind.HISTORY),
+                RequestCard(RequestLayout.LAST_TURN_ID, CardKind.LAST_TURN),
+            )
+        )
+        assertEquals(
+            listOf(SystemPart("Be helpful", SystemSource.USER_PROMPT)),
+            layout.systemParts(mapOf("date" to "2026-11-10", "time" to "14:32")),
+        )
+    }
+
+    @Test
+    fun timeLineHasDateAndTimeOnly() {
+        // Chỉ ngày + giờ: không giây, không weekday, không múi giờ/vị trí.
+        assertEquals(
+            "Current time: 2026-11-10 14:32",
+            RequestLayout.currentTimeLine(mapOf("date" to "2026-11-10", "time" to "14:32")),
+        )
     }
 
     @Test
@@ -95,7 +148,7 @@ class RequestLayoutTest {
                 if (it.kind == CardKind.TOOLS) it.copy(enabled = false) else it
             }
         )
-        assertEquals(emptyList<ToolDef>(), layout.effectiveToolDefs(defs(), "current_time"))
+        assertEquals(emptyList<ToolDef>(), layout.effectiveToolDefs(defs()))
     }
 
     @Test
@@ -107,7 +160,7 @@ class RequestLayoutTest {
                 RequestCard(RequestLayout.LAST_TURN_ID, CardKind.LAST_TURN),
             )
         )
-        assertEquals(defs(), layout.effectiveToolDefs(defs(), "current_time"))
+        assertEquals(defs(), layout.effectiveToolDefs(defs()))
     }
 
     @Test
@@ -119,7 +172,13 @@ class RequestLayoutTest {
         val vars = mapOf("date" to "2026-11-10", "time" to "14:32", "model" to "claude-x", "provider" to "Anthropic")
         assertEquals("You are claude-x from Anthropic", layout.systemParts(vars)[0].text)
         assertEquals("Today is 2026-11-10 14:32.", layout.systemParts(vars)[1].text)
-        assertEquals("You are claude-x from Anthropic\n\nToday is 2026-11-10 14:32.", layout.systemText(vars))
+        // Thẻ Time BẬT nên dòng giờ đứng cuối, sau thẻ Free vai system.
+        assertEquals("Current time: 2026-11-10 14:32", layout.systemParts(vars)[2].text)
+        assertEquals(SystemSource.APP_ADDED, layout.systemParts(vars)[2].source)
+        assertEquals(
+            "You are claude-x from Anthropic\n\nToday is 2026-11-10 14:32.\n\nCurrent time: 2026-11-10 14:32.",
+            layout.systemText(vars),
+        )
     }
 
     @Test

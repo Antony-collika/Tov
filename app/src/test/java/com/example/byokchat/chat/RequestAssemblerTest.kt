@@ -59,7 +59,9 @@ class RequestAssemblerTest {
     private fun noRename(uid: String): String? = null
 
     @Test
-    fun systemIsJustTheSavedPrompt() {
+    fun systemIsTheSavedPromptPlusTimeLine() {
+        // Đợt 2: bố cục mặc định có thẻ Time BẬT nên system gồm prompt đã lưu
+        // + dòng giờ ở cuối, gắn nhãn APP_ADDED.
         val out = RequestAssembler.assemble(
             systemPrompt = "Be helpful",
             rows = emptyList(),
@@ -67,19 +69,25 @@ class RequestAssemblerTest {
             budget = 10_000,
             nameForUid = ::noRename,
         )
-        assertEquals("Be helpful", out.system)
-        assertEquals(listOf(SystemPart("Be helpful", SystemSource.USER_PROMPT)), out.systemParts)
+        assertTrue(out.system.startsWith("Be helpful\n\nCurrent time: "))
+        assertEquals(2, out.systemParts.size)
+        assertEquals(SystemPart("Be helpful", SystemSource.USER_PROMPT), out.systemParts[0])
+        assertEquals(SystemSource.APP_ADDED, out.systemParts[1].source)
+        assertTrue(out.systemParts[1].text.matches(Regex("Current time: \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}")))
         assertEquals(emptyList<AiMessage>(), out.sentMessages)
         assertEquals(emptyList<String>(), out.droppedTurnIds)
         assertEquals(0, out.totalTurns)
-        assertEquals(TokenEstimator.text("Be helpful"), out.estimatedTokens)
+        assertEquals(TokenEstimator.text(out.system), out.estimatedTokens)
     }
 
     @Test
-    fun blankSystemHasNoParts() {
+    fun blankSystemHasOnlyTimePart() {
+        // Đợt 2: system trống nhưng thẻ Time BẬT nên vẫn có một phần là dòng giờ.
         val out = RequestAssembler.assemble("", emptyList(), emptyList(), 10_000, ::noRename)
-        assertEquals("", out.system)
-        assertEquals(emptyList<SystemPart>(), out.systemParts)
+        assertEquals(1, out.systemParts.size)
+        assertEquals(SystemSource.APP_ADDED, out.systemParts[0].source)
+        assertTrue(out.systemParts[0].text.matches(Regex("Current time: \\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}")))
+        assertEquals(out.systemParts[0].text, out.system)
     }
 
     @Test
@@ -161,7 +169,7 @@ class RequestAssemblerTest {
         )
         assertEquals(defs, out.toolDefs)
         val toolTokens = TokenEstimator.text("current_time" + "Get the current date and time" + "{}")
-        assertEquals(TokenEstimator.text("Be helpful") + toolTokens, out.estimatedTokens)
+        assertEquals(TokenEstimator.text(out.system) + toolTokens, out.estimatedTokens)
     }
 
     @Test
@@ -237,6 +245,39 @@ class RequestAssemblerTest {
         val out = assembleLayout(layout, emptyList())
         assertEquals("Base\n\nExtra rules", out.system)
         assertEquals(2, out.systemParts.size)
+    }
+
+    @Test
+    fun timeCardOnAppendsTimeLineToSystem() {
+        val out = RequestAssembler.assemble(
+            layout = defaultLayout("Be helpful"),
+            rows = emptyList(),
+            toolDefs = emptyList(),
+            budget = 10_000,
+            nameForUid = ::noRename,
+            vars = mapOf("date" to "2026-11-10", "time" to "14:32"),
+        )
+        assertEquals("Be helpful\n\nCurrent time: 2026-11-10 14:32", out.system)
+        assertEquals(SystemPart("Current time: 2026-11-10 14:32", SystemSource.APP_ADDED), out.systemParts.last())
+    }
+
+    @Test
+    fun timeCardOffAddsNoTimeLine() {
+        val layout = defaultLayout("Be helpful").copy(
+            cards = defaultLayout("Be helpful").cards.map {
+                if (it.kind == CardKind.TIME) it.copy(enabled = false) else it
+            }
+        )
+        val out = RequestAssembler.assemble(
+            layout = layout,
+            rows = emptyList(),
+            toolDefs = emptyList(),
+            budget = 10_000,
+            nameForUid = ::noRename,
+            vars = mapOf("date" to "2026-11-10", "time" to "14:32"),
+        )
+        assertEquals("Be helpful", out.system)
+        assertEquals(listOf(SystemPart("Be helpful", SystemSource.USER_PROMPT)), out.systemParts)
     }
 
     @Test
