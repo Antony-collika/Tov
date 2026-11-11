@@ -61,6 +61,11 @@ fun RequestPanelScreen(
     val layout by store.storedLayout.collectAsState()
     val layoutError by store.layoutError.collectAsState()
     val fileErrors by store.fileErrors.collectAsState()
+    // Đợt 6: tóm tắt thẻ Metadata cần giá trị metadata + model + max tokens
+    // của provider đang dùng.
+    val metadata by container.settings.metadata.collectAsState()
+    val model by container.settings.currentModel.collectAsState()
+    val currentProvider = container.settings.currentModelProvider()
     var confirmReset by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -128,12 +133,14 @@ fun RequestPanelScreen(
                     card = card,
                     isFirst = index == 0,
                     isLast = index == layout.cards.lastIndex,
-                    summary = cardSummary(card),
+                    summary = cardSummary(card, metadata, model, currentProvider),
                     onToggle = { store.updateCard(card.id) { it.copy(enabled = !it.enabled) } },
                     onMoveUp = { store.moveCard(card.id, up = true) },
                     onMoveDown = { store.moveCard(card.id, up = false) },
                     onEdit = { onEditCard(card.id) },
                     onDelete = { store.deleteCard(card.id) },
+                    // Metadata phải luôn đầu tiên (luật kiểm tra): khóa nút di chuyển của nó.
+                    lockPosition = card.kind == CardKind.METADATA,
                 )
             }
             item {
@@ -149,7 +156,7 @@ fun RequestPanelScreen(
     if (confirmReset) {
         ConfirmDialog(
             title = "Reset the request panel?",
-            message = "The card list returns to the default (System, Time, Tools, History, Last turn). Your system prompt text is kept.",
+            message = "The card list returns to the default (Metadata, System, Time, Tools, History, Last turn). Your system prompt text is kept.",
             confirmLabel = "Reset",
             onConfirm = { confirmReset = false; store.reset() },
             onDismiss = { confirmReset = false },
@@ -158,7 +165,24 @@ fun RequestPanelScreen(
 }
 
 /** Một dòng tóm tắt cho từng thẻ. */
-private fun cardSummary(card: RequestCard): String = when (card.kind) {
+private fun cardSummary(
+    card: RequestCard,
+    metadata: com.example.byokchat.ai.MetadataParams,
+    model: String?,
+    provider: com.example.byokchat.data.ProviderConfig?,
+): String = when (card.kind) {
+    CardKind.METADATA -> {
+        // vd "gpt-4o · effort medium · max 8192 · stream on"; ghi thêm khi
+        // tool bị tắt vì reasoning đang bật với OpenAI.
+        val base = metadata.summary(model.orEmpty(), provider?.maxOutputTokens ?: 8192)
+        val note = when {
+            provider != null && metadata.toolsSuppressedByReasoning(provider.type) ->
+                " · tools off (reasoning is on)"
+            metadata.toolChoice == com.example.byokchat.ai.ToolChoiceMode.NONE -> " · tools off for this request"
+            else -> ""
+        }
+        base + note
+    }
     CardKind.SYSTEM -> card.file?.let { "From file: $it" }
         ?: card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(no system prompt)" }
         ?: "(no system prompt)"
@@ -201,6 +225,8 @@ private fun CardRow(
     onMoveDown: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    /** True = khóa vị trí thẻ (Metadata luôn đầu tiên): ẩn nút lên/xuống. */
+    lockPosition: Boolean = false,
 ) {
     Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp)) {
@@ -216,11 +242,13 @@ private fun CardRow(
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(enabled = !isFirst, onClick = onMoveUp) {
-                    Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
-                }
-                IconButton(enabled = !isLast, onClick = onMoveDown) {
-                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
+                if (!lockPosition) {
+                    IconButton(enabled = !isFirst, onClick = onMoveUp) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move up")
+                    }
+                    IconButton(enabled = !isLast, onClick = onMoveDown) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move down")
+                    }
                 }
                 TextButton(onClick = onEdit) { Text("Edit") }
                 if (!card.isFixed()) {

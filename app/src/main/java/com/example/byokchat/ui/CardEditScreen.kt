@@ -48,9 +48,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
+import com.example.byokchat.ai.MetadataParams
+import com.example.byokchat.ai.ReasoningEffort
+import com.example.byokchat.ai.ServiceTier
+import com.example.byokchat.ai.ToolChoiceMode
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
+import com.example.byokchat.data.ProviderType
 import com.example.byokchat.tools.ToolsMdParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -85,6 +90,22 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var newToolFile by remember(cardId) { mutableStateOf("") }
     var toolsPreview by remember(cardId) { mutableStateOf<String?>(null) }
     var toolsPreviewError by remember(cardId) { mutableStateOf<String?>(null) }
+    // Đợt 6: thẻ Metadata — giá trị lưu toàn cục ở SettingsRepository (trừ
+    // max tokens, theo từng provider). Chỉ hiện trường nào hãng đang dùng
+    // hỗ trợ; trường hãng không có thì ẩn, không gửi bừa.
+    val savedMetadata = container.settings.metadata.value
+    val currentProvider = container.settings.currentModelProvider()
+    val providerType = currentProvider?.type
+    val currentModel = container.settings.currentModel.value
+    var effort by remember(cardId) { mutableStateOf(savedMetadata.effort) }
+    var stopText by remember(cardId) { mutableStateOf(savedMetadata.stopSequences.joinToString("\n")) }
+    var toolChoice by remember(cardId) { mutableStateOf(savedMetadata.toolChoice) }
+    var structured by remember(cardId) { mutableStateOf(savedMetadata.structuredOutput) }
+    var serviceTier by remember(cardId) { mutableStateOf(savedMetadata.serviceTier) }
+    var maxTokens by remember(cardId) { mutableStateOf((currentProvider?.maxOutputTokens ?: 8192).toString()) }
+    val stopLines = stopText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+    val stopsValid = stopLines.size <= 4
+    val maxTokensValid = currentProvider == null || maxTokens.toIntOrNull()?.let { it >= 256 } == true
     var confirmDiscard by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
@@ -95,9 +116,13 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         text != card.text || label != card.label || role != card.role || policy != card.policy ||
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
             turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
-            file.trim() != (card.file ?: "") || toolFiles != card.toolFiles()
+            file.trim() != (card.file ?: "") || toolFiles != card.toolFiles() ||
+            effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
+            toolChoice != savedMetadata.toolChoice || structured != savedMetadata.structuredOutput ||
+            serviceTier != savedMetadata.serviceTier ||
+            (currentProvider != null && maxTokens != currentProvider.maxOutputTokens.toString())
         )
-    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && fileValid && newToolFileValid
+    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && fileValid && newToolFileValid && stopsValid && maxTokensValid
     // Thẻ Time/Last turn không có gì để Save (sửa trực tiếp hoặc chỉ đọc).
     // Thẻ Tools CÓ Save (danh sách file) từ Đợt E.
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.LAST_TURN
@@ -128,6 +153,27 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     val goBack: () -> Unit = { if (dirty) confirmDiscard = true else onBack() }
     fun save() {
         val c = card ?: return
+        // Đợt 6: thẻ Metadata không lưu vào thẻ (thẻ chỉ là vị trí cố định):
+        // giá trị lưu toàn cục ở SettingsRepository, max tokens lưu theo
+        // provider đang dùng (như màn sửa provider).
+        if (c.kind == CardKind.METADATA) {
+            container.settings.setMetadata(
+                MetadataParams(
+                    effort = effort,
+                    stopSequences = stopLines.take(4),
+                    toolChoice = toolChoice,
+                    structuredOutput = structured,
+                    serviceTier = serviceTier,
+                )
+            )
+            val cfg = currentProvider
+            val max = maxTokens.toIntOrNull()
+            if (cfg != null && max != null && max >= 256 && max != cfg.maxOutputTokens) {
+                container.settings.saveProvider(cfg.copy(maxOutputTokens = max))
+            }
+            onBack()
+            return
+        }
         store.updateCard(c.id) {
             it.copy(
                 text = text,
@@ -246,6 +292,145 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             when (card.kind) {
+                CardKind.METADATA -> {
+                    // Đợt 6: model chỉ đọc (chọn ở thanh nhập chat như cũ);
+                    // chỉ hiện trường nào hãng đang dùng hỗ trợ.
+                    Text(
+                        "Model: ${currentModel ?: "no model"}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "The model is chosen in the chat input bar, not here — this card only shows it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text("Reasoning effort", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "How hard the model thinks, instead of temperature (all three providers " +
+                            "dropped temperature on current reasoning models).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    savedMetadata.effortOptionsFor(providerType).forEach { option ->
+                        PolicyOption(
+                            selected = effort == option,
+                            title = option.name.lowercase(),
+                            desc = when (option) {
+                                ReasoningEffort.NONE -> "No effort value is sent — the provider uses its default."
+                                ReasoningEffort.MINIMAL -> "Lowest thinking. Not accepted by GPT-6 models."
+                                ReasoningEffort.LOW -> "Less thinking, faster answers."
+                                ReasoningEffort.MEDIUM -> "Balanced (default)."
+                                ReasoningEffort.HIGH -> "More thinking."
+                                ReasoningEffort.XHIGH -> "Very deep thinking."
+                                ReasoningEffort.MAX -> "Maximum thinking."
+                            },
+                            onClick = { effort = option },
+                        )
+                    }
+                    if ((providerType == ProviderType.OPENAI || providerType == ProviderType.CUSTOM) &&
+                        effort != ReasoningEffort.NONE
+                    ) {
+                        Text(
+                            "Tools are off for this request while reasoning is on: OpenAI Chat Completions " +
+                                "only allows tool calls with effort \"none\". Set effort to \"none\" to use tools.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (currentProvider != null) {
+                        OutlinedTextField(
+                            value = maxTokens,
+                            onValueChange = { maxTokens = it.filter { ch -> ch.isDigit() }.take(7) },
+                            label = { Text("Max output tokens") },
+                            singleLine = true,
+                            isError = !maxTokensValid,
+                            supportingText = {
+                                if (!maxTokensValid) Text("Enter a number of 256 or more.")
+                                else Text("Saved for ${currentProvider.name} (this provider). Minimum 256.")
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        Text(
+                            "Max output tokens: choose a provider and model first (it is saved per provider).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text("Stream: on", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "Streaming is always on — this app only streams, so it cannot be turned off here.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = stopText,
+                        onValueChange = { stopText = it },
+                        label = { Text("Stop sequences (one per line, up to 4)") },
+                        minLines = 2,
+                        maxLines = 5,
+                        isError = !stopsValid,
+                        supportingText = { if (!stopsValid) Text("At most 4 stop sequences (the strictest provider limit).") },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Tools for this request", style = MaterialTheme.typography.labelLarge)
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                        ToolChoiceMode.entries.forEachIndexed { index, mode ->
+                            SegmentedButton(
+                                selected = toolChoice == mode,
+                                onClick = { toolChoice = mode },
+                                shape = SegmentedButtonDefaults.itemShape(index = index, count = ToolChoiceMode.entries.size),
+                                label = { Text(if (mode == ToolChoiceMode.AUTO) "Auto" else "None") },
+                            )
+                        }
+                    }
+                    Text(
+                        if (toolChoice == ToolChoiceMode.AUTO) "The model may call the tools the Tools card offers."
+                        else "No tools are sent with this request — like turning the Tools card off for this request only.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (savedMetadata.supportsStructuredOutput(providerType)) {
+                        SwitchRow(
+                            title = "Structured output (JSON)",
+                            desc = "Ask the model to answer in JSON. OpenAI uses response_format json_object; Gemini uses responseMimeType application/json.",
+                            checked = structured,
+                            onChange = { structured = it },
+                        )
+                    } else {
+                        Text(
+                            "Structured output is not available for Claude yet: it needs a JSON schema, which this app does not set.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Text("Service tier", style = MaterialTheme.typography.labelLarge)
+                    val tiers = savedMetadata.serviceTierOptionsFor(providerType)
+                    if (tiers == null) {
+                        Text(
+                            "Not available for Gemini: its service tier is output-only, not a field you send.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        tiers.forEach { tier ->
+                            PolicyOption(
+                                selected = serviceTier == tier,
+                                title = tier.name.lowercase().replace('_', ' '),
+                                desc = when (tier) {
+                                    ServiceTier.AUTO -> "Project default — not sent."
+                                    ServiceTier.DEFAULT -> "Standard tier."
+                                    ServiceTier.FLEX -> "Cheaper, slower capacity (OpenAI)."
+                                    ServiceTier.FAST -> "Fast mode (OpenAI)."
+                                    ServiceTier.PRIORITY -> "Priority capacity (OpenAI)."
+                                    ServiceTier.STANDARD_ONLY -> "Standard capacity only (Claude)."
+                                },
+                                onClick = { serviceTier = tier },
+                            )
+                        }
+                    }
+                }
                 CardKind.SYSTEM -> {
                     OutlinedTextField(
                         value = text,
