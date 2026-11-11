@@ -146,7 +146,6 @@ fun AppNav() {
                 CardEditScreen(
                     cardId = entry.arguments?.getString("cardId") ?: "",
                     onBack = { nav.popBackStack() },
-                    onOpenTools = { nav.navigate("tools") },
                     // Đợt 4: chỉ thẻ History của một cuộc cụ thể mới mở được màn
                     // Messages (panel mở từ Settings thì không có cuộc nào).
                     onOpenMessages = entry.arguments?.getString("cid")?.let { cid -> { nav.navigate("messages/$cid") } },

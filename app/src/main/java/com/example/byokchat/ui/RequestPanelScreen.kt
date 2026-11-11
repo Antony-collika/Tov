@@ -183,7 +183,11 @@ private fun cardSummary(card: RequestCard): String = when (card.kind) {
         if (extras.isEmpty()) base else base + " · " + extras.joinToString(" · ")
     }
     CardKind.LAST_TURN -> "Your latest message and the tool round in progress. Always sent."
-    CardKind.TOOLS -> "Which tools the AI can use. Tap Edit to open the Tools screen."
+    CardKind.TOOLS -> {
+        val files = card.toolFiles()
+        if (files.isEmpty()) "All tools, with their original names. Tap Edit to choose tools.md files."
+        else "Tools from: " + files.joinToString(", ")
+    }
 }
 
 @Composable
