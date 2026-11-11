@@ -65,9 +65,10 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
                 })
             }
         }
-        val logId = log?.beginRequest("Claude", request.model, body) ?: -1
+        val logId = log?.beginRequest(cfg.name, request.model, body) ?: -1
         val raw = StringBuilder()
         var usage: Usage? = null
+        var httpStatus: Int? = null
         val req = Request.Builder()
             .url("$base/v1/messages")
             .withAuth()
@@ -76,7 +77,7 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
 
         val partial = sortedMapOf<Int, Partial>()
         try {
-            Http.client.sseFlow(req).collect { ev ->
+            Http.client.sseFlow(req) { httpStatus = it }.collect { ev ->
                 raw.append(ev.data).append('\n')
                 if (raw.length > 1_000_000) raw.setLength(1_000_000)
                 val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
@@ -111,10 +112,10 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
             }
         } catch (e: Exception) {
             val err = if (e is CancellationException) "cancelled" else e.message
-            log?.finishRequest(logId, httpStatus = null, responseText = raw.toString(), usage = usage, error = err)
+            log?.finishRequest(logId, httpStatus = httpStatus, responseText = raw.toString(), usage = usage, error = err)
             throw e
         }
-        log?.finishRequest(logId, httpStatus = 200, responseText = raw.toString(), usage = usage, error = null)
+        log?.finishRequest(logId, httpStatus = httpStatus, responseText = raw.toString(), usage = usage, error = null)
         val calls = partial.values.filter { it.name.isNotEmpty() }.map {
             AiToolCall(it.id, it.name, it.args.toString().ifBlank { "{}" })
         }

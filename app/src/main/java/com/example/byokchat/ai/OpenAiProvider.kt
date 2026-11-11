@@ -50,9 +50,10 @@ class OpenAiProvider(
                 })
             }
         }
-        val logId = log?.beginRequest("OpenAI", request.model, body) ?: -1
+        val logId = log?.beginRequest(cfg.name, request.model, body) ?: -1
         val raw = StringBuilder()
         var usage: Usage? = null
+        var httpStatus: Int? = null
         val req = Request.Builder()
             .url("$base/chat/completions")
             .withAuth()
@@ -61,7 +62,7 @@ class OpenAiProvider(
 
         val partial = sortedMapOf<Int, Partial>()
         try {
-            Http.client.sseFlow(req).collect { ev ->
+            Http.client.sseFlow(req) { httpStatus = it }.collect { ev ->
                 if (ev.data == "[DONE]") return@collect
                 raw.append(ev.data).append('\n')
                 if (raw.length > 1_000_000) raw.setLength(1_000_000)
@@ -84,10 +85,10 @@ class OpenAiProvider(
             }
         } catch (e: Exception) {
             val err = if (e is CancellationException) "cancelled" else e.message
-            log?.finishRequest(logId, httpStatus = null, responseText = raw.toString(), usage = usage, error = err)
+            log?.finishRequest(logId, httpStatus = httpStatus, responseText = raw.toString(), usage = usage, error = err)
             throw e
         }
-        log?.finishRequest(logId, httpStatus = 200, responseText = raw.toString(), usage = usage, error = null)
+        log?.finishRequest(logId, httpStatus = httpStatus, responseText = raw.toString(), usage = usage, error = null)
         val calls = partial.values.filter { it.name.isNotEmpty() }.map {
             AiToolCall(
                 id = it.id.ifEmpty { "call_" + UUID.randomUUID().toString().take(12) },
