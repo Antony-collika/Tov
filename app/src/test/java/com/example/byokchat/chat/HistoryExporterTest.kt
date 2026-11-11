@@ -36,19 +36,38 @@ class HistoryExporterTest {
         )
         val out = HistoryExporter.renderHistory(conv, rows)
 
-        assertTrue(out.contains("session: conv-abcdefgh"))
+        assertTrue(out.contains("session: conv-abc"))
         assertTrue(out.contains("title: \"Test chat\""))
         assertTrue(out.contains("created: 2023-11-14T22:13:20Z"))
         assertTrue(out.contains("next_turn: 3"))
         assertTrue(out.contains("## T1 user\n{\"id\":\"m1\"}\nWhat time is it?"))
-        assertTrue(out.contains("## T1 round 1"))
-        assertTrue(out.contains("### call call-1 current_time"))
-        assertTrue(out.contains("### result call-1\n2026-11-10 09:00"))
+        // Đợt E: vòng tool KHÔNG còn section riêng trong .md — tin assistant
+        // có lệnh gọi vẫn có section của nó (kể cả khi text trống), vòng tool
+        // nằm trong history.meta.json.
+        assertTrue(out.contains("## T1 assistant\n{\"id\":\"m2\"}"))
+        assertTrue(!out.contains("## T1 round"))
+        assertTrue(!out.contains("### call"))
+        assertTrue(!out.contains("### result"))
         assertTrue(out.contains("## T1 assistant\n{\"id\":\"m4\"}\nIt is 09:00."))
         assertTrue(out.contains("## T2 user\n{\"id\":\"m5\"}\nThanks"))
         assertTrue(out.contains("## T2 assistant\n{\"id\":\"m6\"}\nYou are welcome."))
         // Lượt 1 đứng trước lượt 2.
         assertTrue(out.indexOf("## T1") < out.indexOf("## T2"))
+
+        val meta = HistoryExporter.renderMeta(conv, rows)
+        val parsed = Json { ignoreUnknownKeys = true }.decodeFromString(HistoryMeta.serializer(), meta)
+        assertEquals(1, parsed.version)
+        assertEquals("conv-abc", parsed.session)
+        assertEquals(listOf("m1", "m2", "m4", "m5", "m6"), parsed.messages.keys.toList())
+        val rounds = parsed.messages.getValue("m2").tool_rounds
+        assertEquals(1, rounds.size)
+        assertEquals("call-1", rounds[0].id)
+        assertEquals("time.now", rounds[0].uid)
+        assertEquals("current_time", rounds[0].name)
+        assertEquals("2026-11-10 09:00", rounds[0].result)
+        assertEquals(emptyList<HistoryToolRound>(), parsed.messages.getValue("m4").tool_rounds)
+        // extra_content luôn null: Room không lưu trường này (Đợt E, không đổi DB).
+        assertTrue(parsed.messages.values.all { it.extra_content == null })
     }
 
     @Test
@@ -66,11 +85,31 @@ class HistoryExporterTest {
     }
 
     @Test
-    fun historyPathUsesDateAndShortId() {
+    fun historyPathUsesSessionsAndShortId() {
         val conv = ConversationEntity("conv-abcdefgh", "Chat", 1_700_000_000_000, 1_700_000_000_000)
         val date = java.time.Instant.ofEpochMilli(1_700_000_000_000)
             .atZone(java.time.ZoneId.systemDefault()).toLocalDate()
-        assertEquals("Tov/chats/${date}_conv-abc/history.md", HistoryExporter.historyPath(conv))
+        assertEquals("sessions/${date}_conv-abc/history.md", HistoryExporter.historyPath(conv))
+        assertEquals("sessions/${date}_conv-abc/history.meta.json", HistoryExporter.metaPath(conv))
+    }
+
+    @Test
+    fun unfinishedTurnIsNotExported() {
+        // Đợt E: lượt chỉ có tin user (chưa có assistant trả lời) không ghi vào file.
+        val conv = ConversationEntity("conv-abcdefgh", "Chat", 1_700_000_000_000, 1_700_000_000_000)
+        val rows = listOf(
+            msg("m1", "t1", 1, "user", "Hi"),
+            msg("m2", "t1", 2, "assistant", "Hello."),
+            msg("m3", "t2", 3, "user", "And then?"),
+        )
+        val out = HistoryExporter.renderHistory(conv, rows)
+        assertTrue(out.contains("## T1 user"))
+        assertTrue(!out.contains("## T2 user"))
+        // next_turn vẫn tính từ Room (lượt chưa xong vẫn chiếm số).
+        assertTrue(out.contains("next_turn: 3"))
+        val meta = HistoryExporter.renderMeta(conv, rows)
+        val parsed = Json { ignoreUnknownKeys = true }.decodeFromString(HistoryMeta.serializer(), meta)
+        assertEquals(listOf("m1", "m2"), parsed.messages.keys.toList())
     }
 
     @Test
