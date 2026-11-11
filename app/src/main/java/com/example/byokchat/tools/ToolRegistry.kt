@@ -137,13 +137,20 @@ class ToolRegistry(
         all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
             .sumOf { TokenEstimator.text(effectiveName(it) + effectiveDescription(it) + effectiveSchema(it).toString()) }
 
-    /** Ghi vào Tov/ luôn phải hỏi user, kể cả khi công cụ đang ở mode Auto (Đợt D). */
+    /** Ghi vào Tov/ luôn phải hỏi user, kể cả khi công cụ đang ở mode Auto (Đợt D).
+     * Kiểm tra mọi tham số có thể là đích ghi: đường dẫn đích trực tiếp
+     * (path/source/dest), đầu ra chuyển đổi (output_path), thư mục giải nén
+     * (dest_dir), thư mục xử lý hàng loạt (directory) và danh sách file
+     * xử lý hàng loạt (paths). Tham số chỉ là nguồn đọc (vd 'sources' của
+     * fs.zip) không tính — đích ghi của nó đã nằm ở 'dest'. */
     private fun targetsProtectedDir(tool: Tool, args: JsonObject): Boolean {
         if (tool.risk == Risk.READ) return false
-        return listOf("path", "source", "dest").any { key ->
+        if (listOf("path", "source", "dest", "output_path", "dest_dir", "directory").any { key ->
             val p = args.str(key) ?: return@any false
             isProtectedPath(p)
-        }
+        }) return true
+        // txt.replace_many ghi vào từng file trong danh sách 'paths'.
+        return args.strList("paths")?.any { isProtectedPath(it) } == true
     }
 
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
