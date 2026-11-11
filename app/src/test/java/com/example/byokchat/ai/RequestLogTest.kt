@@ -76,6 +76,47 @@ class RequestLogTest {
     }
 
     @Test
+    fun perSessionLogKeepsSessionsSeparate() {
+        // Đợt fix 11/11/2026 (F1/F2): log theo từng chat, kèm số lượt.
+        val log = RequestLog(dir)
+        val id1 = log.beginRequest("Claude", "m1", body(), sessionId = "chat-a", turnNo = 1)
+        log.finishRequest(id1, 200, "r1", null, null)
+        val id2 = log.beginRequest("Claude", "m2", body(), sessionId = "chat-b", turnNo = 2)
+        log.finishRequest(id2, 200, "r2", null, null)
+        val legacyId = log.beginRequest("Claude", "m0", body())
+        log.finishRequest(legacyId, 200, "r0", null, null)
+
+        val a = log.entries("chat-a")
+        assertEquals(1, a.size)
+        assertEquals("chat-a", a[0].sessionId)
+        assertEquals(1, a[0].turnNo)
+        assertEquals("r1", a[0].responseText)
+        assertEquals(listOf("m2"), log.entries("chat-b").map { it.model })
+        // Mục cũ (không có chat) chỉ thấy ở mục "Older logs".
+        assertEquals(listOf("m0"), log.entries().map { it.model })
+        assertEquals(emptyList<RequestLogEntry>(), log.entries("chat-c"))
+
+        // Xóa một chat không động đến chat khác hay mục cũ.
+        log.clear("chat-a")
+        assertEquals(emptyList<RequestLogEntry>(), log.entries("chat-a"))
+        assertEquals(1, log.entries("chat-b").size)
+        assertEquals(1, log.entries().size)
+    }
+
+    @Test
+    fun turnMarkdownContainsTurnRequestAndResponse() {
+        val log = RequestLog(dir)
+        val id = log.beginRequest("Claude", "m", body(), sessionId = "chat-a", turnNo = 3)
+        log.finishRequest(id, 200, "hello back", Usage(10, 5, 5, null), null)
+        val md = log.entries("chat-a")[0].toMarkdown()
+        assertTrue(md.contains("Turn 3"))
+        assertTrue(md.contains("test-model"))
+        assertTrue(md.contains("hello back"))
+        assertTrue(md.contains("### Request"))
+        assertTrue(md.contains("### Response"))
+    }
+
+    @Test
     fun base64ImagesAreShortenedButTextIsKept() {
         val log = RequestLog(dir)
         val b64 = "iVBORw0KGgo".repeat(500)

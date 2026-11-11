@@ -46,6 +46,13 @@ data class AiRequest(
      * KHÔNG có temperature/top_p/top_k — xem Metadata.kt.
      */
     val metadata: MetadataParams = MetadataParams(),
+    /**
+     * Đợt fix 11/11/2026 (F1/F2): chat + số lượt của request này — provider
+     * ghi vào request log để log theo từng chat. null = không biết (xem
+     * trước — preview không ghi log — hoặc test).
+     */
+    val sessionId: String? = null,
+    val turnNo: Int? = null,
 )
 
 sealed interface AiEvent {

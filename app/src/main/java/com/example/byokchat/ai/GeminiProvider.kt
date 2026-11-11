@@ -21,7 +21,7 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
     override fun stream(request: AiRequest): Flow<AiEvent> = flow {
         val model = request.model.removePrefix("models/")
         val body = buildBody(request)
-        val logId = log?.beginRequest(cfg.name, request.model, body) ?: -1
+        val logId = log?.beginRequest(cfg.name, request.model, body, sessionId = request.sessionId, turnNo = request.turnNo) ?: -1
         val raw = StringBuilder()
         var usage: Usage? = null
         var httpStatus: Int? = null

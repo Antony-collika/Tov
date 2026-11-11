@@ -122,7 +122,7 @@ fun AppNav() {
                         onOnboarding = { nav.navigate("onboarding") },
                         onProvider = { pid -> nav.navigate(if (pid == null) "providers" else "provider?id=$pid") },
                         onInspector = { nav.navigate("inspector/$id") },
-                        onRequestLog = { nav.navigate("request-log") },
+                        onRequestLog = { nav.navigate("request-log?id=$id") },
                         onPanel = { nav.navigate("panel?id=$id") },
                         onOpenStorage = { nav.navigate("settings-storage") },
                     )
@@ -161,7 +161,7 @@ fun AppNav() {
                     onEditCard = { cardId -> nav.navigate("card-edit/$cardId" + if (id != null) "?cid=$id" else "") },
                     onOpenTools = { nav.navigate("tools") },
                     onOpenInspector = id?.let { { nav.navigate("inspector/$id") } },
-                    onOpenRequestLog = { nav.navigate("request-log") },
+                    onOpenRequestLog = { nav.navigate(if (id != null) "request-log?id=$id" else "request-log") },
                 )
             }
             composable(
@@ -200,7 +200,17 @@ fun AppNav() {
                     onBack = { nav.popBackStack() },
                 )
             }
-            composable("request-log") { RequestLogScreen(onBack = { nav.popBackStack() }) }
+            composable(
+                "request-log?id={id}",
+                arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { entry ->
+                // Đợt fix 11/11/2026 (F1): log theo từng chat — có id thì chỉ
+                // thấy log của chat đó; không có id thì xem mục cũ ("Older logs").
+                RequestLogScreen(
+                    conversationId = entry.arguments?.getString("id"),
+                    onBack = { nav.popBackStack() },
+                )
+            }
             composable("providers") {
                 ProvidersScreen(
                     onBack = { nav.popBackStack() },

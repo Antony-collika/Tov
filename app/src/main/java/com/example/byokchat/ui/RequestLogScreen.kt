@@ -1,5 +1,8 @@
 package com.example.byokchat.ui
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,15 +38,25 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.RequestLogEntry
+import com.example.byokchat.ai.toMarkdown
 import com.example.byokchat.container
 import com.example.byokchat.util.fmtTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-/** Nhật ký request/response: mỗi lần gọi model một mục, ghi ra file trong bộ nhớ riêng của app. */
+/**
+ * Nhật ký request/response: mỗi lần gọi model một mục, ghi ra file trong bộ
+ * nhớ riêng của app. Đợt fix 11/11/2026 (F1–F4): log theo từng chat — mở
+ * một chat thì chỉ thấy log của chat đó (kèm số lượt), sao chép cả một lượt
+ * (request + response) và xuất cả chat ra file .md khi user yêu cầu.
+ * `conversationId = null` = mục cũ ghi trước khi log theo chat.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RequestLogScreen(onBack: () -> Unit) {
+fun RequestLogScreen(conversationId: String? = null, onBack: () -> Unit) {
     val context = LocalContext.current
     val container = context.container
     val settings = container.settings
@@ -55,9 +68,39 @@ fun RequestLogScreen(onBack: () -> Unit) {
     var confirmClear by remember { mutableStateOf(false) }
 
     fun refresh() {
-        scope.launch(Dispatchers.IO) { entries = container.requestLog.entries() }
+        scope.launch(Dispatchers.IO) { entries = container.requestLog.entries(conversationId) }
     }
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(conversationId) { refresh() }
+
+    // F4: xuất cả chat ra file .md — user chọn chỗ lưu bằng hộp chọn file
+    // của hệ thống; đọc lại log lúc ghi để luôn lấy bản mới nhất.
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            val ok = runCatching {
+                val current = container.requestLog.entries(conversationId)
+                val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                val text = buildString {
+                    append("# Request log")
+                    if (conversationId == null) append(" (older logs)")
+                    append("\n\nExported $date.\n\n")
+                    append(current.joinToString("\n\n---\n\n") { it.toMarkdown() })
+                    append("\n")
+                }
+                context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
+                    ?: error("Could not open the file")
+            }.isSuccess
+            launch(Dispatchers.Main) {
+                Toast.makeText(
+                    context,
+                    if (ok) "Log exported" else "Export failed",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -68,6 +111,15 @@ fun RequestLogScreen(onBack: () -> Unit) {
                 },
                 actions = {
                     if (entries.isNotEmpty()) {
+                        TextButton(
+                            onClick = {
+                                val date = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+                                exportLauncher.launch(
+                                    if (conversationId == null) "request-log-older-$date.md"
+                                    else "request-log-$date.md",
+                                )
+                            },
+                        ) { Text("Export") }
                         TextButton(onClick = { confirmClear = true }) { Text("Clear") }
                     }
                 },
@@ -77,7 +129,12 @@ fun RequestLogScreen(onBack: () -> Unit) {
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
             ListItem(
                 headlineContent = { Text("Request log") },
-                supportingContent = { Text("Records every request sent to the AI, with the real token counts. Stored only on this device.") },
+                supportingContent = {
+                    Text(
+                        if (conversationId == null) "Requests logged before chats had their own log, with the real token counts. Stored only on this device."
+                        else "Requests sent in this chat, with the real token counts. Stored only on this device.",
+                    )
+                },
                 trailingContent = {
                     Switch(checked = logEnabled, onCheckedChange = { settings.setRequestLogEnabled(it) })
                 },
@@ -102,6 +159,10 @@ fun RequestLogScreen(onBack: () -> Unit) {
                                 clipboard.setText(AnnotatedString(e.requestBody))
                                 refresh()
                             },
+                            onCopyTurn = {
+                                clipboard.setText(AnnotatedString(e.toMarkdown()))
+                                refresh()
+                            },
                         )
                     }
                 }
@@ -116,7 +177,7 @@ fun RequestLogScreen(onBack: () -> Unit) {
             confirmLabel = "Clear",
             onConfirm = {
                 confirmClear = false
-                scope.launch(Dispatchers.IO) { container.requestLog.clear(); entries = emptyList() }
+                scope.launch(Dispatchers.IO) { container.requestLog.clear(conversationId); entries = emptyList() }
             },
             onDismiss = { confirmClear = false },
         )
@@ -124,11 +185,20 @@ fun RequestLogScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun EntryCard(entry: RequestLogEntry, expanded: Boolean, onToggle: () -> Unit, onCopyRequest: () -> Unit) {
+private fun EntryCard(
+    entry: RequestLogEntry,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onCopyRequest: () -> Unit,
+    onCopyTurn: () -> Unit,
+) {
     Card(onClick = onToggle, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Column(Modifier.padding(12.dp)) {
             Text(
-                "${fmtTime(entry.timeMillis)} · ${entry.provider} · ${entry.model}",
+                buildString {
+                    if (entry.turnNo != null) append("Turn ${entry.turnNo} · ")
+                    append("${fmtTime(entry.timeMillis)} · ${entry.provider} · ${entry.model}")
+                },
                 style = MaterialTheme.typography.titleSmall,
             )
             Text(
@@ -149,6 +219,8 @@ private fun EntryCard(entry: RequestLogEntry, expanded: Boolean, onToggle: () ->
                 } else {
                     ExpandableText(entry.responseText, previewChars = 2000)
                 }
+                // F3: sao chép cả một lượt (request + response) để gửi đi/debug.
+                TextButton(onClick = onCopyTurn) { Text("Copy turn") }
             } else {
                 TextButton(onClick = onToggle) { Text("Show details") }
             }

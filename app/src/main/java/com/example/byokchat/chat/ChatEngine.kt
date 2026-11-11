@@ -187,6 +187,10 @@ class ChatEngine(
                     assembled.toolDefs,
                     cfg.maxOutputTokens,
                     metadata,
+                    // Đợt fix 11/11/2026 (F1/F2): provider ghi session + số lượt
+                    // vào request log để log theo từng chat.
+                    sessionId = conversationId,
+                    turnNo = turnNo,
                 )
 
                 var lastFlush = System.currentTimeMillis()
