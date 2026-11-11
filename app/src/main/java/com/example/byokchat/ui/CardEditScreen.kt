@@ -235,11 +235,15 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 // Thẻ Tools dùng danh sách files (file đơn cũ gộp vào đó);
                 // thẻ khác giữ nguyên file/files của chúng. Đợt 8: nguồn
                 // Text input ghi file = null (bỏ liên kết file cũ), nguồn
-                // External file ghi đường dẫn đã chọn/gõ.
+                // External file ghi đường dẫn đã chọn/gõ. Quyết định 16:
+                // chọn Text nghĩa là thẻ là Text — bỏ luôn danh sách file
+                // cũ, không giữ cả hai.
                 file = if (c.kind == CardKind.TOOLS) null
                 else if (source == CardSource.FILE) file.trim().ifEmpty { null }
                 else null,
-                files = if (c.kind == CardKind.TOOLS) toolFiles else it.files,
+                files = if (c.kind == CardKind.TOOLS) {
+                    if (toolsSource == ToolsSource.TEXT) emptyList() else toolFiles
+                } else it.files,
                 // Sửa luật nguồn 11/11/2026: chỉ thẻ Tools dùng toolsSource;
                 // thẻ khác giữ nguyên giá trị đã lưu (mặc định FILE).
                 toolsSource = if (c.kind == CardKind.TOOLS) toolsSource else it.toolsSource,
