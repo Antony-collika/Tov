@@ -30,14 +30,33 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
 
 data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int, val droppedTurnIds: List<String> = emptyList())
+
+/** Kết quả xem trước request: sẵn sàng, hoặc lý do cụ thể vì sao chưa có gì để gửi. */
+sealed interface PreviewResult {
+    data class Ready(val request: AssembledRequest, val providerName: String, val model: String) : PreviewResult
+    data class Unavailable(val reason: PreviewUnavailable) : PreviewResult
+}
+
+enum class PreviewUnavailable {
+    /** Cuộc trò chuyện không còn trong DB (đã xóa). */
+    CONVERSATION_NOT_FOUND,
+    /** Chưa chọn provider nào. */
+    NO_PROVIDER,
+    /** Provider đang chọn không còn trong danh sách (đã bị xóa). */
+    PROVIDER_UNAVAILABLE,
+    /** Đã chọn provider nhưng chưa chọn model (kể cả model rỗng). */
+    NO_MODEL,
+}
 
 /** Danh sách mô hình chỉ làm mới lại sau 5 phút kể từ lần thành công trước. */
 private const val MODELS_TTL_MS = 5 * 60 * 1000L
@@ -73,35 +92,54 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
      * Ghép request cho lần gửi kế tiếp, đúng đường như ChatEngine.run (kể cả
      * danh sách công cụ đã lọc). Dùng chung cho hộp «Chat memory» (chỉ lấy
      * số liệu) và màn Inspector (lấy toàn bộ), nên hai chỗ không lệch nhau.
+     *
+     * Đọc DB trực tiếp bằng DAO như ChatEngine, thay vì đọc `.value` của
+     * flow `conversation`/`messages`: hai flow dùng `WhileSubscribed` nên ở
+     * màn Inspector — nơi không có ai collect chúng — `.value` mãi là giá
+     * trị khởi tạo (null / rỗng) và preview luôn báo sai là chưa chọn model.
+     * Khi chưa có gì để gửi thì trả về lý do cụ thể thay vì null chung chung,
+     * để màn hình báo đúng nguyên nhân (chưa có cuộc trò chuyện / chưa chọn
+     * provider / provider đã bị xóa / chưa chọn model).
      */
-    suspend fun previewAssembled(): AssembledRequest? = withContext(Dispatchers.Default) {
-        val c = conversation.value
-        val cfg = providers.value.firstOrNull { it.id == currentModelProviderId.value }
-        if (c == null || cfg == null) null
-        else {
-            val modelName = currentModel.value.orEmpty()
-            val baseLayout = app.layoutStore.effectiveLayout.value
-            val vars = RequestLayout.requestVars(modelName, cfg.name)
-            // Đợt D: thẻ System/Free trỏ file được đọc lại mỗi lần xem trước.
-            val (layout, fileErrors) = withContext(Dispatchers.IO) {
-                baseLayout.resolveFiles { path -> runCatching { app.fs.readText(path) } }
-            }
-            app.layoutStore.setFileErrors(fileErrors)
-            val toolDefs = layout.effectiveToolDefs(app.registry.definitions(), app.registry.nameForUid(RequestLayout.TIME_NOW_UID))
-            val system = layout.systemText(vars)
-            val budget = ContextBuilder.budget(
-                cfg, modelName, system,
-                toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
-            )
-            RequestAssembler.assemble(
+    suspend fun previewAssembled(): PreviewResult = withContext(Dispatchers.Default) {
+        if (db.conversations().get(conversationId) == null)
+            return@withContext PreviewResult.Unavailable(PreviewUnavailable.CONVERSATION_NOT_FOUND)
+        // Đợi kho provider đọc xong (nền, lúc mở app) để không nhầm "chưa
+        // tải xong" với "provider đã bị xóa"; quá 5 giây thì dùng giá trị hiện có.
+        withTimeoutOrNull(5_000) { app.settings.ready.first { it } }
+        val providerId = currentModelProviderId.value
+            ?: return@withContext PreviewResult.Unavailable(PreviewUnavailable.NO_PROVIDER)
+        val cfg = providers.value.firstOrNull { it.id == providerId }
+            ?: return@withContext PreviewResult.Unavailable(PreviewUnavailable.PROVIDER_UNAVAILABLE)
+        // Kiểm tra model rỗng như đường gửi (ChatEngine ném lỗi khi model rỗng).
+        val modelName = currentModel.value.orEmpty()
+        if (modelName.isBlank()) return@withContext PreviewResult.Unavailable(PreviewUnavailable.NO_MODEL)
+        val rows = db.messages().getAll(conversationId)
+        val baseLayout = app.layoutStore.effectiveLayout.value
+        val vars = RequestLayout.requestVars(modelName, cfg.name)
+        // Đợt D: thẻ System/Free trỏ file được đọc lại mỗi lần xem trước.
+        val (layout, fileErrors) = withContext(Dispatchers.IO) {
+            baseLayout.resolveFiles { path -> runCatching { app.fs.readText(path) } }
+        }
+        app.layoutStore.setFileErrors(fileErrors)
+        val toolDefs = layout.effectiveToolDefs(app.registry.definitions(), app.registry.nameForUid(RequestLayout.TIME_NOW_UID))
+        val system = layout.systemText(vars)
+        val budget = ContextBuilder.budget(
+            cfg, modelName, system,
+            toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
+        )
+        PreviewResult.Ready(
+            request = RequestAssembler.assemble(
                 layout = layout,
-                rows = messages.value,
+                rows = rows,
                 toolDefs = toolDefs,
                 budget = budget,
                 nameForUid = app.registry::nameForUid,
                 vars = vars,
-            )
-        }
+            ),
+            providerName = cfg.name,
+            model = modelName,
+        )
     }
 
     /**
@@ -109,7 +147,9 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
      * (trước đây chạy liên tục nên mỗi lần AI viết thêm chữ lại duyệt cả lịch sử).
      */
     suspend fun computeTokenStats(): TokenStats? {
-        val assembled = previewAssembled() ?: return null
+        val preview = previewAssembled()
+        if (preview !is PreviewResult.Ready) return null
+        val assembled = preview.request
         val cfg = providers.value.firstOrNull { it.id == currentModelProviderId.value } ?: return null
         return TokenStats(
             assembled.historyTokens,
