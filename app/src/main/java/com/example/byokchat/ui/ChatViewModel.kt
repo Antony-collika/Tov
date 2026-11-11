@@ -105,7 +105,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /**
      * Ghép request cho lần gửi kế tiếp, đúng đường như ChatEngine.run (kể cả
-     * danh sách công cụ đã lọc). Dùng chung cho hộp «Chat memory» (chỉ lấy
+     * danh sách công cụ đã lọc). Dùng chung cho hộp «Context window» (chỉ lấy
      * số liệu) và màn Inspector (lấy toàn bộ), nên hai chỗ không lệch nhau.
      *
      * Đọc DB trực tiếp bằng DAO như ChatEngine, thay vì đọc `.value` của
@@ -176,7 +176,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     }
 
     /**
-     * Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi. Chỉ gọi khi người dùng mở hộp «Chat memory»
+     * Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi. Chỉ gọi khi người dùng mở hộp «Context window»
      * (trước đây chạy liên tục nên mỗi lần AI viết thêm chữ lại duyệt cả lịch sử).
      */
     suspend fun computeTokenStats(): TokenStats? {

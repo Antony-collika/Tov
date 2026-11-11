@@ -60,7 +60,7 @@ internal fun ExpandableText(text: String, previewChars: Int = 500) {
     }
 }
 
-/** "What the AI will see": đúng thứ sẽ gửi cho AI ở lần gửi kế tiếp, kèm nhãn nguồn và token ước lượng. */
+/** "Preview request": đúng thứ sẽ gửi cho AI ở lần gửi kế tiếp, kèm nhãn nguồn và token ước lượng. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
@@ -86,7 +86,7 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("What the AI will see") },
+                title = { Text("Preview request") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
@@ -315,7 +315,7 @@ private fun inspectorMarkdown(a: AssembledRequest, ready: PreviewResult.Ready): 
     val model = ready.model
     val metadata = ready.metadata
     val type = ready.providerType
-    appendLine("# What the AI will see")
+    appendLine("# Preview request")
     appendLine("Provider: $providerName · Model: $model")
     appendLine("Estimated tokens: ${a.estimatedTokens} (history ${a.historyTokens})")
     appendLine()

@@ -303,7 +303,7 @@ fun RequestPanelScreen(
                         AdvancedRow(label = "Preview", onClick = onOpenInspector)
                     }
                     if (onOpenRequestLog != null) {
-                        AdvancedRow(label = "Request log", onClick = onOpenRequestLog)
+                        AdvancedRow(label = "Log", onClick = onOpenRequestLog)
                     }
                     AdvancedRow(label = "Reset", onClick = { confirmReset = true })
                 }

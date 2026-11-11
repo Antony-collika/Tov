@@ -105,7 +105,7 @@ fun RequestLogScreen(conversationId: String? = null, onBack: () -> Unit) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Request log") },
+                title = { Text("Log") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
@@ -128,7 +128,7 @@ fun RequestLogScreen(conversationId: String? = null, onBack: () -> Unit) {
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
             ListItem(
-                headlineContent = { Text("Request log") },
+                headlineContent = { Text("Log") },
                 supportingContent = {
                     Text(
                         if (conversationId == null) "Requests logged before chats had their own log, with the real token counts. Stored only on this device."
@@ -172,7 +172,7 @@ fun RequestLogScreen(conversationId: String? = null, onBack: () -> Unit) {
 
     if (confirmClear) {
         ConfirmDialog(
-            title = "Clear the request log?",
+            title = "Clear the log?",
             message = "All ${entries.size} logged request(s) will be deleted from this device.",
             confirmLabel = "Clear",
             onConfirm = {

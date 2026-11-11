@@ -123,6 +123,7 @@ fun AppNav() {
                         onProvider = { pid -> nav.navigate(if (pid == null) "providers" else "provider?id=$pid") },
                         onInspector = { nav.navigate("inspector/$id") },
                         onRequestLog = { nav.navigate("request-log?id=$id") },
+                        onOpenMessages = { nav.navigate("messages/$id") },
                         onPanel = { nav.navigate("panel?id=$id") },
                         onOpenStorage = { nav.navigate("settings-storage") },
                     )

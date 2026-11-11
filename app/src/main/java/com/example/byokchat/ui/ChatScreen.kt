@@ -21,11 +21,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -76,8 +77,10 @@ fun ChatScreen(
     onOpenProvider: (String?) -> Unit,
     /** Starts a fresh chat (used by the "context almost full" hint). */
     onNewChat: () -> Unit,
-    /** Opens the "What the AI will see" Inspector for this chat. */
+    /** Opens the "Preview request" Inspector for this chat. */
     onOpenInspector: () -> Unit,
+    /** Opens the Messages screen (chat history) for this chat. */
+    onOpenMessages: () -> Unit,
     /** Opens the request log. */
     onOpenRequestLog: () -> Unit,
     /** Opens the Request panel for this chat. */
@@ -113,7 +116,7 @@ fun ChatScreen(
 
     var showModelPicker by remember { mutableStateOf(false) }
     var showMemory by remember { mutableStateOf(false) }
-    // Số liệu «Chat memory» chỉ tính khi hộp thoại được mở (xem ChatViewModel.computeTokenStats).
+    // Số liệu «Context window» chỉ tính khi hộp thoại được mở (xem ChatViewModel.computeTokenStats).
     var memoryStats by remember { mutableStateOf<TokenStats?>(null) }
     LaunchedEffect(showMemory, messages) {
         if (showMemory) memoryStats = vm.computeTokenStats()
@@ -356,17 +359,20 @@ fun ChatScreen(
                         IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, contentDescription = "Conversations") }
                     },
                     actions = {
-                        IconButton(onClick = { searchOpen = true }) { Icon(Icons.Default.Search, contentDescription = "Search") }
+                        // Đợt fix 11/11/2026 (H2): Request panel và New chat
+                        // thành nút trên thanh trên cùng (thứ tự: panel – new
+                        // chat – menu); Search chuyển vào trong menu.
+                        IconButton(onClick = onOpenRequestPanel) { Icon(Icons.Default.Tune, contentDescription = "Request panel") }
+                        IconButton(onClick = onNewChat) { Icon(Icons.Default.Edit, contentDescription = "New chat") }
                         Box {
                             IconButton(onClick = { showMenu = true }) {
                                 Icon(Icons.Default.MoreVert, contentDescription = "More")
                             }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                                DropdownMenuItem(text = { Text("New chat") }, onClick = { showMenu = false; onNewChat() })
-                                DropdownMenuItem(text = { Text("Chat memory") }, onClick = { showMenu = false; showMemory = true })
-                                DropdownMenuItem(text = { Text("What the AI will see") }, onClick = { showMenu = false; onOpenInspector() })
-                                DropdownMenuItem(text = { Text("Request log") }, onClick = { showMenu = false; onOpenRequestLog() })
-                                DropdownMenuItem(text = { Text("Request panel") }, onClick = { showMenu = false; onOpenRequestPanel() })
+                                DropdownMenuItem(text = { Text("Search") }, onClick = { showMenu = false; searchOpen = true })
+                                DropdownMenuItem(text = { Text("Context window") }, onClick = { showMenu = false; showMemory = true })
+                                DropdownMenuItem(text = { Text("Preview request") }, onClick = { showMenu = false; onOpenInspector() })
+                                DropdownMenuItem(text = { Text("Log") }, onClick = { showMenu = false; onOpenRequestLog() })
                                 DropdownMenuItem(text = { Text("Settings") }, onClick = { showMenu = false; onOpenSettings() })
                             }
                         }
@@ -490,7 +496,7 @@ fun ChatScreen(
             open = true,
             onDismiss = { showMemory = false; memoryStats = null },
             onNewChat = onNewChat,
-            onOpenInspector = onOpenInspector,
+            onOpenMessages = onOpenMessages,
         )
     }
     regenPrompt?.let { rp ->

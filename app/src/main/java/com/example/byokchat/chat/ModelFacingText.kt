@@ -2,7 +2,7 @@ package com.example.byokchat.chat
 
 /**
  * Mọi chuỗi chữ mà app tự viết để gửi cho AI đều nằm ở đây, để màn
- * "What the AI will see" (Đợt B) hiện đúng thứ app gửi đi.
+ * "Preview request" (Đợt B) hiện đúng thứ app gửi đi.
  *
  * Chỉ gồm chuỗi GỬI CHO AI (chủ yếu là kết quả tool, vì kết quả tool được
  * đưa lại vào lịch sử và gửi kèm ở vòng sau). Các câu lỗi chỉ lưu trong DB

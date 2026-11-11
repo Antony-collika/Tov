@@ -45,6 +45,8 @@ fun ChatHost(
     onInspector: () -> Unit,
     onRequestLog: () -> Unit,
     onPanel: () -> Unit,
+    /** Opens the Messages screen (chat history) for this chat. */
+    onOpenMessages: () -> Unit,
     onOpenStorage: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -122,6 +124,7 @@ fun ChatHost(
                 onOpenProvider = onProvider,
                 onNewChat = onNewChat,
                 onOpenInspector = onInspector,
+                onOpenMessages = onOpenMessages,
                 onOpenRequestLog = onRequestLog,
                 onOpenRequestPanel = onPanel,
                 onOpenStorage = onOpenStorage,
