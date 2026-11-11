@@ -124,6 +124,8 @@ class OpenAiProvider(
             put("tool_choice", "auto")
         }
     }
+
+    private fun buildMessages(r: AiRequest): JsonArray = buildJsonArray {
         if (r.system.isNotBlank()) {
             add(buildJsonObject { put("role", "system"); put("content", r.system) })
         }

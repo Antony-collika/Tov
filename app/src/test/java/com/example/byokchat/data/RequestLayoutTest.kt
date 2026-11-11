@@ -21,7 +21,7 @@ class RequestLayoutTest {
     fun defaultLayoutReproducesTheOldRequest() {
         val layout = RequestLayout.layoutFromSettings("Be helpful")
         assertEquals(
-            listOf(CardKind.SYSTEM, CardKind.TIME, CardKind.TOOLS, CardKind.HISTORY, CardKind.LAST_TURN),
+            listOf(CardKind.METADATA, CardKind.SYSTEM, CardKind.TIME, CardKind.TOOLS, CardKind.HISTORY, CardKind.LAST_TURN),
             layout.cards.map { it.kind },
         )
         assertTrue(layout.cards.all { it.enabled })
@@ -311,5 +311,20 @@ class RequestLayoutTest {
     fun toolsFileMustEndWithMd() {
         val layout = toolsLayout("tools.txt")
         assertTrue(layout.validate().any { it.contains("Tools") && it.contains(".md") })
+    }
+
+    @Test
+    fun metadataCardMustBeExactlyOnceFirstAndAlwaysOn() {
+        // Đợt 6: Metadata cố định như FPilot — đúng 1, đầu tiên, không tắt.
+        val base = RequestLayout.defaultLayout("x").cards
+        val noMetadata = RequestLayout(base.filter { it.kind != CardKind.METADATA })
+        assertTrue(noMetadata.validate().any { it.contains("Metadata") && it.contains("exactly once") })
+        val dup = RequestLayout(base + RequestCard("metadata-2", CardKind.METADATA))
+        assertTrue(dup.validate().any { it.contains("Metadata") && it.contains("exactly once") })
+        val notFirst = RequestLayout(base.filter { it.kind != CardKind.METADATA } + RequestCard(RequestLayout.METADATA_ID, CardKind.METADATA))
+        assertTrue(notFirst.validate().any { it.contains("Metadata") && it.contains("first") })
+        val off = RequestLayout(base.map { if (it.kind == CardKind.METADATA) it.copy(enabled = false) else it })
+        assertTrue(off.validate().any { it.contains("Metadata") && it.contains("turned off") })
+        assertTrue(RequestLayout.defaultLayout("x").metadataCard()?.isFixed() == true)
     }
 }
