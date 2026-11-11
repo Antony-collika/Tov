@@ -371,7 +371,7 @@ private fun cardSummary(
         }
         val extras = listOfNotNull(
             "shortens old tool results".takeIf { card.compactToolResults },
-            "turn tags [Tn]".takeIf { card.turnTags },
+            "turn tags".takeIf { card.turnTags },
             "includes error turns".takeIf { card.includeErrorTurns },
         )
         if (extras.isEmpty()) base else base + " · " + extras.joinToString(" · ")

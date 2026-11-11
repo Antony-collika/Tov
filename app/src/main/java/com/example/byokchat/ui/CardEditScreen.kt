@@ -400,19 +400,19 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         OutlinedTextField(
                             value = maxTokens,
                             onValueChange = { maxTokens = it.filter { ch -> ch.isDigit() }.take(7) },
-                            label = { Text("Max output tokens") },
+                            label = { Text("Longest answer (tokens)") },
                             singleLine = true,
                             isError = !maxTokensValid,
                             supportingText = {
                                 if (!maxTokensValid) Text("Enter a number of 256 or more.")
-                                else Text("Saved for ${currentProvider.name} (this provider). Minimum 256.")
+                                else Text("Saved for this provider (${currentProvider.name}). At least 256.")
                             },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             modifier = Modifier.fillMaxWidth(),
                         )
                     } else {
                         Text(
-                            "Max output tokens: choose a provider and model first (it is saved per provider).",
+                            "Longest answer (tokens): choose a provider and model first (it is saved per provider).",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -637,7 +637,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         onChange = { compact = it },
                     )
                     SwitchRow(
-                        title = "Tag turns [T7]",
+                        title = "Tag turns",
                         desc = "Add the turn number to each of your messages, so the AI can refer to a turn.",
                         checked = turnTags,
                         onChange = { turnTags = it },

@@ -150,10 +150,11 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
                 modifier = Modifier.padding(vertical = 4.dp),
             )
 
-            // ---------- Markdown-only writes (always on, no switch) ----------
+            // ---------- Text-only writes (always on, no switch) ----------
             StorageSectionTitle("What the AI may write")
             Text(
-                "Text tools (txt.*) can only write Markdown files (.md or .markdown). " +
+                "Text tools can only write text files — files whose content is plain text, " +
+                    "whatever the extension (.md, .txt, .json, .csv, .html, …). " +
                     "Other tools keep the file type their job needs (.zip, .json, .csv, …), " +
                     "but every AI write must stay inside the subfolder above. " +
                     "This limit is always on — there is no switch for it — and a blocked " +
