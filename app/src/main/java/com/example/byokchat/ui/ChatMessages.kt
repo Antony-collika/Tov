@@ -118,6 +118,7 @@ private fun EditedLabel() {
 /**
  * Your message. Press and hold opens the menu (bottom sheet): Copy | Select text | Edit message | Edit & regenerate | Delete.
  * [canRegen] adds a plain "Regenerate" only for a turn that has no AI answer at all (so it can always be retried).
+ * [turnLabel] is the stable turn number ("T1") shown above the bubble (Đợt 4, like FPilot).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -128,6 +129,7 @@ internal fun UserMessage(
     edit: EditState?,
     actions: Actions,
     canRegen: Boolean,
+    turnLabel: String? = null,
     onEditChange: (String) -> Unit,
     onEditSave: (EditState) -> Unit,
     onEditCancel: () -> Unit,
@@ -159,6 +161,9 @@ internal fun UserMessage(
         },
         horizontalAlignment = Alignment.End,
     ) {
+        if (turnLabel != null) {
+            Text(turnLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         // Zero-size anchor at the top-start of the message; the dropdown opens at
         // the recorded press point (offset from the anchor).
         if (menuOpen) {

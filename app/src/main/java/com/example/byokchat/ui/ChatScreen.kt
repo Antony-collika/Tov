@@ -46,6 +46,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.byokchat.container
+import com.example.byokchat.chat.TurnNumbers
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
@@ -217,6 +218,8 @@ fun ChatScreen(
             m.role != "tool" && !(m.role == "assistant" && m.text.isBlank() && m.status == "done" && m.toolCallsJson == null)
         }
     }
+    // Đợt 4: nhãn lượt ổn định (T1, T2…) cho bong bóng user, như FPilot.
+    val turnLabels = remember(messages) { TurnNumbers.effectiveTurnNumbers(messages) }
     val visible = remember(chrono) { chrono.asReversed() }
     // Only the very last answer of the chat gets the Copy / Regenerate / Branch row; older answers use press-and-hold.
     val lastAnswerId = remember(chrono) {
@@ -408,6 +411,7 @@ fun ChatScreen(
                             UserMessage(
                                 m, generating, hl, edit, actions,
                                 canRegen = m.turnId !in turnsWithAnswer,
+                                turnLabel = turnLabels[m.turnId]?.let { "T$it" },
                                 onEditChange = { t -> editing = editing?.copy(text = t) },
                                 onEditSave = { st ->
                                     editing = null
