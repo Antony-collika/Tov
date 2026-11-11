@@ -1,27 +1,40 @@
 package com.example.byokchat.ui
 
-import android.widget.Toast
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
-import com.example.byokchat.data.ThemeMode
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Settings, split into four clearly titled groups: AI, Tools, Data & workspace, Appearance. */
+/**
+ * Settings (Đợt 7): chỉ còn DANH SÁCH THẺ — tên + một dòng tóm tắt, ấn vào
+ * mở màn chi tiết — cùng chuẩn thẻ với Request panel. Không còn điều khiển
+ * inline nào trên màn này: web search, workspace, theme đã dời sang màn
+ * chi tiết; switch include_usage đã dời sang từng provider (Đợt 7); hàng
+ * Request log đã xóa — công tắc bật/tắt log vẫn nằm trên chính màn
+ * Request log, nút mở log nằm trên Request panel cạnh Preview.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -30,25 +43,25 @@ fun SettingsScreen(
     onTools: () -> Unit,
     onNotes: () -> Unit,
     onRequestPanel: () -> Unit,
+    onWebSearch: () -> Unit,
+    onStorage: () -> Unit,
+    onAppearance: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
     val settings = container.settings
-    val scope = rememberCoroutineScope()
     val theme by settings.themeMode.collectAsState()
     val providers by settings.providers.collectAsState()
-    val logEnabled by settings.requestLogEnabled.collectAsState()
-    val openAiIncludeUsage by settings.openAiIncludeUsage.collectAsState()
-    val workspaceUri by settings.workspaceUri.collectAsState()
-    val accessible by container.fs.accessible.collectAsState()
     val searchProvider by settings.searchProvider.collectAsState()
-    var searchKey by remember { mutableStateOf(settings.searchApiKey.value) }
-    var showKey by remember { mutableStateOf(false) }
-    var confirmClear by remember { mutableStateOf(false) }
-    val pickFolder = rememberFolderPicker()
+    val searchKey by settings.searchApiKey.collectAsState()
+    val workspaceUri by settings.workspaceUri.collectAsState()
+    val sessionStorageUri by settings.sessionStorageUri.collectAsState()
     // Reading the folder name touches the document provider, so it is done off the main thread.
-    val workspacePath by produceState<String?>(null, workspaceUri, accessible) {
+    val workspacePath by produceState<String?>(null, workspaceUri) {
         value = withContext(Dispatchers.IO) { container.fs.displayPath() }
+    }
+    val sessionPath by produceState<String?>(null, sessionStorageUri) {
+        value = withContext(Dispatchers.IO) { container.fs.displaySessionPath() }
     }
 
     Scaffold(
@@ -61,136 +74,62 @@ fun SettingsScreen(
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
-            // ---------- AI ----------
-            SectionTitle("AI")
-            ListItem(
-                modifier = Modifier.clickable(onClick = onProviders),
-                headlineContent = { Text("AI providers") },
-                supportingContent = { Text(if (providers.isEmpty()) "No providers yet" else providers.joinToString(", ") { it.name }) },
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            SettingsCard(
+                title = "AI providers",
+                summary = if (providers.isEmpty()) "No providers yet" else providers.joinToString(", ") { it.name },
+                onClick = onProviders,
             )
-            ListItem(
-                modifier = Modifier.clickable(onClick = onRequestPanel),
-                headlineContent = { Text("System prompt & request panel") },
-                supportingContent = { Text("What the AI sees, and in which order — system prompt, time tool, history and tools") },
+            SettingsCard(
+                title = "System prompt & request panel",
+                summary = "What the AI sees, and in which order — system prompt, time tool, history and tools",
+                onClick = onRequestPanel,
             )
-            ListItem(
-                headlineContent = { Text("Request log") },
-                supportingContent = { Text("Records every request sent to the AI, with the real token counts. Stored only on this device.") },
-                trailingContent = {
-                    Switch(checked = logEnabled, onCheckedChange = { settings.setRequestLogEnabled(it) })
+            SettingsCard(
+                title = "Manage tools",
+                summary = "Turn tools on or off and choose how much control you keep. The name and description the AI sees are managed in the Tools card file.",
+                onClick = onTools,
+            )
+            SettingsCard(
+                title = "Web search",
+                summary = (if (searchProvider == "TAVILY") "Tavily" else "Brave Search") +
+                    if (searchKey.isBlank()) " · No API key — web search is not offered" else " · API key saved",
+                onClick = onWebSearch,
+            )
+            SettingsCard(
+                title = "Select Storage and Playground folder",
+                summary = when {
+                    workspaceUri == null -> "No folder chosen"
+                    sessionStorageUri == null -> "Workspace: ${workspacePath ?: "Folder selected"} · Sessions: same folder"
+                    else -> "Workspace: ${workspacePath ?: "Folder selected"} · Sessions: ${sessionPath ?: "Folder selected"}"
                 },
+                onClick = onStorage,
             )
-            ListItem(
-                headlineContent = { Text("Ask OpenAI for real token counts") },
-                supportingContent = { Text("Sends stream_options.include_usage so the log shows real counts. Some self-hosted servers reject this — turn it off if requests fail.") },
-                trailingContent = {
-                    Switch(checked = openAiIncludeUsage, onCheckedChange = { settings.setOpenAiIncludeUsage(it) })
-                },
+            SettingsCard(
+                title = "Notes & to-dos",
+                summary = "See what the AI has saved for you",
+                onClick = onNotes,
             )
-
-            // ---------- Tools ----------
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Tools")
-            ListItem(
-                modifier = Modifier.clickable(onClick = onTools),
-                headlineContent = { Text("Manage tools") },
-                supportingContent = { Text("Turn tools on or off, choose how much control you keep, rename them and edit their descriptions") },
+            SettingsCard(
+                title = "Appearance",
+                summary = "Theme: ${theme.label}",
+                onClick = onAppearance,
             )
-            Text(
-                "Web search (for the web_search tool)",
-                style = MaterialTheme.typography.titleSmall,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
-            )
-            val engines = listOf("BRAVE" to "Brave Search", "TAVILY" to "Tavily")
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                engines.forEachIndexed { index, (id, label) ->
-                    SegmentedButton(
-                        selected = searchProvider == id,
-                        onClick = { settings.setSearchProvider(id) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = engines.size),
-                        label = { Text(label) },
-                    )
-                }
-            }
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                OutlinedTextField(
-                    value = searchKey,
-                    onValueChange = { searchKey = it; settings.setSearchApiKey(it.trim()) },
-                    label = { Text("Your search service API key") },
-                    singleLine = true,
-                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
-                    supportingText = { Text("If empty, the web search tool is not offered to the AI. The key is encrypted on this device.") },
-                    keyboardOptions = KeyboardOptions.Default,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            // ---------- Data & workspace ----------
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Data & workspace")
-            ListItem(
-                headlineContent = { Text(if (workspaceUri == null) "No folder chosen" else workspacePath ?: "Folder selected") },
-                overlineContent = { Text("Workspace folder") },
-                supportingContent = {
-                    Text(
-                        when {
-                            workspaceUri == null -> "File tools are blocked until you choose a folder."
-                            accessible -> "Active. The AI can only see and change things inside this folder."
-                            else -> "Access was lost or the folder no longer exists. Please choose it again."
-                        }
-                    )
-                },
-            )
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = pickFolder) { Text(if (workspaceUri == null) "Choose folder" else "Change folder") }
-                if (workspaceUri != null) {
-                    TextButton(onClick = { confirmClear = true }) { Text("Remove") }
-                }
-            }
-            if (workspaceUri != null) {
-                OutlinedButton(
-                    onClick = {
-                        scope.launch(Dispatchers.IO) {
-                            val msg = container.fs.selfTest()
-                            launch(Dispatchers.Main) { Toast.makeText(context, msg, Toast.LENGTH_LONG).show() }
-                        }
-                    },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                ) { Text("Check read/write access") }
-            }
-            ListItem(
-                modifier = Modifier.clickable(onClick = onNotes),
-                headlineContent = { Text("Notes & to-dos") },
-                supportingContent = { Text("See what the AI has saved for you") },
-            )
-
-            // ---------- Appearance ----------
-            HorizontalDivider(Modifier.padding(vertical = 8.dp))
-            SectionTitle("Appearance")
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-                ThemeMode.entries.forEachIndexed { index, mode ->
-                    SegmentedButton(
-                        selected = theme == mode,
-                        onClick = { settings.setThemeMode(mode) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = ThemeMode.entries.size),
-                        label = { Text(mode.label) },
-                    )
-                }
-            }
-            Spacer(Modifier.height(24.dp))
         }
     }
+}
 
-    if (confirmClear) {
-        ConfirmDialog(
-            title = "Remove the workspace folder?",
-            message = "The app will forget its access to this folder. The files in the folder are not affected.",
-            confirmLabel = "Remove",
-            onConfirm = { confirmClear = false; scope.launch(Dispatchers.IO) { container.fs.clear() } },
-            onDismiss = { confirmClear = false },
-        )
+/** Một thẻ Settings: tên + một dòng tóm tắt, cùng chuẩn thẻ với Request panel. */
+@Composable
+private fun SettingsCard(title: String, summary: String, onClick: () -> Unit) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 

@@ -121,8 +121,14 @@ fun AppNav() {
                     onTools = { nav.navigate("tools") },
                     onNotes = { nav.navigate("notes") },
                     onRequestPanel = { nav.navigate("panel") },
+                    onWebSearch = { nav.navigate("settings-web-search") },
+                    onStorage = { nav.navigate("settings-storage") },
+                    onAppearance = { nav.navigate("settings-appearance") },
                 )
             }
+            composable("settings-web-search") { SettingsWebSearchScreen(onBack = { nav.popBackStack() }) }
+            composable("settings-storage") { SettingsStorageScreen(onBack = { nav.popBackStack() }) }
+            composable("settings-appearance") { SettingsAppearanceScreen(onBack = { nav.popBackStack() }) }
             composable(
                 "panel?id={id}",
                 arguments = listOf(navArgument("id") { type = NavType.StringType; nullable = true; defaultValue = null }),

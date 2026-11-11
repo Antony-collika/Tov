@@ -24,3 +24,19 @@ fun rememberFolderPicker(onPicked: () -> Unit = {}): () -> Unit {
     }
     return { launcher.launch(null) }
 }
+
+/** Như rememberFolderPicker nhưng cho thư mục Session storage riêng (Đợt 7). */
+@Composable
+fun rememberSessionFolderPicker(onPicked: () -> Unit = {}): () -> Unit {
+    val fs = LocalContext.current.container.fs
+    val scope = rememberCoroutineScope()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                runCatching { fs.onSessionFolderPicked(uri) }
+                onPicked()
+            }
+        }
+    }
+    return { launcher.launch(null) }
+}

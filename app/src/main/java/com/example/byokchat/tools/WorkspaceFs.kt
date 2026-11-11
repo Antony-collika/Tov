@@ -102,6 +102,45 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         refresh()
     }
 
+    // ---------- Thư mục Session storage (Đợt 7) ----------
+    // Gương của onFolderPicked/clear/displayPath ở trên, nhưng cho thư mục
+    // Session storage riêng (setting session_storage_uri, Đợt E). Chưa chọn
+    // thì sessionRoot() dùng chung workspace (xem sessionRoot).
+
+    fun sessionRootName(): String? =
+        runCatching { settings.sessionStorageUri.value?.let { DocumentFile.fromTreeUri(ctx, Uri.parse(it))?.name } }.getOrNull()
+
+    /** Tên thư mục session hiển thị kiểu "./tên": null nếu chưa chọn riêng. */
+    fun displaySessionPath(): String? {
+        val raw = settings.sessionStorageUri.value ?: return null
+        val uri = Uri.parse(raw)
+        val name = sessionRootName()?.takeIf { it.isNotBlank() }
+            ?: runCatching { DocumentsContract.getTreeDocumentId(uri).substringAfterLast(':').substringAfterLast('/') }
+                .getOrNull()?.takeIf { it.isNotBlank() }
+        return "./" + (name ?: "")
+    }
+
+    /** Gọi sau khi người dùng chọn thư mục Session storage bằng hộp chọn của hệ thống. */
+    fun onSessionFolderPicked(uri: Uri) {
+        val old = settings.sessionStorageUri.value?.let { Uri.parse(it) }
+        resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        if (old != null && old != uri) {
+            runCatching {
+                resolver.releasePersistableUriPermission(old, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+        }
+        settings.setSessionStorageUri(uri.toString())
+    }
+
+    fun clearSessionStorage() {
+        settings.sessionStorageUri.value?.let {
+            runCatching {
+                resolver.releasePersistableUriPermission(Uri.parse(it), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+        }
+        settings.setSessionStorageUri(null)
+    }
+
     /** Thử tạo, ghi, đọc, xóa một file tạm để chắc chắn công cụ ghi đúng chỗ. */
     fun selfTest(): String {
         if (!refresh()) return "No access to the workspace folder."
