@@ -20,7 +20,11 @@ import kotlinx.serialization.json.contentOrNull
 
 /**
  * Danh sách toàn bộ công cụ + cầu nối với vòng chat.
- * - UID cố định do app đặt; tên/mô tả model nhìn thấy là phần người dùng có thể đổi.
+ * - UID cố định do app đặt; tên/mô tả GỐC lấy từ code, không bao giờ mất.
+ *   Tên/mô tả model nhìn thấy chỉ còn đến từ file tools.md của thẻ Tools
+ *   (đường "legacy" khi không có thẻ thì dùng tên/mô tả gốc).
+ * - Chế độ Auto/Ask/Off (tầng quyền) vẫn ở trong app (ToolPrefs); tool tắt
+ *   vẫn được offer cho model, chỉ chặn lúc gọi (quyết định 8, Đợt E).
  * - Mọi thay đổi trong ToolPrefs có hiệu lực từ request kế tiếp (definitions() đọc lại mỗi lần).
  */
 class ToolRegistry(
@@ -33,8 +37,14 @@ class ToolRegistry(
 
     fun tool(uid: String): Tool? = byUid[uid]
 
-    fun effectiveName(t: Tool): String = prefs.get(t.uid).name?.takeIf { it.isNotBlank() } ?: t.defaultName
-    fun effectiveDescription(t: Tool): String = prefs.get(t.uid).description?.takeIf { it.isNotBlank() } ?: t.defaultDescription
+    /**
+     * Tên/mô tả GỐC của tool, lấy từ code (Đợt E, quyết định 5): không bao
+     * giờ mất, file tools.md không ghi đè. Tên/mô tả model thấy chỉ còn
+     * đến từ file tools.md của thẻ Tools (xem definitions(exposed)); các
+     * override tên/mô tả cũ trong ToolPrefs không còn hiệu lực nữa.
+     */
+    fun effectiveName(t: Tool): String = t.defaultName
+    fun effectiveDescription(t: Tool): String = t.defaultDescription
 
     fun mode(t: Tool): ToolMode {
         val m = prefs.get(t.uid).mode?.let { runCatching { ToolMode.valueOf(it) }.getOrNull() } ?: t.defaultMode
@@ -66,22 +76,16 @@ class ToolRegistry(
         return (p["description"] as? JsonPrimitive)?.contentOrNull
     }
 
-    /** Mô tả tham số mà AI nhìn thấy: bản sửa của user, nếu không thì bản gốc. */
+    /**
+     * Mô tả tham số mà AI nhìn thấy (Đợt E, quyết định 5): luôn là mô tả
+     * gốc trong code. Các override mô tả tham số cũ trong ToolPrefs không
+     * còn hiệu lực nữa — file tools.md cũng không đổi được schema tham số.
+     */
     fun paramDescription(t: Tool, param: String): String =
-        prefs.get(t.uid).paramDescriptions[param] ?: defaultParamDescription(t, param).orEmpty()
+        defaultParamDescription(t, param).orEmpty()
 
-    /** Schema thật sự gửi cho AI: mô tả tham số đã sửa (nếu có) thay mô tả gốc. */
-    fun effectiveSchema(t: Tool): JsonObject {
-        val overrides = prefs.get(t.uid).paramDescriptions
-        if (overrides.isEmpty()) return t.schema
-        val props = t.schema["properties"] as? JsonObject ?: return t.schema
-        val newProps = JsonObject(props.entries.associate { (k, v) ->
-            val desc = overrides[k]
-            if (desc == null || v !is JsonObject) k to v
-            else k to JsonObject(v.toMap() + ("description" to JsonPrimitive(desc)))
-        })
-        return JsonObject(t.schema.toMap() + ("properties" to newProps))
-    }
+    /** Schema thật sự gửi cho AI: luôn là schema gốc trong code. */
+    fun effectiveSchema(t: Tool): JsonObject = t.schema
 
     /** Sửa mô tả một tham số; về lại đúng mô tả gốc thì xóa bản sửa. */
     fun setParamDescription(t: Tool, param: String, desc: String) {
@@ -123,19 +127,50 @@ class ToolRegistry(
 
     // ---------- ToolRuntime ----------
 
-    override suspend fun definitions(): List<ToolDef> {
+    /**
+     * Danh sách công cụ đưa cho model (Đợt E).
+     * - exposed == null (legacy, không có thẻ Tools): mọi tool dùng được,
+     *   tên/mô tả/schema gốc.
+     * - exposed != null: chỉ các tool trong file, đúng thứ tự file/khối,
+     *   tên/mô tả từ file, schema tham số lấy từ tool thật theo uid (file
+     *   không đổi được schema).
+     * - Cả hai đường đều KHÔNG lọc tool mode OFF (quyết định 8): tool tắt
+     *   vẫn được offer, chỉ chặn lúc gọi trong execute(). Chỉ lọc tool
+     *   không dùng được (chưa chọn workspace / thiếu API key) vì model có
+     *   gọi cũng không chạy được.
+     */
+    override suspend fun definitions(exposed: List<ParsedTool>?): List<ToolDef> {
         withContext(Dispatchers.IO) { env.fs.refreshIfStale() }
-        return all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
-            .map { ToolDef(effectiveName(it), effectiveDescription(it), effectiveSchema(it)) }
+        return if (exposed == null) {
+            all.filter { isAvailable(it) }
+                .map { ToolDef(it.defaultName, it.defaultDescription, it.schema) }
+        } else {
+            exposed.mapNotNull { parsed ->
+                val tool = byUid[parsed.uid] ?: return@mapNotNull null // uid đã kiểm tra lúc parse; phòng thủ.
+                if (!isAvailable(tool)) null else ToolDef(parsed.name, parsed.description, tool.schema)
+            }
+        }
     }
 
-    override fun uidForName(name: String): String? = all.firstOrNull { effectiveName(it) == name }?.uid
+    /**
+     * Map tên model gọi -> uid thật. Khi có file: CHỈ tra trong file (tool
+     * không trong file thì không được offer nên cũng không chạy được, kể cả
+     * khi tên đó trùng tên gốc của một tool khác). Khi legacy: tra tên gốc.
+     */
+    override fun uidForName(name: String, exposed: List<ParsedTool>?): String? =
+        if (exposed != null) exposed.firstOrNull { it.name == name }?.uid
+        else all.firstOrNull { it.defaultName == name }?.uid
 
-    override fun nameForUid(uid: String): String? = byUid[uid]?.let { effectiveName(it) }
+    /** Tên model thấy của một uid: tên trong file nếu có, không thì tên gốc. */
+    override fun nameForUid(uid: String, exposed: List<ParsedTool>?): String? =
+        exposed?.firstOrNull { it.uid == uid }?.name ?: byUid[uid]?.defaultName
+
+    override fun originDescriptions(): Map<String, String> =
+        all.associate { it.uid to it.defaultDescription }
 
     override fun estimateToolTokens(): Int =
-        all.filter { mode(it) != ToolMode.OFF && isAvailable(it) }
-            .sumOf { TokenEstimator.text(effectiveName(it) + effectiveDescription(it) + effectiveSchema(it).toString()) }
+        all.filter { isAvailable(it) }
+            .sumOf { TokenEstimator.text(it.defaultName + it.defaultDescription + it.schema.toString()) }
 
     /** Ghi vào Tov/ luôn phải hỏi user, kể cả khi công cụ đang ở mode Auto (Đợt D).
      * Kiểm tra mọi tham số có thể là đích ghi: đường dẫn đích trực tiếp
@@ -155,12 +190,23 @@ class ToolRegistry(
 
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
 
-    override suspend fun execute(call: AiToolCall, turnId: String): ToolOutcome {
+    override suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>?): ToolOutcome {
         // Mỗi lần chạy công cụ bắt đầu với bộ nhớ đệm metadata sạch (xem WorkspaceFs).
         env.fs.clearMeta()
-        val tool = all.firstOrNull { effectiveName(it) == call.name && mode(it) != ToolMode.OFF && isAvailable(it) }
-            ?: return ToolOutcome("", ModelFacingText.noSuchTool(call.name), true)
-        val displayName = effectiveName(tool)
+        // Tôn trọng danh sách file (Đợt E): tên model gọi phải nằm trong file
+        // (hoặc là tên gốc khi legacy); tool không được offer thì không chạy.
+        val tool = if (exposed != null) {
+            exposed.firstOrNull { it.name == call.name }?.uid?.let(byUid::get)
+        } else {
+            all.firstOrNull { it.defaultName == call.name }
+        } ?: return ToolOutcome("", ModelFacingText.noSuchTool(call.name), true)
+        if (!isAvailable(tool)) return ToolOutcome("", ModelFacingText.noSuchTool(call.name), true)
+        // Quyết định 8: tool tắt ở Settings vẫn được offer, chỉ chặn lúc gọi —
+        // model được báo rõ là tool đang tắt để tự nói với user.
+        if (mode(tool) == ToolMode.OFF) {
+            return ToolOutcome(tool.uid, ModelFacingText.toolTurnedOff(call.name), true)
+        }
+        val displayName = exposed?.firstOrNull { it.uid == tool.uid }?.name ?: tool.defaultName
         val args: JsonObject = try {
             if (call.argsJson.isBlank()) JsonObject(emptyMap()) else Json.parseToJsonElement(call.argsJson) as? JsonObject
                 ?: return ToolOutcome(tool.uid, ModelFacingText.ARGS_NOT_OBJECT, true)

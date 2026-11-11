@@ -22,6 +22,11 @@ object ModelFacingText {
     /** AI gọi tên công cụ không có, hoặc công cụ đã tắt. */
     fun noSuchTool(name: String): String = "There is no tool named '$name', or it is turned off."
 
+    /** Tool bị tắt ở Settings (mode OFF) nhưng model vẫn gọi (quyết định 8, Đợt E):
+     * model được báo rõ là tool đang tắt, để tự nói với user thay vì tưởng là không có tool. */
+    fun toolTurnedOff(name: String): String =
+        "The tool '$name' is turned off in the app settings, so it cannot run. Tell the user they can turn it on in Settings → Manage tools."
+
     /** Tham số gọi tool không phải object JSON. */
     const val ARGS_NOT_OBJECT = "The arguments must be a JSON object."
 

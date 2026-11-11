@@ -2,6 +2,7 @@ package com.example.byokchat.chat
 
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.ai.ToolDef
+import com.example.byokchat.tools.ParsedTool
 
 data class ToolOutcome(
     val uid: String,
@@ -11,11 +12,23 @@ data class ToolOutcome(
 
 /** Cầu nối giữa vòng chat và các công cụ. */
 interface ToolRuntime {
-    suspend fun definitions(): List<ToolDef>
-    suspend fun execute(call: AiToolCall, turnId: String): ToolOutcome
+    /**
+     * Danh sách công cụ đưa cho model.
+     * @param exposed null = đường "legacy" (không có thẻ Tools): mọi tool
+     *   Settings cho phép, tên/mô tả gốc. Khác null = chỉ các tool parse
+     *   được từ file tools.md của thẻ Tools, đúng thứ tự file/khối.
+     *   Tool tắt ở Settings (mode OFF) vẫn được offer trong cả hai đường
+     *   (quyết định 8, Đợt E); chỉ chặn lúc gọi trong [execute].
+     */
+    suspend fun definitions(exposed: List<ParsedTool>? = null): List<ToolDef>
+    suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>? = null): ToolOutcome
     /** The run for this turn is over: forget turn-scoped permissions ("Allow all in this turn"). */
     fun endTurn(turnId: String)
-    fun uidForName(name: String): String?
-    fun nameForUid(uid: String): String?
+    /** UID của tool mà model gọi bằng [name] (tên trong file nếu có, không thì tên gốc). */
+    fun uidForName(name: String, exposed: List<ParsedTool>? = null): String?
+    /** Tên model thấy của tool [uid] (tên trong file nếu có, không thì tên gốc). */
+    fun nameForUid(uid: String, exposed: List<ParsedTool>? = null): String?
     fun estimateToolTokens(): Int
+    /** uid -> mô tả gốc của mọi tool, để parse tools.md đối chiếu origin_description. */
+    fun originDescriptions(): Map<String, String>
 }
