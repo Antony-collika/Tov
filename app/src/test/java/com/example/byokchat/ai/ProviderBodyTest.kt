@@ -85,12 +85,14 @@ class ProviderBodyTest {
     }
 
     @Test
-    fun openAiDefaultEffortMediumSuppressesTools() {
-        // Mặc định effort medium → Chat Completions không cho gọi tool.
+    fun openAiDefaultEffortStillSendsToolsWithEffortNone() {
+        // Đợt fix 11/11/2026 (D3): effort đã lưu mặc định là medium, nhưng
+        // OpenAI luôn gửi reasoning_effort "none" + đủ tool — app ép về
+        // none để tool luôn dùng được.
         val body = OpenAiProvider(cfg(ProviderType.OPENAI)).buildBody(request(ProviderType.OPENAI))
-        assertEquals("medium", body["reasoning_effort"]?.jsonPrimitive?.content)
-        assertNull(body["tools"])
-        assertNull(body["tool_choice"])
+        assertEquals("none", body["reasoning_effort"]?.jsonPrimitive?.content)
+        assertEquals(1, body["tools"]?.jsonArray?.size)
+        assertEquals("auto", body["tool_choice"]?.jsonPrimitive?.content)
     }
 
     @Test
@@ -104,25 +106,24 @@ class ProviderBodyTest {
     }
 
     @Test
-    fun openAiStopCappedAtFourAndStructuredOutputIsJsonObject() {
+    fun openAiStopCappedAtFourAndNoJsonOrTierFields() {
         val body = OpenAiProvider(cfg(ProviderType.OPENAI)).buildBody(
             request(
                 ProviderType.OPENAI,
                 metadata = MetadataParams(
                     effort = ReasoningEffort.NONE,
                     stopSequences = listOf("a", "b", "c", "d", "e"),
-                    structuredOutput = true,
-                    serviceTier = ServiceTier.FLEX,
                 ),
             )
         )
         assertEquals(listOf("a", "b", "c", "d"), body["stop"]?.jsonArray?.map { it.jsonPrimitive.content })
-        assertEquals("json_object", body["response_format"]?.jsonObject?.get("type")?.jsonPrimitive?.content)
-        assertEquals("flex", body["service_tier"]?.jsonPrimitive?.content)
+        // Structured output và service tier đã bỏ khỏi Metadata (D4/D6).
+        assertNull(body["response_format"])
+        assertNull(body["service_tier"])
     }
 
     @Test
-    fun openAiServiceTierAutoIsNotSent() {
+    fun openAiNeverSendsServiceTier() {
         val body = OpenAiProvider(cfg(ProviderType.OPENAI)).buildBody(request(ProviderType.OPENAI))
         assertNull(body["service_tier"])
     }
@@ -148,19 +149,19 @@ class ProviderBodyTest {
     }
 
     @Test
-    fun geminiStructuredOutputAndStops() {
+    fun geminiStopsAndNoJsonField() {
         val body = GeminiProvider(cfg(ProviderType.GEMINI)).buildBody(
             request(
                 ProviderType.GEMINI,
                 metadata = MetadataParams(
                     stopSequences = listOf("END"),
-                    structuredOutput = true,
                 ),
             )
         )
         val gen = body["generationConfig"]!!.jsonObject
         assertEquals(listOf("END"), gen["stopSequences"]?.jsonArray?.map { it.jsonPrimitive.content })
-        assertEquals("application/json", gen["responseMimeType"]?.jsonPrimitive?.content)
+        // Structured output đã bỏ khỏi Metadata (D4).
+        assertNull(gen["responseMimeType"])
     }
 
     @Test
@@ -193,23 +194,23 @@ class ProviderBodyTest {
     }
 
     @Test
-    fun claudeServiceTierAndStops() {
+    fun claudeStopsAndNoTierField() {
         val body = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(
             request(
                 ProviderType.CLAUDE,
                 metadata = MetadataParams(
                     stopSequences = listOf("END"),
-                    serviceTier = ServiceTier.STANDARD_ONLY,
                 ),
             ),
             useCache = false,
         )
-        assertEquals("standard_only", body["service_tier"]?.jsonPrimitive?.content)
+        // Service tier đã bỏ khỏi Metadata (D6).
+        assertNull(body["service_tier"])
         assertEquals(listOf("END"), body["stop_sequences"]?.jsonArray?.map { it.jsonPrimitive.content })
     }
 
     @Test
-    fun claudeServiceTierAutoIsNotSent() {
+    fun claudeNeverSendsServiceTier() {
         val body = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(request(ProviderType.CLAUDE), useCache = false)
         assertNull(body["service_tier"])
     }

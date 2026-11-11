@@ -1,39 +1,43 @@
 package com.example.byokchat.ai
 
 import com.example.byokchat.data.ProviderType
-import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Test cho Đợt 6: MetadataParams map sang trường riêng từng hãng + luật tắt tool. */
+/** Test cho Đợt 6 + đợt fix 11/11/2026 (D2–D6): MetadataParams map sang trường riêng từng hãng + luật effort × tools. */
 class MetadataTest {
 
-    private fun toolDefs() = listOf(
-        ToolDef("time_now", "Get the current time", buildJsonObject {}),
-    )
-
     @Test
-    fun defaultsAreMediumAutoNoStopsNoJsonTierAuto() {
+    fun defaultsAreMediumNoStops() {
         val m = MetadataParams()
         assertEquals(ReasoningEffort.MEDIUM, m.effort)
         assertEquals(emptyList<String>(), m.stopSequences)
-        assertEquals(ToolChoiceMode.AUTO, m.toolChoice)
-        assertFalse(m.structuredOutput)
-        assertEquals(ServiceTier.AUTO, m.serviceTier)
-        assertEquals("gpt-4o · effort medium · max 8192 · stream on", m.summary("gpt-4o", 8192))
+        assertEquals("gpt-4o · effort medium · max 8192", m.summary("gpt-4o", 8192))
     }
 
     @Test
-    fun openAiAlwaysSendsReasoningEffortIncludingNone() {
-        // Server mặc định medium nên bỏ qua trường này cũng là medium — và
-        // tool sẽ bị chặn; vì vậy OpenAI luôn gửi, kể cả "none".
-        assertEquals("none", MetadataParams(effort = ReasoningEffort.NONE).openAiReasoningEffort())
-        assertEquals("minimal", MetadataParams(effort = ReasoningEffort.MINIMAL).openAiReasoningEffort())
-        assertEquals("medium", MetadataParams().openAiReasoningEffort())
-        assertEquals("max", MetadataParams(effort = ReasoningEffort.MAX).openAiReasoningEffort())
+    fun openAiEffortIsAlwaysForcedToNone() {
+        // Đợt fix 11/11/2026 (D3): Chat Completions chỉ gọi được tool khi
+        // reasoning_effort "none" — app ép về none để tool luôn dùng được,
+        // bất kể effort đã lưu là gì. Giá trị đã lưu vẫn giữ để đổi sang
+        // Claude/Gemini thì dùng lại.
+        val medium = MetadataParams()
+        val high = MetadataParams(effort = ReasoningEffort.HIGH)
+        assertEquals("none", medium.effortValueFor(ProviderType.OPENAI))
+        assertEquals("none", high.effortValueFor(ProviderType.OPENAI))
+        assertEquals("none", medium.effortValueFor(ProviderType.CUSTOM))
+        assertEquals(ReasoningEffort.NONE, medium.effectiveEffort(ProviderType.OPENAI))
+        assertEquals(ReasoningEffort.NONE, high.effectiveEffort(ProviderType.CUSTOM))
+        // Hãng khác giữ nguyên lựa chọn của user.
+        assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.GEMINI))
+        assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.CLAUDE))
+        assertEquals("HIGH", high.effortValueFor(ProviderType.GEMINI))
+        assertEquals("high", high.effortValueFor(ProviderType.CLAUDE))
+        // Tóm tắt trên panel hiện effort thật sự áp cho hãng đó.
+        assertEquals("gpt-4o · effort none · max 8192", high.summary("gpt-4o", 8192, ProviderType.OPENAI))
+        assertEquals("gpt-4o · effort high · max 8192", high.summary("gpt-4o", 8192, ProviderType.CLAUDE))
     }
 
     @Test
@@ -57,64 +61,12 @@ class MetadataTest {
     }
 
     @Test
-    fun serviceTierOnlySendsWhereTheProviderHasIt() {
-        val m = MetadataParams()
-        assertNull(m.openAiServiceTier())
-        assertNull(m.claudeServiceTier())
-        assertEquals("flex", m.copy(serviceTier = ServiceTier.FLEX).openAiServiceTier())
-        assertNull(m.copy(serviceTier = ServiceTier.FLEX).claudeServiceTier())
-        assertEquals("standard_only", m.copy(serviceTier = ServiceTier.STANDARD_ONLY).claudeServiceTier())
-        assertNull(m.copy(serviceTier = ServiceTier.STANDARD_ONLY).openAiServiceTier())
-    }
-
-    @Test
-    fun reasoningSuppressesToolsOnlyForOpenAiCompatible() {
-        val medium = MetadataParams()
-        val none = MetadataParams(effort = ReasoningEffort.NONE)
-        // OpenAI (và Custom dùng shape OpenAI): effort != none thì không gửi tool.
-        assertTrue(medium.suppressesTools(ProviderType.OPENAI))
-        assertTrue(medium.suppressesTools(ProviderType.CUSTOM))
-        assertTrue(medium.toolsSuppressedByReasoning(ProviderType.OPENAI))
-        assertFalse(none.suppressesTools(ProviderType.OPENAI))
-        // Gemini/Claude: effort nào tool cũng gửi được.
-        assertFalse(medium.suppressesTools(ProviderType.GEMINI))
-        assertFalse(medium.suppressesTools(ProviderType.CLAUDE))
-        assertFalse(medium.toolsSuppressedByReasoning(ProviderType.GEMINI))
-        assertFalse(medium.toolsSuppressedByReasoning(ProviderType.CLAUDE))
-        // toolChoice NONE tắt tool với mọi hãng (tương đương tắt thẻ Tools
-        // cho request này).
-        assertTrue(none.copy(toolChoice = ToolChoiceMode.NONE).suppressesTools(ProviderType.CLAUDE))
-        assertFalse(none.copy(toolChoice = ToolChoiceMode.NONE).toolsSuppressedByReasoning(ProviderType.CLAUDE))
-    }
-
-    @Test
-    fun effectiveToolsDropsToolsWhenSuppressed() {
-        val tools = toolDefs()
-        assertEquals(emptyList<ToolDef>(), MetadataParams().effectiveTools(ProviderType.OPENAI, tools))
-        assertEquals(tools, MetadataParams(effort = ReasoningEffort.NONE).effectiveTools(ProviderType.OPENAI, tools))
-        assertEquals(tools, MetadataParams().effectiveTools(ProviderType.CLAUDE, tools))
-        assertEquals(
-            emptyList<ToolDef>(),
-            MetadataParams(effort = ReasoningEffort.NONE, toolChoice = ToolChoiceMode.NONE)
-                .effectiveTools(ProviderType.GEMINI, tools),
-        )
-    }
-
-    @Test
-    fun effortAndTierOptionsArePerProvider() {
+    fun effortOptionsArePerProvider() {
         val m = MetadataParams()
         assertEquals(7, m.effortOptionsFor(ProviderType.OPENAI).size)
         assertFalse(m.effortOptionsFor(ProviderType.GEMINI).contains(ReasoningEffort.XHIGH))
         assertFalse(m.effortOptionsFor(ProviderType.GEMINI).contains(ReasoningEffort.MAX))
         assertFalse(m.effortOptionsFor(ProviderType.CLAUDE).contains(ReasoningEffort.MINIMAL))
-        assertNull(m.serviceTierOptionsFor(ProviderType.GEMINI))
-        assertEquals(
-            listOf(ServiceTier.AUTO, ServiceTier.STANDARD_ONLY),
-            m.serviceTierOptionsFor(ProviderType.CLAUDE),
-        )
-        assertFalse(m.supportsStructuredOutput(ProviderType.CLAUDE))
-        assertTrue(m.supportsStructuredOutput(ProviderType.OPENAI))
-        assertTrue(m.supportsStructuredOutput(ProviderType.GEMINI))
     }
 
     @Test
@@ -123,7 +75,7 @@ class MetadataTest {
         assertEquals("reasoning_effort", m.effortFieldName(ProviderType.OPENAI))
         assertEquals("thinkingLevel", m.effortFieldName(ProviderType.GEMINI))
         assertEquals("output_config.effort", m.effortFieldName(ProviderType.CLAUDE))
-        assertEquals("medium", m.effortValueFor(ProviderType.OPENAI))
+        assertEquals("none", m.effortValueFor(ProviderType.OPENAI))
         assertEquals("MEDIUM", m.effortValueFor(ProviderType.GEMINI))
         assertEquals("medium", m.effortValueFor(ProviderType.CLAUDE))
         assertNull(m.copy(effort = ReasoningEffort.NONE).effortValueFor(ProviderType.GEMINI))

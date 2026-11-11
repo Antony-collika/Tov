@@ -162,20 +162,11 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             nameForUid = { uid -> app.registry.nameForUid(uid, exposed) },
             vars = vars,
         )
-        // Đợt 6: cùng logic metadata với ChatEngine.run (một nguồn duy nhất):
-        // cùng đọc settings.metadata, cùng lọc tool — Inspector thấy đúng
-        // thứ sẽ gửi đi, kể cả khi tool bị tắt vì reasoning đang bật.
-        // Token ước lượng trừ đi phần tool đã lược để khỏi đếm thừa.
+        // Đợt 6: cùng logic metadata với ChatEngine.run (một nguồn duy nhất).
+        // Tool luôn được gửi đủ, với mọi hãng (xem MetadataParams.effectiveEffort).
         val metadata = app.settings.metadata.value
-        val effectiveTools = metadata.effectiveTools(cfg.type, assembled.toolDefs)
-        val droppedToolTokens = (assembled.toolDefs - effectiveTools.toSet()).sumOf {
-            TokenEstimator.text(it.name + it.description + it.schema.toString())
-        }
         PreviewResult.Ready(
-            request = assembled.copy(
-                toolDefs = effectiveTools,
-                estimatedTokens = assembled.estimatedTokens - droppedToolTokens,
-            ),
+            request = assembled,
             providerName = cfg.name,
             model = modelName,
             providerType = cfg.type,

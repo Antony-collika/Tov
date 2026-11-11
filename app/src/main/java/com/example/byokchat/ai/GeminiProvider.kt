@@ -76,8 +76,8 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
      *   Gemini 4; NONE = không gửi, server dùng mặc định của nó — thinking
      *   trên Gemini 4 không tắt được). KHÔNG gửi thinkingBudget (chỉ Gemini
      *   2.5, không được gộp với thinkingLevel).
-     * - stopSequences khi có; structured output = responseMimeType
-     *   application/json (không cần schema).
+     * - stopSequences khi có. Structured output và service tier: KHÔNG gửi
+     *   nữa (đã bỏ khỏi Metadata — D4/D6).
      * - KHÔNG gửi temperature/topK/topP/penalty/candidateCount (model mới
      *   nhất không còn hỗ trợ — bỏ qua hoặc 400) và KHÔNG gửi service tier
      *   (serviceTier của Gemini chỉ là output, không phải trường gửi đi).
@@ -113,7 +113,6 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
             }
             val stops = request.metadata.stopSequences.filter { it.isNotBlank() }
             if (stops.isNotEmpty()) put("stopSequences", JsonArray(stops.map { JsonPrimitive(it) }))
-            if (request.metadata.structuredOutput) put("responseMimeType", "application/json")
         })
     }
 

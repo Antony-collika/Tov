@@ -97,11 +97,10 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
      * - max_tokens (bắt buộc với Claude) như cũ.
      * - output_config.effort khi effort != NONE — tín hiệu mềm, max_tokens
      *   vẫn là trần cứng. NONE = không gửi (dùng mặc định của hãng).
-     * - service_tier chỉ khi khác AUTO (auto/standard_only).
      * - stop_sequences khi có.
      * - Structured output: KHÔNG gửi — output_config.format cần json_schema
-     *   KÈM schema, chưa có UI schema đợt này nên không gửi bừa (màn edit ẩn
-     *   nút này với Claude).
+     *   KÈM schema, chưa có UI schema nên không gửi bừa. Service tier:
+     *   KHÔNG gửi nữa (đã bỏ khỏi Metadata — D6).
      * - KHÔNG BAO GIỜ gửi temperature/top_p/top_k: API version 2026-10-21
      *   gỡ hẳn, gửi kèm là lỗi 400 kể cả giá trị mặc định. Tov cũng chưa
      *   từng gửi chúng.
@@ -113,7 +112,6 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
         request.metadata.claudeEffort()?.let { effort ->
             put("output_config", buildJsonObject { put("effort", effort) })
         }
-        request.metadata.claudeServiceTier()?.let { put("service_tier", it) }
         val stops = request.metadata.stopSequences.filter { it.isNotBlank() }
         if (stops.isNotEmpty()) put("stop_sequences", JsonArray(stops.map { JsonPrimitive(it) }))
         if (request.system.isNotBlank()) {

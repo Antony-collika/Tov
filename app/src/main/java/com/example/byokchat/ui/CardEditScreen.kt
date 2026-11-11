@@ -53,8 +53,6 @@ import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
 import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.ReasoningEffort
-import com.example.byokchat.ai.ServiceTier
-import com.example.byokchat.ai.ToolChoiceMode
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
@@ -129,9 +127,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     val currentModel = container.settings.currentModel.value
     var effort by remember(cardId) { mutableStateOf(savedMetadata.effort) }
     var stopText by remember(cardId) { mutableStateOf(savedMetadata.stopSequences.joinToString("\n")) }
-    var toolChoice by remember(cardId) { mutableStateOf(savedMetadata.toolChoice) }
-    var structured by remember(cardId) { mutableStateOf(savedMetadata.structuredOutput) }
-    var serviceTier by remember(cardId) { mutableStateOf(savedMetadata.serviceTier) }
     var maxTokens by remember(cardId) { mutableStateOf((currentProvider?.maxOutputTokens ?: 8192).toString()) }
     val stopLines = stopText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     val stopsValid = stopLines.size <= 4
@@ -150,8 +145,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             toolsSource != (card?.toolsSource ?: ToolsSource.FILE) ||
             source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
-            toolChoice != savedMetadata.toolChoice || structured != savedMetadata.structuredOutput ||
-            serviceTier != savedMetadata.serviceTier ||
             (currentProvider != null && maxTokens != currentProvider.maxOutputTokens.toString())
         )
     val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && fileValid && stopsValid && maxTokensValid
@@ -217,9 +210,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 MetadataParams(
                     effort = effort,
                     stopSequences = stopLines.take(4),
-                    toolChoice = toolChoice,
-                    structuredOutput = structured,
-                    serviceTier = serviceTier,
                 )
             )
             val cfg = currentProvider
@@ -336,8 +326,10 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         ) {
             when (card.kind) {
                 CardKind.METADATA -> {
-                    // Đợt 6: model chỉ đọc (chọn ở thanh nhập chat như cũ);
-                    // chỉ hiện trường nào hãng đang dùng hỗ trợ.
+                    // Đợt 6: model chỉ đọc (chọn ở thanh nhập chat như cũ).
+                    // Đợt fix 11/11/2026 (D1–D6): viết lại bằng tiếng thường,
+                    // không thuật ngữ API; bỏ "Tools for this request",
+                    // Structured output, Service tier và dòng Stream.
                     Text(
                         "Model: ${currentModel ?: "no model"}",
                         style = MaterialTheme.typography.bodyMedium,
@@ -347,38 +339,43 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Text("Reasoning effort", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "How hard the model thinks, instead of temperature (all three providers " +
-                            "dropped temperature on current reasoning models).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    savedMetadata.effortOptionsFor(providerType).forEach { option ->
-                        PolicyOption(
-                            selected = effort == option,
-                            title = option.name.lowercase(),
-                            desc = when (option) {
-                                ReasoningEffort.NONE -> "No effort value is sent — the provider uses its default."
-                                ReasoningEffort.MINIMAL -> "Lowest thinking. Not accepted by GPT-6 models."
-                                ReasoningEffort.LOW -> "Less thinking, faster answers."
-                                ReasoningEffort.MEDIUM -> "Balanced (default)."
-                                ReasoningEffort.HIGH -> "More thinking."
-                                ReasoningEffort.XHIGH -> "Very deep thinking."
-                                ReasoningEffort.MAX -> "Maximum thinking."
-                            },
-                            onClick = { effort = option },
-                        )
-                    }
-                    if ((providerType == ProviderType.OPENAI || providerType == ProviderType.CUSTOM) &&
-                        effort != ReasoningEffort.NONE
-                    ) {
+                    // D3: hãng OpenAI(-compatible) không suy nghĩ và dùng
+                    // tool cùng lúc được trên Chat Completions — app luôn để
+                    // tool bật và không hiện lựa chọn thinking ở đây; hãng
+                    // khác (Claude/Gemini) thì thinking với tool dùng chung
+                    // được nên vẫn hiện lựa chọn.
+                    if (providerType == ProviderType.OPENAI || providerType == ProviderType.CUSTOM) {
                         Text(
-                            "Tools are off for this request while reasoning is on: OpenAI Chat Completions " +
-                                "only allows tool calls with effort \"none\". Set effort to \"none\" to use tools.",
+                            "Thinking is off for this provider, so the tools always work. " +
+                                "This provider can't think and use tools at the same time, " +
+                                "so the app keeps the tools on.",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                    } else {
+                        Text("How hard the model thinks", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "How hard the model thinks before it answers. Harder thinking " +
+                                "takes longer and costs more, but can give better answers.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        savedMetadata.effortOptionsFor(providerType).forEach { option ->
+                            PolicyOption(
+                                selected = effort == option,
+                                title = option.name.lowercase(),
+                                desc = when (option) {
+                                    ReasoningEffort.NONE -> "As little thinking as the provider allows."
+                                    ReasoningEffort.MINIMAL -> "The least thinking."
+                                    ReasoningEffort.LOW -> "A little thinking — faster answers."
+                                    ReasoningEffort.MEDIUM -> "Balanced (default)."
+                                    ReasoningEffort.HIGH -> "More thinking."
+                                    ReasoningEffort.XHIGH -> "Very deep thinking."
+                                    ReasoningEffort.MAX -> "Maximum thinking."
+                                },
+                                onClick = { effort = option },
+                            )
+                        }
                     }
                     if (currentProvider != null) {
                         OutlinedTextField(
@@ -401,78 +398,22 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text("Stream: on", style = MaterialTheme.typography.bodyMedium)
-                    Text(
-                        "Streaming is always on — this app only streams, so it cannot be turned off here.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     OutlinedTextField(
                         value = stopText,
                         onValueChange = { stopText = it },
-                        label = { Text("Stop sequences (one per line, up to 4)") },
+                        label = { Text("Stop phrases (one per line, up to 4)") },
                         minLines = 2,
                         maxLines = 5,
                         isError = !stopsValid,
-                        supportingText = { if (!stopsValid) Text("At most 4 stop sequences (the strictest provider limit).") },
+                        supportingText = { if (!stopsValid) Text("At most 4 phrases.") },
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Text("Tools for this request", style = MaterialTheme.typography.labelLarge)
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        ToolChoiceMode.entries.forEachIndexed { index, mode ->
-                            SegmentedButton(
-                                selected = toolChoice == mode,
-                                onClick = { toolChoice = mode },
-                                shape = SegmentedButtonDefaults.itemShape(index = index, count = ToolChoiceMode.entries.size),
-                                label = { Text(if (mode == ToolChoiceMode.AUTO) "Auto" else "None") },
-                            )
-                        }
-                    }
                     Text(
-                        if (toolChoice == ToolChoiceMode.AUTO) "The model may call the tools the Tools card offers."
-                        else "No tools are sent with this request — like turning the Tools card off for this request only.",
+                        "If the model is about to write one of these, it stops there instead. " +
+                            "For example, write \"User:\" so the model never starts a new turn by itself.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (savedMetadata.supportsStructuredOutput(providerType)) {
-                        SwitchRow(
-                            title = "Structured output (JSON)",
-                            desc = "Ask the model to answer in JSON. OpenAI uses response_format json_object; Gemini uses responseMimeType application/json.",
-                            checked = structured,
-                            onChange = { structured = it },
-                        )
-                    } else {
-                        Text(
-                            "Structured output is not available for Claude yet: it needs a JSON schema, which this app does not set.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Text("Service tier", style = MaterialTheme.typography.labelLarge)
-                    val tiers = savedMetadata.serviceTierOptionsFor(providerType)
-                    if (tiers == null) {
-                        Text(
-                            "Not available for Gemini: its service tier is output-only, not a field you send.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        tiers.forEach { tier ->
-                            PolicyOption(
-                                selected = serviceTier == tier,
-                                title = tier.name.lowercase().replace('_', ' '),
-                                desc = when (tier) {
-                                    ServiceTier.AUTO -> "Project default — not sent."
-                                    ServiceTier.DEFAULT -> "Standard tier."
-                                    ServiceTier.FLEX -> "Cheaper, slower capacity (OpenAI)."
-                                    ServiceTier.FAST -> "Fast mode (OpenAI)."
-                                    ServiceTier.PRIORITY -> "Priority capacity (OpenAI)."
-                                    ServiceTier.STANDARD_ONLY -> "Standard capacity only (Claude)."
-                                },
-                                onClick = { serviceTier = tier },
-                            )
-                        }
-                    }
                 }
                 CardKind.SYSTEM -> {
                     // Đợt 8: ô Name (lưu vào label đã có; tên hiện trên Panel).

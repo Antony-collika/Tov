@@ -1,6 +1,7 @@
 package com.example.byokchat.ai
 
 import com.example.byokchat.data.ProviderConfig
+import com.example.byokchat.data.ProviderType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -81,21 +82,21 @@ class OpenAiProvider(
     /**
      * Body gửi đi, tách riêng khỏi stream() để test được (Đợt 6). Thẻ Metadata:
      * - max_completion_tokens (KHÔNG dùng max_tokens đã deprecated).
-     * - reasoning_effort LUÔN gửi, kể cả "none" (server mặc định medium nên
-     *   bỏ qua cũng là medium — và tool sẽ bị chặn, xem dưới).
-     * - Tools: CHỈ gửi khi effort == NONE — Chat Completions chỉ cho gọi
-     *   tool khi reasoning_effort "none" (từ GPT-5.4); ChatEngine/preview đã
-     *   lọc trước, đây là lớp phòng thủ thứ hai nên request không bao giờ
-     *   lọt tool kèm reasoning lên server. tool_choice "auto" khi có tool.
-     * - stop tối đa 4 chuỗi; structured output = response_format json_object
-     *   (chưa có UI schema đợt này); service_tier chỉ khi khác AUTO.
+     * - reasoning_effort LUÔN "none" (đợt fix 11/11/2026, D3): Chat
+     *   Completions chỉ cho gọi tool khi reasoning_effort "none" — server
+     *   mặc định medium nên bỏ qua cũng là medium; tool luôn được ưu tiên
+     *   hơn thinking, app tự ép về none (xem MetadataParams.effectiveEffort).
+     * - Tools: LUÔN gửi — không còn trường hợp nào tool bị tắt vì reasoning.
+     *   tool_choice "auto" khi có tool.
+     * - stop tối đa 4 chuỗi.
      * - KHÔNG BAO GIỜ gửi temperature/top_p/top_k/logprobs (bỏ khi reasoning
-     *   bật; Tov cũng chưa từng có chúng).
+     *   bật; Tov cũng chưa từng có chúng). Không gửi structured output hay
+     *   service tier nữa (đã bỏ khỏi Metadata — D4/D6).
      */
     internal fun buildBody(request: AiRequest): JsonObject = buildJsonObject {
         put("model", request.model)
         put("max_completion_tokens", request.maxOutputTokens)
-        put("reasoning_effort", request.metadata.openAiReasoningEffort())
+        put("reasoning_effort", request.metadata.effortValueFor(ProviderType.OPENAI) ?: "none")
         put("stream", true)
         // Số token thật: xin thêm stream_options.include_usage theo từng
         // provider (cfg.includeUsage, Đợt 7); tắt đi nếu máy chủ tự dựng
@@ -103,12 +104,8 @@ class OpenAiProvider(
         if (cfg.includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
         val stops = request.metadata.stopSequences.filter { it.isNotBlank() }.take(4)
         if (stops.isNotEmpty()) put("stop", JsonArray(stops.map { JsonPrimitive(it) }))
-        if (request.metadata.structuredOutput) {
-            put("response_format", buildJsonObject { put("type", "json_object") })
-        }
-        request.metadata.openAiServiceTier()?.let { put("service_tier", it) }
         put("messages", buildMessages(request))
-        val tools = if (request.metadata.effort == ReasoningEffort.NONE) request.tools else emptyList()
+        val tools = request.tools
         if (tools.isNotEmpty()) {
             put("tools", buildJsonArray {
                 tools.forEach { t ->

@@ -176,17 +176,17 @@ class ChatEngine(
                     vars = vars,
                 )
                 // Đợt 6: Metadata (một nguồn duy nhất với previewAssembled):
-                // cùng đọc settings.metadata, cùng lọc tool bằng
-                // MetadataParams.effectiveTools — Inspector thấy đúng thứ gửi đi.
+                // cùng đọc settings.metadata. Tool luôn được gửi đủ, với mọi
+                // hãng (xung đột effort × tools của OpenAI đã giải quyết bằng
+                // cách ép effort về NONE — xem MetadataParams.effectiveEffort).
                 val metadata = settings.metadata.value
                 val request = AiRequest(
                     model,
                     assembled.system,
                     assembled.sentMessages,
-                    metadata.effectiveTools(cfg.type, assembled.toolDefs),
+                    assembled.toolDefs,
                     cfg.maxOutputTokens,
                     metadata,
-                    metadata.toolsSuppressedByReasoning(cfg.type),
                 )
 
                 var lastFlush = System.currentTimeMillis()

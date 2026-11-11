@@ -342,16 +342,8 @@ private fun cardSummary(
     provider: com.example.byokchat.data.ProviderConfig?,
 ): String = when (card.kind) {
     CardKind.METADATA -> {
-        // vd "gpt-4o · effort medium · max 8192 · stream on"; ghi thêm khi
-        // tool bị tắt vì reasoning đang bật với OpenAI.
-        val base = metadata.summary(model.orEmpty(), provider?.maxOutputTokens ?: 8192)
-        val note = when {
-            provider != null && metadata.toolsSuppressedByReasoning(provider.type) ->
-                " · tools off (reasoning is on)"
-            metadata.toolChoice == com.example.byokchat.ai.ToolChoiceMode.NONE -> " · tools off for this request"
-            else -> ""
-        }
-        base + note
+        // vd "gpt-4o · effort medium · max 8192".
+        metadata.summary(model.orEmpty(), provider?.maxOutputTokens ?: 8192, provider?.type)
     }
     CardKind.SYSTEM -> card.file?.let { "File: ${fileName(it)}" }
         ?: card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(no system prompt)" }
