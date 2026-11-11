@@ -79,6 +79,20 @@ class RequestLayoutStore(context: Context, private val settings: SettingsReposit
         update { layout -> layout.copy(cards = layout.cards.filter { it.id != id }) }
     }
 
+    /**
+     * Đợt 8: chèn lại một thẻ đã xóa ở đúng vị trí cũ (cho Undo sau khi vuốt
+     * xóa). Không làm gì nếu thẻ đã có lại trong bố cục (tránh trùng khi
+     * Undo bấm hai lần).
+     */
+    fun insertCard(card: RequestCard, index: Int) {
+        update { layout ->
+            if (layout.cards.any { it.id == card.id }) return@update layout
+            val cards = layout.cards.toMutableList()
+            cards.add(index.coerceIn(0, cards.size), card)
+            layout.copy(cards = cards)
+        }
+    }
+
     /** Thêm một thẻ Free mới, trả về id để mở thẳng màn sửa. */
     fun addFreeCard(): String {
         val id = UUID.randomUUID().toString()
