@@ -102,11 +102,12 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
             )
         },
     ) { padding ->
+        val p = preview
         when {
             loading -> Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) { Text("Loading…") }
-            preview is PreviewResult.Unavailable -> Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            p is PreviewResult.Unavailable -> Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
                 Text(
-                    when (preview.reason) {
+                    when (p.reason) {
                         PreviewUnavailable.CONVERSATION_NOT_FOUND ->
                             "This chat no longer exists, so there is nothing to preview."
                         PreviewUnavailable.NO_PROVIDER ->
