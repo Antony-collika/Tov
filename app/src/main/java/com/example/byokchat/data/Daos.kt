@@ -94,6 +94,11 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE id = :id")
     suspend fun deleteById(id: String)
 
+    /** Xóa các dòng kết quả tool của một lượt trong một cuộc (Đợt E: đồng bộ file
+     * ghi lại vòng tool từ history.meta.json nên dòng cũ phải xóa trước khi ghi lại). */
+    @Query("DELETE FROM messages WHERE conversationId = :cid AND turnNo = :turnNo AND role = 'tool'")
+    suspend fun deleteToolRowsOfTurn(cid: String, turnNo: Int)
+
     @Query("DELETE FROM messages WHERE turnId = :turnId")
     suspend fun deleteTurn(turnId: String)
 

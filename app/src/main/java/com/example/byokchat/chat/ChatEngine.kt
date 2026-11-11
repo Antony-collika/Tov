@@ -46,6 +46,8 @@ class ChatEngine(
     private val layoutStore: RequestLayoutStore? = null,
     /** Workspace để đọc file của thẻ (Đợt D) và xuất history.md; null = bỏ qua. */
     private val fs: WorkspaceFs? = null,
+    /** Đồng bộ hai chiều history.md (Đợt E); null = chỉ xuất một chiều như Đợt D. */
+    private val historySync: HistorySync? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -87,6 +89,9 @@ class ChatEngine(
         // cùng lượt (đã gán khi gửi). Tạo lại (regenerate) giữ nguyên số cũ.
         val turnNo = msgDao.getTurn(conversationId, turnId)
             .firstOrNull { it.role == "user" }?.turnNo ?: 0
+        // Đợt E: tạo thư mục session ở lần gửi đầu tiên (như FPilot) — nếu
+        // chưa có file session thì xuất trạng thái hiện tại của Room.
+        historySync?.let { runCatching { it.ensureSession(conversationId) } }
         var rounds = 0
         while (true) {
             val conv = db.conversations().get(conversationId) ?: return
@@ -262,8 +267,14 @@ class ChatEngine(
     }
 
     /** Báo cho người dùng khi AI trả lời xong (hoặc lỗi) mà app không đang hiện. Không gọi khi người dùng bấm Dừng. */
-    /** Xuất lịch sử ra history.md trong workspace (Đợt D). Best-effort. */
+    /** Xuất lịch sử ra history.md + history.meta.json trong Session storage (Đợt E).
+     * Sửa trong app thì ghi ra ngay (ghi .md trước rồi .meta.json, verify bằng
+     * đọc lại — xem HistorySync.export). Best-effort. */
     suspend fun exportHistory(conversationId: String) {
+        if (historySync != null) {
+            historySync.export(conversationId)
+            return
+        }
         val f = fs ?: return
         HistoryExporter.exportHistory(f, db, conversationId)
     }

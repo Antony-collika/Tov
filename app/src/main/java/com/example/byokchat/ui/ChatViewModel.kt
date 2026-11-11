@@ -12,6 +12,7 @@ import com.example.byokchat.ai.ImageStore
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
+import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RequestAssembler
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
@@ -175,6 +176,25 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val events: SharedFlow<ChatEvent> = _events
 
+    init {
+        // Đợt E: đồng bộ history.md khi mở đúng chat (không parse ngay khi mở
+        // app, không đợi đến lúc gửi). Chạy nền; lỗi sync chỉ báo bằng toast,
+        // Room giữ nguyên nên chat vẫn mở được.
+        viewModelScope.launch { syncHistoryOnOpen() }
+    }
+
+    /** Đồng bộ hai chiều history.md khi mở chat (Đợt E, xem HistorySync). */
+    private suspend fun syncHistoryOnOpen() {
+        val sync = app.historySync ?: return
+        when (val r = sync.syncOnOpen(conversationId) { app.engine.activeConversations.value.contains(conversationId) }) {
+            is HistorySync.SyncResult.Failed ->
+                _events.emit(ChatEvent.Error("Could not sync history.md: ${r.error}"))
+            HistorySync.SyncResult.ExternalEditDiscarded ->
+                _events.emit(ChatEvent.Error("Your edit to history.md while the AI was answering had no effect — the file was overwritten when the answer finished."))
+            else -> Unit
+        }
+    }
+
     var draft by mutableStateOf("")
     val pendingImages = mutableStateListOf<String>()
 
@@ -325,6 +345,12 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun regenerateHere(turnId: String, newUserText: String?) {
         if (generating.value) return
         viewModelScope.launch {
+            // Đợt E: xung đột khi regenerate — file đổi ngoài app thì giữ bản
+            // sửa ngoài, hủy việc tạo lại, báo lỗi.
+            if (app.historySync?.hasExternalChange(conversationId) == true) {
+                _events.emit(ChatEvent.Error("History changed outside the app. The external edit was kept; the regeneration was cancelled."))
+                return@launch
+            }
             app.ops.prepareRegenerateHere(conversationId, turnId, newUserText)
             app.engine.start(conversationId, turnId)
         }
@@ -334,6 +360,11 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun regenerateInBranch(turnId: String, newUserText: String?) {
         if (generating.value) return
         viewModelScope.launch {
+            // Đợt E: xung đột khi regenerate — như regenerateHere.
+            if (app.historySync?.hasExternalChange(conversationId) == true) {
+                _events.emit(ChatEvent.Error("History changed outside the app. The external edit was kept; the regeneration was cancelled."))
+                return@launch
+            }
             try {
                 val r = app.ops.branchForRegenerate(conversationId, turnId, newUserText)
                 app.engine.start(r.conversationId, r.turnMap.getValue(turnId))

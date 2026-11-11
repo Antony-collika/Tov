@@ -9,6 +9,7 @@ import com.example.byokchat.chat.AppVisibility
 import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.chat.ChatEngine
 import com.example.byokchat.chat.ChatNotifier
+import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.GenerationService
 import com.example.byokchat.chat.ChatOps
 import com.example.byokchat.data.AppDatabase
@@ -87,7 +88,9 @@ class AppContainer(val context: Context) {
     val layoutStore = RequestLayoutStore(context, settings)
     /** Nhật ký request/response (Đợt B): ghi ra file trong bộ nhớ riêng của app. */
     val requestLog = RequestLog(java.io.File(context.filesDir, "request-log"), enabled = { settings.requestLogEnabled.value })
-    val engine = ChatEngine(db, settings, registry, notifier, requestLog, layoutStore, fs)
+    /** Đồng bộ hai chiều history.md (Đợt E): hash + parse khi mở chat + ghi ra ngay khi sửa trong app. */
+    val historySync = HistorySync(context, db, fs)
+    val engine = ChatEngine(db, settings, registry, notifier, requestLog, layoutStore, fs, historySync)
 
     /** Mở cuộc trò chuyện được yêu cầu từ thông báo (MainActivity ghi vào, AppNav đọc rồi xóa). */
     val pendingConversation = MutableStateFlow<String?>(null)
