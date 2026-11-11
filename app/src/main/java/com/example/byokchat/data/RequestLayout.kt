@@ -3,6 +3,9 @@ package com.example.byokchat.data
 import com.example.byokchat.ai.ToolDef
 import com.example.byokchat.chat.SystemPart
 import com.example.byokchat.chat.SystemSource
+import com.example.byokchat.tools.ParsedTool
+import com.example.byokchat.tools.ToolsMdParseException
+import com.example.byokchat.tools.ToolsMdParser
 import kotlinx.serialization.Serializable
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -48,7 +51,17 @@ data class RequestCard(
      * lỗi (xem RequestLayout.resolveFiles). Null = chỉ dùng văn bản trong thẻ.
      */
     val file: String? = null,
+    /**
+     * Thẻ Tools (Đợt E): danh sách file tools.md đã chọn, theo thứ tự.
+     * App gộp (hợp) tất cả tool trong các file rồi đưa cho model: theo thứ
+     * tự file đã chọn, trong mỗi file theo thứ tự khối. Giữ tương thích
+     * ngược với [file]: thẻ Tools cũ chỉ có [file] thì coi như danh sách
+     * 1 file (xem [toolFiles]).
+     */
+    val files: List<String> = emptyList(),
 ) {
+    /** File tools.md của thẻ Tools: [files] nếu có, không thì [file] cũ. */
+    fun toolFiles(): List<String> = if (files.isNotEmpty()) files else listOfNotNull(file)
     /** Tên hiển thị trên Panel. */
     fun displayName(): String = when (kind) {
         CardKind.SYSTEM -> "System"
@@ -160,6 +173,9 @@ data class RequestLayout(val cards: List<RequestCard>) {
         cards.filter { (it.kind == CardKind.SYSTEM || it.kind == CardKind.FREE) && it.file != null && !it.file.endsWith(".md") }.forEach {
             errors += "The ${it.displayName()} card links to '${it.file}' — the file must end with .md."
         }
+        cards.filter { it.kind == CardKind.TOOLS }.flatMap { it.toolFiles() }.filter { !it.endsWith(".md") }.forEach {
+            errors += "The Tools card links to '$it' — the file must end with .md."
+        }
         return errors
     }
 
@@ -226,6 +242,69 @@ data class RequestLayout(val cards: List<RequestCard>) {
             } else card
         }
         return copy(cards = cards) to errors
+    }
+
+    /**
+     * Kết quả resolve file tools.md của thẻ Tools (Đợt E).
+     * - exposed == null: không có thẻ Tools, hoặc thẻ có nhưng chưa chọn
+     *   file nào → đường "legacy": mọi tool Settings cho phép, tên/mô tả gốc.
+     * - exposed == danh sách rỗng: thẻ Tools tắt, hoặc file rỗng → 0 tool.
+     * - errors rỗng = parse được hết; có lỗi thì exposed rỗng và lần gửi bị
+     *   chặn (báo lỗi rõ ràng thay vì gửi với danh sách tool sai).
+     */
+    data class ToolsResolution(val exposed: List<ParsedTool>?, val errors: List<String>)
+
+    /**
+     * Đợt E: đọc + parse các file tools.md của thẻ Tools, gộp lại theo thứ
+     * tự file đã chọn, trong mỗi file theo thứ tự khối. Parse lại mỗi lần
+     * gửi (gọi ở đầu mỗi lần gửi + trước preview, như resolveFiles).
+     * - Cùng một tool ở hai file: mô tả GIỐNG HỆT nhau thì gộp bình thường
+     *   (dedupe, giữ khối đầu tiên); mô tả KHÁC nhau thì BÁO LỖI nêu rõ tool
+     *   nào và ở file nào, KHÔNG tự chọn một bên.
+     * - File rỗng được phép (0 tool); chỉ báo lỗi khi không parse được.
+     * - Không có thẻ Tools → legacy (exposed null); thẻ Tools tắt → 0 tool.
+     */
+    fun resolveToolFiles(
+        readFile: (String) -> Result<String>,
+        origins: Map<String, String>,
+    ): ToolsResolution {
+        val card = toolsCard() ?: return ToolsResolution(null, emptyList())
+        if (!card.enabled) return ToolsResolution(emptyList(), emptyList())
+        val files = card.toolFiles()
+        if (files.isEmpty()) return ToolsResolution(null, emptyList())
+        val errors = mutableListOf<String>()
+        val merged = mutableListOf<ParsedTool>()
+        val seenByUid = mutableMapOf<String, ParsedTool>()
+        val seenInFile = mutableMapOf<String, String>()
+        for (path in files) {
+            val text = readFile(path).fold(
+                onSuccess = { it },
+                onFailure = { e ->
+                    errors += "Could not read the Tools card file '$path': ${e.message}"
+                    null
+                },
+            ) ?: continue
+            val parsed = try {
+                ToolsMdParser.parse(text, origins)
+            } catch (e: ToolsMdParseException) {
+                errors += "In tools file '$path': ${e.message}"
+                null
+            } ?: continue
+            for (tool in parsed) {
+                val prev = seenByUid[tool.uid]
+                if (prev == null) {
+                    seenByUid[tool.uid] = tool
+                    seenInFile[tool.uid] = path
+                    merged += tool
+                } else if (prev.name != tool.name || prev.description != tool.description) {
+                    errors += "Tool \"${tool.uid}\" is described differently in '${seenInFile[tool.uid]}' and '$path'. " +
+                        "Fix the files so they agree, or remove the tool from one of them."
+                }
+                // Giống hệt nhau thì gộp bình thường (dedupe).
+            }
+        }
+        if (errors.isNotEmpty()) return ToolsResolution(emptyList(), errors)
+        return ToolsResolution(merged, emptyList())
     }
 
     /**

@@ -220,4 +220,96 @@ class RequestLayoutTest {
         )
         assertEquals(listOf("Base", "Extra rules"), layout.systemParts(emptyMap()).map { it.text })
     }
+
+    // ---------- Đợt E phần A: thẻ Tools nhiều file ----------
+
+    private val origins = mapOf(
+        "txt.write" to "Write text to a file.",
+        "txt.read" to "Read a bounded section of a UTF-8 text file.",
+        "time.now" to "Get the current date and time.",
+    )
+
+    private fun toolsLayout(vararg files: String, enabled: Boolean = true): RequestLayout =
+        RequestLayout.defaultLayout("x").copy(
+            cards = RequestLayout.defaultLayout("x").cards.map {
+                if (it.kind == CardKind.TOOLS) it.copy(enabled = enabled, files = files.toList()) else it
+            }
+        )
+
+    private fun toolsFile(vararg blocks: String): String = blocks.joinToString("\n\n")
+
+    private fun block(uid: String, name: String, desc: String): String =
+        "## $uid\nuid: $uid\norigin_description: ${origins.getValue(uid)}\nname: $name\ndescription: $desc"
+
+    @Test
+    fun toolsFilesMergeInFileAndBlockOrder() {
+        val files = mapOf(
+            "a.md" to toolsFile(block("txt.write", "write_file", "Write text to a file."), block("time.now", "current_time", "Get the current date and time.")),
+            "b.md" to toolsFile(block("txt.read", "read_file", "Read a bounded section of a UTF-8 text file.")),
+        )
+        val res = toolsLayout("a.md", "b.md").resolveToolFiles({ Result.success(files.getValue(it)) }, origins)
+        assertTrue(res.errors.isEmpty())
+        assertEquals(listOf("txt.write", "time.now", "txt.read"), res.exposed?.map { it.uid })
+    }
+
+    @Test
+    fun identicalToolInTwoFilesDedupesButDifferentDescriptionIsAnError() {
+        val same = toolsFile(block("txt.write", "write_file", "Write text to a file."))
+        val files = mapOf("a.md" to same, "b.md" to same)
+        val ok = toolsLayout("a.md", "b.md").resolveToolFiles({ Result.success(files.getValue(it)) }, origins)
+        assertTrue(ok.errors.isEmpty())
+        assertEquals(listOf("txt.write"), ok.exposed?.map { it.uid })
+
+        val different = toolsFile(block("txt.write", "write_file", "Write something else."))
+        val bad = toolsLayout("a.md", "b.md").resolveToolFiles(
+            { Result.success(if (it == "a.md") same else different) }, origins,
+        )
+        assertTrue(bad.errors.any { it.contains("txt.write") && it.contains("a.md") && it.contains("b.md") })
+    }
+
+    @Test
+    fun noToolsCardIsLegacyDisabledCardIsZeroToolsEmptyFileIsZeroTools() {
+        val noCard = RequestLayout(listOf(RequestCard(RequestLayout.SYSTEM_ID, CardKind.SYSTEM, text = "x")))
+        val legacy = noCard.resolveToolFiles({ Result.success("") }, origins)
+        assertEquals(null, legacy.exposed)
+        assertTrue(legacy.errors.isEmpty())
+
+        val disabled = toolsLayout("a.md", enabled = false).resolveToolFiles({ Result.success("## x") }, origins)
+        assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), disabled.exposed)
+
+        val noFiles = toolsLayout().resolveToolFiles({ Result.success("") }, origins)
+        assertEquals(null, noFiles.exposed)
+
+        val empty = toolsLayout("a.md").resolveToolFiles({ Result.success("> only notes\n") }, origins)
+        assertTrue(empty.errors.isEmpty())
+        assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), empty.exposed)
+    }
+
+    @Test
+    fun unreadableOrUnparsableToolsFileIsAnError() {
+        val missing = toolsLayout("gone.md").resolveToolFiles({ Result.failure(RuntimeException("Not found")) }, origins)
+        assertTrue(missing.errors.any { it.contains("gone.md") })
+        val bad = toolsLayout("a.md").resolveToolFiles(
+            { Result.success("## nope\nuid: nope\nname: nope\ndescription: No such tool.\n") }, origins,
+        )
+        assertTrue(bad.errors.any { it.contains("a.md") && it.contains("nope") })
+    }
+
+    @Test
+    fun legacyToolsFileFieldStillWorksAsOneFile() {
+        val card = RequestCard(RequestLayout.TOOLS_ID, CardKind.TOOLS, file = "old.md")
+        assertEquals(listOf("old.md"), card.toolFiles())
+        val layout = RequestLayout(listOf(card))
+        val res = layout.resolveToolFiles(
+            { Result.success(block("time.now", "current_time", "Get the current date and time.")) }, origins,
+        )
+        assertTrue(res.errors.isEmpty())
+        assertEquals(listOf("time.now"), res.exposed?.map { it.uid })
+    }
+
+    @Test
+    fun toolsFileMustEndWithMd() {
+        val layout = toolsLayout("tools.txt")
+        assertTrue(layout.validate().any { it.contains("Tools") && it.contains(".md") })
+    }
 }
