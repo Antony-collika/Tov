@@ -6,6 +6,7 @@ import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.chat.ToolOutcome
 import com.example.byokchat.chat.ToolRuntime
+import com.example.byokchat.data.normalizeWriteSubfolder
 import com.example.byokchat.util.cap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -127,6 +128,64 @@ class ToolRegistry(
         all.filter { isAvailable(it) }
             .sumOf { TokenEstimator.text(it.defaultName + it.defaultDescription + it.schema.toString()) }
 
+    /**
+     * Kiểm tra giới hạn ghi của AI (Đợt E, quyết định 6). Trả về câu báo lỗi
+     * cho model nếu vi phạm, null nếu được phép.
+     * - Mọi đường dẫn ghi phải nằm dưới allowedWriteSubfolder (nếu có).
+     * - Tool ghi nội dung văn bản (txt.* WRITE) thì đích phải là file
+     *   .md/.markdown. note.save/update không có đường dẫn trong args (app
+     *   tự ghi Tov/notes/<id>.md) nên mặc nhiên đúng.
+     * - Tool ghi khác (fs.copy/move/rename/zip, convert.*, csv.*, json.*):
+     *   đích là file đầu ra theo đúng chức năng của tool (.zip/.json/.csv...)
+     *   nên chỉ kiểm tra subfolder, không ép đuôi .md.
+     * - Thư mục đích (dest_dir, directory, và path của fs.mkdir) chỉ kiểm
+     *   tra subfolder (thư mục không có đuôi .md).
+     * - Chỉ áp cho tool WRITE; tool READ không giới hạn, tool DELETE luôn
+     *   hỏi user trước (và xóa không phải là ghi).
+     */
+    private fun aiWriteViolation(tool: Tool, args: JsonObject): String? {
+        if (tool.risk != Risk.WRITE) return null
+        val sub = normalizeWriteSubfolder(env.settings.allowedWriteSubfolder.value)
+        fun underSubfolder(path: String): Boolean {
+            if (sub.isEmpty()) return true
+            val p = path.trim().replace('\\', '/').trim('/')
+            return p.startsWith("$sub/")
+        }
+        fun isMarkdown(path: String): Boolean {
+            val n = path.trim().lowercase()
+            return n.endsWith(".md") || n.endsWith(".markdown")
+        }
+        // Đích ghi dạng file của từng tool ("path" của fs.copy/move là NGUỒN
+        // đọc nên không tính; đích của chúng nằm ở "dest").
+        val fileDestKeys: List<String> = when {
+            tool.uid.startsWith("txt.") -> listOf("path", "output_path")
+            tool.uid in setOf("fs.copy", "fs.move", "fs.rename", "fs.zip") -> listOf("dest")
+            tool.uid.startsWith("convert.") -> listOf("output_path")
+            tool.uid.startsWith("csv.") || tool.uid.startsWith("json.") -> listOf("path")
+            tool.uid == "fs.mkdir" || tool.uid == "note.save" || tool.uid == "note.update" -> emptyList()
+            else -> listOf("path", "dest", "output_path")
+        }
+        val dirDestKeys = listOf("dest_dir", "directory") +
+            if (tool.uid == "fs.mkdir") listOf("path") else emptyList()
+        val textWriter = tool.uid.startsWith("txt.")
+        for (key in fileDestKeys) {
+            val p = args.str(key) ?: continue
+            if (textWriter && !isMarkdown(p)) return ModelFacingText.notMarkdown(p)
+            if (!underSubfolder(p)) return ModelFacingText.outsideWriteSubfolder(p, sub)
+        }
+        if (tool.uid == "txt.replace_many") {
+            args.strList("paths")?.forEach { p ->
+                if (!isMarkdown(p)) return ModelFacingText.notMarkdown(p)
+                if (!underSubfolder(p)) return ModelFacingText.outsideWriteSubfolder(p, sub)
+            }
+        }
+        for (key in dirDestKeys) {
+            val p = args.str(key) ?: continue
+            if (!underSubfolder(p)) return ModelFacingText.outsideWriteSubfolder(p, sub)
+        }
+        return null
+    }
+
     /** Ghi vào Tov/ luôn phải hỏi user, kể cả khi công cụ đang ở mode Auto (Đợt D).
      * Kiểm tra mọi tham số có thể là đích ghi: đường dẫn đích trực tiếp
      * (path/source/dest), đầu ra chuyển đổi (output_path), thư mục giải nén
@@ -168,6 +227,11 @@ class ToolRegistry(
         } catch (e: Exception) {
             return ToolOutcome(tool.uid, ModelFacingText.invalidArgsJson(e.message), true)
         }
+
+        // Đợt E, quyết định 6: "Allowed write subfolder" + AI chỉ ghi file .md —
+        // thực thi ở tầng tool (không phải tầng SAF), chặn ngay trước khi hỏi
+        // user để không hỏi về một lần ghi vốn đã bị chặn.
+        aiWriteViolation(tool, args)?.let { return ToolOutcome(tool.uid, it, true) }
 
         // Thư mục bảo vệ Tov/ (Đợt D): AI chỉ đọc được, ghi luôn phải hỏi
         // user — kể cả khi công cụ đang ở mode Auto.
