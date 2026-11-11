@@ -119,10 +119,22 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     // ---------- Đường dẫn ----------
 
-    fun root(): DocumentFile {
-        val uri = settings.workspaceUri.value ?: throw ToolException("No workspace folder has been chosen.")
-        return DocumentFile.fromTreeUri(ctx, Uri.parse(uri)) ?: throw ToolException("Could not open the workspace folder.")
+    fun root(): DocumentFile = rootFrom(settings.workspaceUri.value, "workspace")
+
+    private fun rootFrom(uriString: String?, label: String): DocumentFile {
+        val uri = uriString ?: throw ToolException("No $label folder has been chosen.")
+        return DocumentFile.fromTreeUri(ctx, Uri.parse(uri)) ?: throw ToolException("Could not open the $label folder.")
     }
+
+    /**
+     * Thư mục Session storage (Đợt E): đã chọn thư mục riêng thì dùng nó,
+     * chưa chọn thì dùng chung thư mục workspace (để xuất history vẫn chạy
+     * như trước khi user chưa vào Settings chọn thêm).
+     */
+    fun sessionRoot(): DocumentFile =
+        rootFrom(settings.sessionStorageUri.value ?: settings.workspaceUri.value, "session storage")
+
+    fun sessionRootOrNull(): DocumentFile? = runCatching { sessionRoot() }.getOrNull()
 
     fun segments(path: String): List<String> {
         val p = path.trim().replace('\\', '/')
@@ -138,8 +150,16 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     fun display(path: String): String = segments(path).joinToString("/").ifEmpty { "." }
 
-    fun find(path: String): DocumentFile? {
-        var cur = root()
+    fun find(path: String): DocumentFile? = findUnder(root(), path)
+
+    /** Tìm trong Session storage; null nếu chưa có thư mục session hoặc không thấy. */
+    fun findSession(path: String): DocumentFile? {
+        val root = sessionRootOrNull() ?: return null
+        return findUnder(root, path)
+    }
+
+    fun findUnder(root: DocumentFile, path: String): DocumentFile? {
+        var cur = root
         for (seg in segments(path)) {
             if (!isDir(cur)) return null
             cur = childByName(cur, seg) ?: return null
@@ -147,19 +167,26 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return cur
     }
 
-    fun require(path: String): DocumentFile = find(path) ?: throw ToolException("Not found: '${display(path)}'.")
+    fun requireUnder(root: DocumentFile, path: String): DocumentFile =
+        findUnder(root, path) ?: throw ToolException("Not found: '${display(path)}'.")
 
-    fun requireDir(path: String): DocumentFile {
-        val d = require(path)
+    fun require(path: String): DocumentFile = requireUnder(root(), path)
+
+    fun requireDirUnder(root: DocumentFile, path: String): DocumentFile {
+        val d = requireUnder(root, path)
         if (!d.isDirectory) throw ToolException("'${display(path)}' is not a folder.")
         return d
     }
 
-    fun requireFile(path: String): DocumentFile {
-        val d = require(path)
+    fun requireDir(path: String): DocumentFile = requireDirUnder(root(), path)
+
+    fun requireFileUnder(root: DocumentFile, path: String): DocumentFile {
+        val d = requireUnder(root, path)
         if (d.isDirectory) throw ToolException("'${display(path)}' is a folder, not a file.")
         return d
     }
+
+    fun requireFile(path: String): DocumentFile = requireFileUnder(root(), path)
 
     // ---------- Bộ nhớ đệm metadata ----------
     // Hỏi nhà cung cấp tài liệu (qua DocumentFile) mỗi lần rất chậm. Khi liệt kê thư mục, ta lấy
@@ -220,9 +247,14 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     /**
      * Đảm bảo các thư mục tồn tại. [cache] (tùy chọn) nhớ thư mục đã xử lý theo đường dẫn,
      * để một lần chạy công cụ nhiều tệp không phải kiểm tra lại cùng một thư mục.
+     * [root] mặc định là workspace; Session storage truyền root của nó vào.
      */
-    fun ensureDir(segs: List<String>, cache: MutableMap<List<String>, DocumentFile>? = null): DocumentFile {
-        var cur = root()
+    fun ensureDir(
+        segs: List<String>,
+        cache: MutableMap<List<String>, DocumentFile>? = null,
+        root: DocumentFile = root(),
+    ): DocumentFile {
+        var cur = root
         for (i in segs.indices) {
             val key = segs.subList(0, i + 1).toList()
             val cached = cache?.get(key)
@@ -264,7 +296,20 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return String(bytes, Charsets.UTF_8).removePrefix("\uFEFF")
     }
 
-    fun readText(path: String, maxBytes: Long = 5_000_000): String = readDocText(requireFile(path), display(path), maxBytes)
+    fun readText(path: String, maxBytes: Long = 5_000_000): String = readTextUnder(root(), path, maxBytes)
+
+    fun readTextUnder(root: DocumentFile, path: String, maxBytes: Long = 5_000_000): String =
+        readDocText(requireFileUnder(root, path), display(path), maxBytes)
+
+    /** Đọc file trong Session storage (Đợt E). */
+    fun readSessionText(path: String, maxBytes: Long = 5_000_000): String =
+        readTextUnder(sessionRoot(), path, maxBytes)
+
+    /** File có tồn tại trong Session storage không (Đợt E). */
+    fun sessionExists(path: String): Boolean = findSession(path) != null
+
+    /** Giờ sửa file trong Session storage, null nếu không có file (Đợt E). */
+    fun sessionLastModified(path: String): Long? = findSession(path)?.let { modifiedOf(it) }
 
     /**
      * Đọc tệp văn bản chỉ MỘT lần. Trả về null nếu là tệp nhị phân, quá lớn, hoặc không đọc được.
@@ -303,10 +348,19 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return result
     }
 
-    fun writeText(path: String, text: String, mustNotExist: Boolean = false, createParents: Boolean = true) {
+    fun writeText(path: String, text: String, mustNotExist: Boolean = false, createParents: Boolean = true) =
+        writeTextUnder(root(), path, text, mustNotExist, createParents)
+
+    fun writeTextUnder(
+        root: DocumentFile,
+        path: String,
+        text: String,
+        mustNotExist: Boolean = false,
+        createParents: Boolean = true,
+    ) {
         val segs = segments(path)
         if (segs.isEmpty()) throw ToolException("Missing file name.")
-        val parent = if (createParents) ensureDir(segs.dropLast(1)) else requireDir(segs.dropLast(1).joinToString("/"))
+        val parent = if (createParents) ensureDir(segs.dropLast(1), root = root) else requireDirUnder(root, segs.dropLast(1).joinToString("/"))
         val name = segs.last()
         var doc = parent.findFile(name)
         if (doc != null && doc.isDirectory) throw ToolException("'${display(path)}' is a folder.")
@@ -315,6 +369,9 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         openOut(doc).use { it.write(text.toByteArray(Charsets.UTF_8)) }
         clearMeta()
     }
+
+    /** Ghi file trong Session storage (Đợt E). */
+    fun writeSessionText(path: String, text: String) = writeTextUnder(sessionRoot(), path, text)
 
     // ---------- Duyệt cây ----------
 
