@@ -62,10 +62,10 @@ data class RequestCard(
 ) {
     /** File tools.md của thẻ Tools: [files] nếu có, không thì [file] cũ. */
     fun toolFiles(): List<String> = if (files.isNotEmpty()) files else listOfNotNull(file)
-    /** Tên hiển thị trên Panel. */
+    /** Tên hiển thị trên Panel. Đợt 8: thẻ System cũng dùng label khi user đặt tên (màn sửa có ô Name); mặc định vẫn là "System". */
     fun displayName(): String = when (kind) {
         CardKind.METADATA -> "Metadata"
-        CardKind.SYSTEM -> "System"
+        CardKind.SYSTEM -> label.ifBlank { "System" }
         CardKind.TIME -> "Time"
         CardKind.FREE -> label.ifBlank { "Free card" }
         CardKind.HISTORY -> "History"

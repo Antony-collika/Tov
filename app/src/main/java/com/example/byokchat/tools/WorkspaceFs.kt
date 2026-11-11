@@ -79,6 +79,24 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return "./" + (name ?: "")
     }
 
+    /**
+     * Đợt 8: đường dẫn tương đối trong workspace của một document user vừa
+     * chọn bằng hộp chọn file của hệ thống (SAF OpenDocument). So bằng
+     * document ID: document nằm trong cây workspace thì ID của nó bắt đầu
+     * bằng ID của cây + "/". Null = file nằm ngoài workspace (app chỉ trỏ
+     * file .md trong workspace, như FileSection đã ghi), hoặc chưa chọn
+     * workspace. Không cần xin thêm quyền: file trong cây workspace đã nằm
+     * trong quyền persistable của cây đó.
+     */
+    fun relativePathForDocument(uri: Uri): String? {
+        val treeUri = settings.workspaceUri.value?.let { Uri.parse(it) } ?: return null
+        val treeId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return null
+        val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull() ?: return null
+        val prefix = "$treeId/"
+        if (!docId.startsWith(prefix)) return null
+        return docId.removePrefix(prefix).takeIf { it.isNotEmpty() }
+    }
+
     /** Gọi sau khi người dùng chọn thư mục bằng hộp chọn của hệ thống. */
     fun onFolderPicked(uri: Uri) {
         val old = settings.workspaceUri.value?.let { Uri.parse(it) }
