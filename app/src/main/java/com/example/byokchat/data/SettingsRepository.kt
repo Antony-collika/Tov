@@ -14,6 +14,13 @@ import kotlinx.serialization.json.Json
 
 enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
 
+/**
+ * Chuẩn hóa thư mục con cho phép ghi (Đợt E, quyết định 6): trim, '\' -> '/',
+ * bỏ '/' ở hai đầu, gộp '/' lặp. Rỗng = ghi anywhere trong workspace.
+ */
+fun normalizeWriteSubfolder(raw: String): String =
+    raw.trim().replace('\\', '/').trim('/').replace(Regex("/+"), "/")
+
 class SettingsRepository(context: Context) {
     private val appContext = context.applicationContext
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -65,6 +72,37 @@ class SettingsRepository(context: Context) {
     fun setWorkspaceUri(uri: String?) {
         _workspaceUri.value = uri
         plain.edit().putString("workspace_uri", uri).apply()
+    }
+
+    /**
+     * Thư mục Session storage (Đợt E, quyết định 6 + mục 11): chỗ app lưu
+     * sessions/<ngày>_<session-id>/history.md + history.meta.json, tách
+     * riêng khỏi Workspace (chỗ AI chơi). Chưa chọn thì dùng chung thư mục
+     * workspace (xem WorkspaceFs.sessionRoot). CHƯA CÓ UI — màn chi tiết
+     * chọn thư mục thuộc Đợt 7 (Settings dạng thẻ).
+     */
+    private val _sessionStorageUri = MutableStateFlow(plain.getString("session_storage_uri", null))
+    val sessionStorageUri: StateFlow<String?> = _sessionStorageUri.asStateFlow()
+
+    fun setSessionStorageUri(uri: String?) {
+        _sessionStorageUri.value = uri
+        plain.edit().putString("session_storage_uri", uri).apply()
+    }
+
+    /**
+     * Thư mục con AI được phép ghi (Đợt E, quyết định 6): rỗng = ghi anywhere
+     * trong workspace; khác rỗng thì đường dẫn ghi phải nằm dưới thư mục này.
+     * CHƯA CÓ UI — thuộc Đợt 7. Thực thi ở ToolRegistry.execute (tầng tool).
+     */
+    private val _allowedWriteSubfolder = MutableStateFlow(
+        normalizeWriteSubfolder(plain.getString("allowed_write_subfolder", "") ?: ""),
+    )
+    val allowedWriteSubfolder: StateFlow<String> = _allowedWriteSubfolder.asStateFlow()
+
+    fun setAllowedWriteSubfolder(subfolder: String) {
+        val normalized = normalizeWriteSubfolder(subfolder)
+        _allowedWriteSubfolder.value = normalized
+        plain.edit().putString("allowed_write_subfolder", normalized).apply()
     }
 
     private val _searchProvider = MutableStateFlow(plain.getString("search_provider", "BRAVE") ?: "BRAVE")
