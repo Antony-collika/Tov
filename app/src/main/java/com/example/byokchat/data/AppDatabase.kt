@@ -33,16 +33,19 @@ abstract class AppDatabase : RoomDatabase() {
          * trong cùng cuộc trò chuyện mà lượt đầu tiên của chúng đến trước nó
          * (so theo seq nhỏ nhất của lượt). Xóa lượt không làm số còn lại đổi,
          * và lượt mới luôn lấy max + 1 nên số đã xóa không bao giờ dùng lại.
+         * (Bảng đích phải có bí danh m0: trong SQL lồng nhau, tên `messages`
+         * không bí danh sẽ trỏ vào bảng của SELECT trong cùng, không phải
+         * dòng đang UPDATE — không bí danh thì mọi hàng đều nhận số 1.)
          */
         private val MIGRATION_4_5 = object : Migration(4, 5) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE messages ADD COLUMN turnNo INTEGER NOT NULL DEFAULT 0")
                 db.execSQL(
-                    "UPDATE messages SET turnNo = 1 + (" +
+                    "UPDATE messages AS m0 SET turnNo = 1 + (" +
                         "SELECT COUNT(DISTINCT m2.turnId) FROM messages m2 " +
-                        "WHERE m2.conversationId = messages.conversationId " +
-                        "AND (SELECT MIN(seq) FROM messages WHERE turnId = m2.turnId) < " +
-                        "(SELECT MIN(seq) FROM messages WHERE turnId = messages.turnId))"
+                        "WHERE m2.conversationId = m0.conversationId " +
+                        "AND (SELECT MIN(m3.seq) FROM messages m3 WHERE m3.turnId = m2.turnId) < " +
+                        "(SELECT MIN(m4.seq) FROM messages m4 WHERE m4.turnId = m0.turnId))"
                 )
             }
         }
