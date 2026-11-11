@@ -56,19 +56,6 @@ class ToolRegistry(
         prefs.update(t.uid) { it.copy(mode = if (m == t.defaultMode) null else m.name) }
     }
 
-    fun setNameAndDescription(t: Tool, name: String, description: String) {
-        prefs.update(t.uid) {
-            it.copy(
-                name = name.trim().takeIf { n -> n != t.defaultName },
-                description = description.trim().takeIf { d -> d != t.defaultDescription },
-            )
-        }
-    }
-
-    fun restoreDefaults(t: Tool) {
-        prefs.update(t.uid) { it.copy(name = null, description = null) }
-    }
-
     /** Mô tả gốc của một tham số trong code (null nếu tham số không có mô tả). */
     fun defaultParamDescription(t: Tool, param: String): String? {
         val props = t.schema["properties"] as? JsonObject ?: return null
@@ -86,38 +73,6 @@ class ToolRegistry(
 
     /** Schema thật sự gửi cho AI: luôn là schema gốc trong code. */
     fun effectiveSchema(t: Tool): JsonObject = t.schema
-
-    /** Sửa mô tả một tham số; về lại đúng mô tả gốc thì xóa bản sửa. */
-    fun setParamDescription(t: Tool, param: String, desc: String) {
-        val d = desc.trim()
-        prefs.update(t.uid) { pref ->
-            val map = pref.paramDescriptions.toMutableMap()
-            if (d.isEmpty() || d == defaultParamDescription(t, param)) map.remove(param) else map[param] = d
-            pref.copy(paramDescriptions = map)
-        }
-    }
-
-    fun restoreParamDescriptions(t: Tool) {
-        prefs.update(t.uid) { it.copy(paramDescriptions = emptyMap()) }
-    }
-
-    /** Trả về thông báo lỗi nếu tên không hợp lệ, null nếu ổn. */
-    fun validateName(t: Tool, name: String): String? {
-        val n = name.trim()
-        if (n.isEmpty()) return "The name must not be empty."
-        if (!NAME_RX.matches(n)) {
-            return "The name may only contain unaccented letters, digits, underscores (_) or hyphens (-); it must start with a letter or _; at most 64 characters (an AI provider requirement)."
-        }
-        val clash = all.firstOrNull { it.uid != t.uid && effectiveName(it).equals(n, ignoreCase = true) }
-        if (clash != null) return "This name is already used by the tool \"${clash.uid}\". Choose a different name."
-        return null
-    }
-
-    fun validateDescription(d: String): String? = when {
-        d.isBlank() -> "The description must not be empty (the model needs it to know when to use the tool)."
-        d.length > 1500 -> "The description is too long (max 1500 characters)."
-        else -> null
-    }
 
     fun isAvailable(t: Tool): Boolean =
         (!t.needsWorkspace || env.fs.accessible.value) && t.isAvailable(env)
@@ -243,10 +198,6 @@ class ToolRegistry(
         } catch (e: Exception) {
             ToolOutcome(tool.uid, ModelFacingText.toolError(e.message ?: e.javaClass.simpleName), true)
         }
-    }
-
-    companion object {
-        private val NAME_RX = Regex("^[A-Za-z_][A-Za-z0-9_-]{0,63}$")
     }
 }
 

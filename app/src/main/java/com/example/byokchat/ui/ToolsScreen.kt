@@ -1,6 +1,5 @@
 package com.example.byokchat.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +23,8 @@ import com.example.byokchat.tools.Tool
 import com.example.byokchat.tools.ToolGroup
 import com.example.byokchat.tools.ToolMode
 import com.example.byokchat.tools.ToolRegistry
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -92,7 +93,9 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item {
                 Text(
-                    "Tap a tool to see its UID, rename it or change the description the AI sees, turn it on or off, and choose how much control you keep. Changes apply from the next message you send.",
+                    "Tap a tool to see its UID, its original name and description, the name and description the model sees " +
+                        "from the Tools card file, and its mode. The name and description the model sees are managed in the " +
+                        "tools.md file (Request panel → Tools card), not here. Mode changes apply from the next message you send.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),
@@ -149,7 +152,6 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             Column {
                                 Text(shortDescription(registry.effectiveDescription(t)), maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 val notes = listOfNotNull(
-                                    if (name != t.defaultName) "renamed" else null,
                                     if (blocked) "blocked: " + (if (t.needsWorkspace && !workspaceOk) "no workspace folder" else t.unavailableHint ?: "not ready") else null,
                                 )
                                 if (notes.isNotEmpty()) {
@@ -191,27 +193,15 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
     val registry = container.registry
     val tool: Tool? = registry.tool(uid)
     val prefs by container.toolPrefs.prefs.collectAsState()
-
-    // Edits of the name/description that are not saved yet must not be lost silently.
-    var name by remember(uid) { mutableStateOf(tool?.let { registry.effectiveName(it) } ?: "") }
-    var desc by remember(uid) { mutableStateOf(tool?.let { registry.effectiveDescription(it) } ?: "") }
-    var confirmDiscard by remember { mutableStateOf(false) }
-    val dirty = tool != null && (name.trim() != registry.effectiveName(tool) || desc.trim() != registry.effectiveDescription(tool))
-    BackHandler(enabled = dirty) { confirmDiscard = true }
-    val goBack: () -> Unit = {
-        if (dirty) {
-            confirmDiscard = true
-        } else {
-            onBack()
-        }
-    }
+    // Tên/mô tả hiệu dụng từ file tools.md của thẻ Tools (nếu tool có trong file).
+    val fileExposure = rememberToolsFileExposure()
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (tool == null) "Tool" else registry.effectiveName(tool)) },
+                title = { Text(if (tool == null) "Tool" else tool.defaultName) },
                 navigationIcon = {
-                    IconButton(onClick = goBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
             )
         },
@@ -222,8 +212,7 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
         }
         // Read prefs so the screen refreshes when the mode changes.
         val mode = remember(prefs) { registry.mode(tool) }
-        val nameError = registry.validateName(tool, name)
-        val descError = registry.validateDescription(desc)
+        val exposed = fileExposure[tool.uid]
 
         Column(
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
@@ -231,12 +220,14 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
         ) {
             Text("UID (fixed, set by the app)", style = MaterialTheme.typography.labelLarge)
             Text(tool.uid, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.primary)
+            Text("Original name", style = MaterialTheme.typography.labelLarge)
+            Text(tool.defaultName, style = MaterialTheme.typography.bodyLarge)
             Text("Original description (read-only)", style = MaterialTheme.typography.labelLarge)
             Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
                 Text(tool.defaultDescription, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
             }
             Text(
-                "Original name: ${tool.defaultName} · Type: " + when (tool.risk) {
+                "Type: " + when (tool.risk) {
                     Risk.READ -> "read-only"
                     Risk.WRITE -> "writes, edits or moves"
                     Risk.DELETE -> "deletes (always asks first)"
@@ -248,6 +239,8 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
             HorizontalDivider()
             Text("Control", style = MaterialTheme.typography.labelLarge)
             // One control for everything: Auto / Ask first / Off. Delete tools can never run on their own.
+            // A tool that is turned off is still offered to the model (Đợt E, quyết định 8) —
+            // the model is told it is turned off only when it tries to call it.
             val options = if (tool.risk == Risk.DELETE) listOf(ToolMode.ASK, ToolMode.OFF) else ToolMode.entries.toList()
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, m ->
@@ -262,74 +255,89 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
             if (tool.risk == Risk.DELETE) {
                 Text("Delete tools always ask you first.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            Text(
+                "A tool that is turned off is still shown to the model, but the model is told it is turned off when it tries to call it.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             HorizontalDivider()
             Text("What the AI sees", style = MaterialTheme.typography.titleSmall)
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text("Tool name") },
-                singleLine = true,
-                isError = nameError != null,
-                supportingText = { if (nameError != null) Text(nameError) },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            OutlinedTextField(
-                value = desc,
-                onValueChange = { desc = it },
-                label = { Text("Description for the AI") },
-                isError = descError != null,
-                supportingText = { if (descError != null) Text(descError) },
-                minLines = 4,
-                maxLines = 12,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    enabled = dirty && nameError == null && descError == null,
-                    onClick = { registry.setNameAndDescription(tool, name, desc); name = name.trim(); desc = desc.trim() },
-                ) { Text("Save") }
-                OutlinedButton(onClick = {
-                    registry.restoreDefaults(tool)
-                    name = tool.defaultName
-                    desc = tool.defaultDescription
-                }) { Text("Restore defaults") }
+            if (exposed != null) {
+                Text("Name (from the Tools card file)", style = MaterialTheme.typography.labelLarge)
+                Text(exposed.name, style = MaterialTheme.typography.bodyLarge)
+                Text("Description (from the Tools card file)", style = MaterialTheme.typography.labelLarge)
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
+                    Text(exposed.description, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(
+                    "This tool is listed in the Tools card file, so the model sees this name and description. " +
+                        "Edit the file (Request panel → Tools card) to change them.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            } else {
+                Text("Name (original)", style = MaterialTheme.typography.labelLarge)
+                Text(tool.defaultName, style = MaterialTheme.typography.bodyLarge)
+                Text("Description (original)", style = MaterialTheme.typography.labelLarge)
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
+                    Text(tool.defaultDescription, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(
+                    "This tool is not listed in any Tools card file, so the model sees the original name and description. " +
+                        "Add it to a tools.md file (Request panel → Tools card) to give it a different name or description.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
 
             HorizontalDivider()
             Text("Parameters", style = MaterialTheme.typography.labelLarge)
             Text(
-                "What each parameter means to the AI. Edit a description to change how the AI uses that parameter.",
+                "What each parameter means to the AI. The descriptions come from the app and cannot be changed here — " +
+                    "a tools.md file cannot change a tool's parameters either.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ParametersSection(tool)
             Text(
-                "The way the tool works is handled by the app. You can edit the name, the description, and what each parameter means to the AI. When the AI calls a tool by its new name, the app maps it back to the UID, so older conversations keep working.",
+                "The way the tool works is handled by the app. When the AI calls a tool by the name in the file, " +
+                    "the app maps it back to the UID, so older conversations keep working.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(24.dp))
         }
     }
-
-    if (confirmDiscard) {
-        ConfirmDialog(
-            title = "Discard changes?",
-            message = "Your edits to the name or description have not been saved.",
-            confirmLabel = "Discard",
-            onConfirm = { confirmDiscard = false; onBack() },
-            onDismiss = { confirmDiscard = false },
-        )
-    }
 }
 
-/** Danh sách tham số của công cụ, xem và sửa mô tả từng tham số (Đợt C). */
+/**
+ * Tên/mô tả hiệu dụng của từng tool theo file tools.md của thẻ Tools (Đợt E):
+ * uid -> ParsedTool, chỉ gồm các tool có trong file đang dùng. Đọc + parse
+ * lại mỗi khi bố cục đổi; lỗi đọc/parse thì coi như không có file (hiện tên gốc).
+ */
+@Composable
+private fun rememberToolsFileExposure(): Map<String, com.example.byokchat.tools.ParsedTool> {
+    val container = LocalContext.current.container
+    var exposure by remember { mutableStateOf<Map<String, com.example.byokchat.tools.ParsedTool>>(emptyMap()) }
+    val layout by container.layoutStore.effectiveLayout.collectAsState()
+    LaunchedEffect(layout) {
+        exposure = withContext(Dispatchers.IO) {
+            val res = layout.resolveToolFiles(
+                { path -> runCatching { container.fs.readText(path) } },
+                container.registry.originDescriptions(),
+            )
+            res.exposed?.associateBy { it.uid }.orEmpty()
+        }
+    }
+    return exposure
+}
+
+/** Danh sách tham số của công cụ, chỉ xem (Đợt E: bỏ sửa mô tả tham số). */
 @Composable
 private fun ParametersSection(tool: Tool) {
     val container = LocalContext.current.container
     val registry = container.registry
-    val prefs by container.toolPrefs.prefs.collectAsState()
     val props = remember(tool) {
         (tool.schema["properties"] as? JsonObject)?.entries?.toList().orEmpty()
     }
@@ -345,59 +353,21 @@ private fun ParametersSection(tool: Tool) {
         (tool.schema["required"] as? JsonArray)
             ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }.orEmpty().toSet()
     }
-    val overrides = prefs[tool.uid]?.paramDescriptions.orEmpty()
-    var editingParam by remember(tool.uid) { mutableStateOf<String?>(null) }
-    var paramText by remember(tool.uid) { mutableStateOf("") }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         props.forEach { (paramName, schemaEl) ->
             val paramObj = schemaEl as? JsonObject
             val type = (paramObj?.get("type") as? JsonPrimitive)?.contentOrNull
-            val effDesc = registry.paramDescription(tool, paramName)
-            val defDesc = registry.defaultParamDescription(tool, paramName)
-            val edited = overrides.containsKey(paramName)
+            val desc = registry.paramDescription(tool, paramName)
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     paramName + (if (paramName in required) " (required)" else "") + (type?.let { " · $it" } ?: ""),
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Text(
-                    if (effDesc.isBlank()) "(no description)" else effDesc,
+                    if (desc.isBlank()) "(no description)" else desc,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                if (edited) {
-                    Text(
-                        "Edited — original: ${defDesc.orEmpty()}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (editingParam == paramName) {
-                    OutlinedTextField(
-                        value = paramText,
-                        onValueChange = { paramText = it },
-                        label = { Text("Description for the AI") },
-                        minLines = 2,
-                        maxLines = 6,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            enabled = paramText.trim() != effDesc,
-                            onClick = { registry.setParamDescription(tool, paramName, paramText); editingParam = null },
-                        ) { Text("Save") }
-                        TextButton(onClick = { editingParam = null }) { Text("Cancel") }
-                    }
-                } else {
-                    TextButton(onClick = { paramText = effDesc; editingParam = paramName }) {
-                        Text("Edit description")
-                    }
-                }
-            }
-        }
-        if (overrides.isNotEmpty()) {
-            TextButton(onClick = { registry.restoreParamDescriptions(tool) }) {
-                Text("Restore parameter descriptions")
             }
         }
     }
