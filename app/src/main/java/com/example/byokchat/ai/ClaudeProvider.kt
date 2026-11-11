@@ -34,37 +34,7 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
 
     override fun stream(request: AiRequest): Flow<AiEvent> = flow {
         val useCache = caching
-        val body = buildJsonObject {
-            put("model", request.model)
-            put("max_tokens", request.maxOutputTokens)
-            put("stream", true)
-            if (request.system.isNotBlank()) {
-                if (useCache) {
-                    put("system", buildJsonArray {
-                        add(buildJsonObject {
-                            put("type", "text")
-                            put("text", request.system)
-                            put("cache_control", CACHE_MARK)
-                        })
-                    })
-                } else {
-                    put("system", request.system)
-                }
-            }
-            put("messages", buildMessages(request.messages, useCache))
-            if (request.tools.isNotEmpty()) {
-                put("tools", buildJsonArray {
-                    request.tools.forEachIndexed { i, t ->
-                        add(buildJsonObject {
-                            put("name", t.name)
-                            put("description", t.description)
-                            put("input_schema", t.schema)
-                            if (useCache && i == request.tools.lastIndex) put("cache_control", CACHE_MARK)
-                        })
-                    }
-                })
-            }
-        }
+        val body = buildBody(request, useCache)
         val logId = log?.beginRequest(cfg.name, request.model, body) ?: -1
         val raw = StringBuilder()
         var usage: Usage? = null
@@ -121,6 +91,58 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
         }
         if (calls.isNotEmpty()) emit(AiEvent.ToolCalls(calls))
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * Body gửi đi, tách riêng khỏi stream() để test được (Đợt 6). Thẻ Metadata:
+     * - max_tokens (bắt buộc với Claude) như cũ.
+     * - output_config.effort khi effort != NONE — tín hiệu mềm, max_tokens
+     *   vẫn là trần cứng. NONE = không gửi (dùng mặc định của hãng).
+     * - service_tier chỉ khi khác AUTO (auto/standard_only).
+     * - stop_sequences khi có.
+     * - Structured output: KHÔNG gửi — output_config.format cần json_schema
+     *   KÈM schema, chưa có UI schema đợt này nên không gửi bừa (màn edit ẩn
+     *   nút này với Claude).
+     * - KHÔNG BAO GIỜ gửi temperature/top_p/top_k: API version 2026-10-21
+     *   gỡ hẳn, gửi kèm là lỗi 400 kể cả giá trị mặc định. Tov cũng chưa
+     *   từng gửi chúng.
+     */
+    internal fun buildBody(request: AiRequest, useCache: Boolean = caching): JsonObject = buildJsonObject {
+        put("model", request.model)
+        put("max_tokens", request.maxOutputTokens)
+        put("stream", true)
+        request.metadata.claudeEffort()?.let { effort ->
+            put("output_config", buildJsonObject { put("effort", effort) })
+        }
+        request.metadata.claudeServiceTier()?.let { put("service_tier", it) }
+        val stops = request.metadata.stopSequences.filter { it.isNotBlank() }
+        if (stops.isNotEmpty()) put("stop_sequences", JsonArray(stops.map { JsonPrimitive(it) }))
+        if (request.system.isNotBlank()) {
+            if (useCache) {
+                put("system", buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", "text")
+                        put("text", request.system)
+                        put("cache_control", CACHE_MARK)
+                    })
+                })
+            } else {
+                put("system", request.system)
+            }
+        }
+        put("messages", buildMessages(request.messages, useCache))
+        if (request.tools.isNotEmpty()) {
+            put("tools", buildJsonArray {
+                request.tools.forEachIndexed { i, t ->
+                    add(buildJsonObject {
+                        put("name", t.name)
+                        put("description", t.description)
+                        put("input_schema", t.schema)
+                        if (useCache && i == request.tools.lastIndex) put("cache_control", CACHE_MARK)
+                    })
+                }
+            })
+        }
+    }
 
     private fun withCacheMark(el: JsonElement): JsonElement =
         if (el is JsonObject) JsonObject(el + ("cache_control" to CACHE_MARK)) else el

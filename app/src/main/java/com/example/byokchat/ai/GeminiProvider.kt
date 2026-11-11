@@ -20,32 +20,7 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
 
     override fun stream(request: AiRequest): Flow<AiEvent> = flow {
         val model = request.model.removePrefix("models/")
-        val body = buildJsonObject {
-            if (request.system.isNotBlank()) {
-                put("systemInstruction", buildJsonObject {
-                    put("parts", buildJsonArray { add(buildJsonObject { put("text", request.system) }) })
-                })
-            }
-            put("contents", buildContents(request.messages))
-            if (request.tools.isNotEmpty()) {
-                put("tools", buildJsonArray {
-                    add(buildJsonObject {
-                        put("functionDeclarations", buildJsonArray {
-                            request.tools.forEach { t ->
-                                add(buildJsonObject {
-                                    put("name", t.name)
-                                    put("description", t.description)
-                                    val s = sanitize(t.schema) as JsonObject
-                                    // Gemini từ chối "properties" rỗng: công cụ không có tham số thì bỏ hẳn
-                                    if ((s["properties"] as? JsonObject)?.isNotEmpty() == true) put("parameters", s)
-                                })
-                            }
-                        })
-                    })
-                })
-            }
-            put("generationConfig", buildJsonObject { put("maxOutputTokens", request.maxOutputTokens) })
-        }
+        val body = buildBody(request)
         val logId = log?.beginRequest(cfg.name, request.model, body) ?: -1
         val raw = StringBuilder()
         var usage: Usage? = null
@@ -93,6 +68,54 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
         val valid = calls.filter { it.name.isNotEmpty() }
         if (valid.isNotEmpty()) emit(AiEvent.ToolCalls(valid))
     }.flowOn(Dispatchers.IO)
+
+    /**
+     * Body gửi đi, tách riêng khỏi stream() để test được (Đợt 6). Thẻ Metadata:
+     * - generationConfig.maxOutputTokens như cũ.
+     * - thinkingConfig.thinkingLevel khi effort != NONE (bắt buộc với
+     *   Gemini 4; NONE = không gửi, server dùng mặc định của nó — thinking
+     *   trên Gemini 4 không tắt được). KHÔNG gửi thinkingBudget (chỉ Gemini
+     *   2.5, không được gộp với thinkingLevel).
+     * - stopSequences khi có; structured output = responseMimeType
+     *   application/json (không cần schema).
+     * - KHÔNG gửi temperature/topK/topP/penalty/candidateCount (model mới
+     *   nhất không còn hỗ trợ — bỏ qua hoặc 400) và KHÔNG gửi service tier
+     *   (serviceTier của Gemini chỉ là output, không phải trường gửi đi).
+     */
+    internal fun buildBody(request: AiRequest): JsonObject = buildJsonObject {
+        if (request.system.isNotBlank()) {
+            put("systemInstruction", buildJsonObject {
+                put("parts", buildJsonArray { add(buildJsonObject { put("text", request.system) }) })
+            })
+        }
+        put("contents", buildContents(request.messages))
+        if (request.tools.isNotEmpty()) {
+            put("tools", buildJsonArray {
+                add(buildJsonObject {
+                    put("functionDeclarations", buildJsonArray {
+                        request.tools.forEach { t ->
+                            add(buildJsonObject {
+                                put("name", t.name)
+                                put("description", t.description)
+                                val s = sanitize(t.schema) as JsonObject
+                                // Gemini từ chối "properties" rỗng: công cụ không có tham số thì bỏ hẳn
+                                if ((s["properties"] as? JsonObject)?.isNotEmpty() == true) put("parameters", s)
+                            })
+                        }
+                    })
+                })
+            })
+        }
+        put("generationConfig", buildJsonObject {
+            put("maxOutputTokens", request.maxOutputTokens)
+            request.metadata.geminiThinkingLevel()?.let { level ->
+                put("thinkingConfig", buildJsonObject { put("thinkingLevel", level) })
+            }
+            val stops = request.metadata.stopSequences.filter { it.isNotBlank() }
+            if (stops.isNotEmpty()) put("stopSequences", JsonArray(stops.map { JsonPrimitive(it) }))
+            if (request.metadata.structuredOutput) put("responseMimeType", "application/json")
+        })
+    }
 
     private fun sanitize(el: JsonElement): JsonElement = when (el) {
         is JsonObject -> JsonObject(

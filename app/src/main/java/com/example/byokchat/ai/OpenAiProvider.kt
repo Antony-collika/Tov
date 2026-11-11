@@ -30,26 +30,7 @@ class OpenAiProvider(
     }
 
     override fun stream(request: AiRequest): Flow<AiEvent> = flow {
-        val body = buildJsonObject {
-            put("model", request.model)
-            put("stream", true)
-            if (includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
-            put("messages", buildMessages(request))
-            if (request.tools.isNotEmpty()) {
-                put("tools", buildJsonArray {
-                    request.tools.forEach { t ->
-                        add(buildJsonObject {
-                            put("type", "function")
-                            put("function", buildJsonObject {
-                                put("name", t.name)
-                                put("description", t.description)
-                                put("parameters", t.schema)
-                            })
-                        })
-                    }
-                })
-            }
-        }
+        val body = buildBody(request)
         val logId = log?.beginRequest(cfg.name, request.model, body) ?: -1
         val raw = StringBuilder()
         var usage: Usage? = null
@@ -99,7 +80,50 @@ class OpenAiProvider(
         if (calls.isNotEmpty()) emit(AiEvent.ToolCalls(calls))
     }.flowOn(Dispatchers.IO)
 
-    private fun buildMessages(r: AiRequest): JsonArray = buildJsonArray {
+    /**
+     * Body gửi đi, tách riêng khỏi stream() để test được (Đợt 6). Thẻ Metadata:
+     * - max_completion_tokens (KHÔNG dùng max_tokens đã deprecated).
+     * - reasoning_effort LUÔN gửi, kể cả "none" (server mặc định medium nên
+     *   bỏ qua cũng là medium — và tool sẽ bị chặn, xem dưới).
+     * - Tools: CHỈ gửi khi effort == NONE — Chat Completions chỉ cho gọi
+     *   tool khi reasoning_effort "none" (từ GPT-5.4); ChatEngine/preview đã
+     *   lọc trước, đây là lớp phòng thủ thứ hai nên request không bao giờ
+     *   lọt tool kèm reasoning lên server. tool_choice "auto" khi có tool.
+     * - stop tối đa 4 chuỗi; structured output = response_format json_object
+     *   (chưa có UI schema đợt này); service_tier chỉ khi khác AUTO.
+     * - KHÔNG BAO GIỜ gửi temperature/top_p/top_k/logprobs (bỏ khi reasoning
+     *   bật; Tov cũng chưa từng có chúng).
+     */
+    internal fun buildBody(request: AiRequest): JsonObject = buildJsonObject {
+        put("model", request.model)
+        put("max_completion_tokens", request.maxOutputTokens)
+        put("reasoning_effort", request.metadata.openAiReasoningEffort())
+        put("stream", true)
+        if (includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
+        val stops = request.metadata.stopSequences.filter { it.isNotBlank() }.take(4)
+        if (stops.isNotEmpty()) put("stop", JsonArray(stops.map { JsonPrimitive(it) }))
+        if (request.metadata.structuredOutput) {
+            put("response_format", buildJsonObject { put("type", "json_object") })
+        }
+        request.metadata.openAiServiceTier()?.let { put("service_tier", it) }
+        put("messages", buildMessages(request))
+        val tools = if (request.metadata.effort == ReasoningEffort.NONE) request.tools else emptyList()
+        if (tools.isNotEmpty()) {
+            put("tools", buildJsonArray {
+                tools.forEach { t ->
+                    add(buildJsonObject {
+                        put("type", "function")
+                        put("function", buildJsonObject {
+                            put("name", t.name)
+                            put("description", t.description)
+                            put("parameters", t.schema)
+                        })
+                    })
+                }
+            })
+            put("tool_choice", "auto")
+        }
+    }
         if (r.system.isNotBlank()) {
             add(buildJsonObject { put("role", "system"); put("content", r.system) })
         }
