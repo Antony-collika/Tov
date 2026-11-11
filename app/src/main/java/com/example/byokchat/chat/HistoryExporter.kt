@@ -38,6 +38,9 @@ object HistoryExporter {
     fun renderHistory(conversation: ConversationEntity, rows: List<MessageEntity>): String {
         val turns = LinkedHashMap<String, MutableList<MessageEntity>>()
         rows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
+        // Đợt 4: số lượt lấy từ turnNo đã lưu (ổn định, không dùng lại), không
+        // đếm lại theo vị trí; next_turn = số lớn nhất + 1, không giảm khi xóa lượt.
+        val numbers = TurnNumbers.effectiveTurnNumbers(rows)
         val created = DateTimeFormatter.ISO_INSTANT
             .format(Instant.ofEpochMilli(conversation.createdAt))
         return buildString {
@@ -45,11 +48,11 @@ object HistoryExporter {
             appendLine("session: ${conversation.id}")
             appendLine("title: ${json.encodeToString(conversation.title.ifBlank { "Untitled" })}")
             appendLine("created: $created")
-            appendLine("next_turn: ${turns.size + 1}")
+            appendLine("next_turn: ${TurnNumbers.nextTurnNo(rows)}")
             appendLine("---")
-            turns.entries.forEachIndexed { index, (_, rs) ->
+            turns.entries.forEach { (turnId, rs) ->
                 appendLine()
-                renderTurn(index + 1, rs)
+                renderTurn(numbers[turnId] ?: 0, rs)
             }
         }
     }

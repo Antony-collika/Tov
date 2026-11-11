@@ -189,12 +189,16 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         pendingImages.clear()
         viewModelScope.launch {
             val turnId = UUID.randomUUID().toString()
+            // Đợt 4: số lượt ổn định — lượt mới lấy (số lớn nhất hiện có + 1),
+            // chỉ tăng không giảm nên số của lượt đã xóa không dùng lại.
+            val turnNo = (db.messages().maxTurnNo(conversationId) ?: 0) + 1
             val seq = (db.messages().maxSeq(conversationId) ?: 0) + 1
             db.messages().upsert(
                 MessageEntity(
                     id = UUID.randomUUID().toString(),
                     conversationId = conversationId,
                     turnId = turnId,
+                    turnNo = turnNo,
                     seq = seq,
                     role = "user",
                     text = text,

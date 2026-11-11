@@ -64,13 +64,16 @@ object ContextBuilder {
     ): ContextPlan {
         val turns = LinkedHashMap<String, MutableList<MessageEntity>>()
         rows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
+        // Đợt 4: số lượt ổn định cho ghi chú rút gọn (không đếm theo vị trí).
+        val turnNumbers = TurnNumbers.effectiveTurnNumbers(rows)
         val converted = turns.entries
             .map { (turnId, rs) -> turnId to sanitize(rs.mapNotNull { r -> toAi(r, nameForUid, includeErrorTurns) }) }
             .filter { it.second.isNotEmpty() }
         val compacted = if (!compactToolResults) converted else converted.mapIndexed { index, (turnId, msgs) ->
+            val turnNo = turnNumbers[turnId] ?: index + 1
             turnId to msgs.map { m ->
                 if (m.role == Role.TOOL && m.text.length > COMPACT_TOOL_RESULT_CHARS) {
-                    m.copy(text = ModelFacingText.compactedToolResult(m.toolName ?: "tool", m.text.length, index + 1))
+                    m.copy(text = ModelFacingText.compactedToolResult(m.toolName ?: "tool", m.text.length, turnNo))
                 } else m
             }
         }

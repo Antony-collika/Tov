@@ -83,6 +83,10 @@ class ChatEngine(
 
     private suspend fun run(conversationId: String, turnId: String) {
         val msgDao = db.messages()
+        // Đợt 4: tin assistant và kết quả tool dùng chung số lượt của tin user
+        // cùng lượt (đã gán khi gửi). Tạo lại (regenerate) giữ nguyên số cũ.
+        val turnNo = msgDao.getTurn(conversationId, turnId)
+            .firstOrNull { it.role == "user" }?.turnNo ?: 0
         var rounds = 0
         while (true) {
             val conv = db.conversations().get(conversationId) ?: return
@@ -91,6 +95,7 @@ class ChatEngine(
                 id = assistantId,
                 conversationId = conversationId,
                 turnId = turnId,
+                turnNo = turnNo,
                 seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
                 role = "assistant",
                 text = "",
@@ -205,6 +210,7 @@ class ChatEngine(
                 msgDao.upsert(
                     base.copy(
                         id = UUID.randomUUID().toString(),
+                        turnNo = turnNo,
                         seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
                         status = "error",
                         text = "",
@@ -223,6 +229,7 @@ class ChatEngine(
                         id = UUID.randomUUID().toString(),
                         conversationId = conversationId,
                         turnId = turnId,
+                        turnNo = turnNo,
                         seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
                         role = "tool",
                         text = outcome.resultText,
