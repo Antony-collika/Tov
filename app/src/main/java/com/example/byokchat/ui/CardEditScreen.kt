@@ -1,8 +1,6 @@
 package com.example.byokchat.ui
 
-import android.content.Intent
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ManagedActivityResultLauncher
@@ -308,35 +306,10 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         }
     }
 
-    fun openFileAt(path: String) {
-        if (path.isEmpty()) return
-        try {
-            val doc = container.fs.find(path)
-            if (doc == null) {
-                fileError = "File not found: $path"
-                return
-            }
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(doc.uri, "text/markdown")
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(intent)
-        } catch (e: Exception) {
-            try {
-                val doc = container.fs.find(path) ?: return
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(doc.uri, "text/plain")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                context.startActivity(intent)
-            } catch (e2: Exception) {
-                Toast.makeText(context, "No app can open this file.", Toast.LENGTH_SHORT).show()
-            }
-        }
+    /** Mở file đã trỏ bằng app ngoài (trình soạn .md) — dùng helper chung (OpenFile.kt). */
+    fun openFile() {
+        openFileAt(context, container.fs, file.trim()) { fileError = it }
     }
-
-    /** Mở file đã trỏ bằng app ngoài (trình soạn .md). */
-    fun openFile() = openFileAt(file.trim())
 
     Scaffold(
         topBar = {
@@ -726,7 +699,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                                     modifier = Modifier.weight(1f),
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
-                                IconButton(onClick = { openFileAt(path) }) {
+                                IconButton(onClick = { openFileAt(context, container.fs, path) { fileError = it } }) {
                                     Icon(Icons.Default.OpenInNew, contentDescription = "Open file")
                                 }
                                 IconButton(onClick = { toolFiles = toolFiles - path }) {

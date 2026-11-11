@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -14,6 +15,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.example.byokchat.chat.HistoryExporter
 import com.example.byokchat.chat.ModelFiles
 import com.example.byokchat.chat.TurnNumbers
 import com.example.byokchat.chat.UsedWorkspaceFile
@@ -71,6 +75,20 @@ fun MessagesScreen(conversationId: String, onBack: () -> Unit) {
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()
+    val conv by vm.conversation.collectAsState()
+    // Đợt fix 11/11/2026 (E1): file history.md của session này — chỉ có sau
+    // lần gửi đầu (và chỉ khi đã chọn data storage). Chưa có file thì ẩn
+    // nút, không tự trỏ sang chỗ khác.
+    val historyPath = conv?.let { HistoryExporter.historyPath(it) }
+    var historyExists by remember { mutableStateOf(false) }
+    LaunchedEffect(conv, messages.size) {
+        historyExists = historyPath?.let {
+            withContext(Dispatchers.IO) {
+                runCatching { container.fs.sessionExists(it) }.getOrDefault(false)
+            }
+        } ?: false
+    }
+    var historyError by remember { mutableStateOf<String?>(null) }
 
     val numbers = remember(messages) { TurnNumbers.effectiveTurnNumbers(messages) }
     val turns = remember(messages) {
@@ -110,6 +128,23 @@ fun MessagesScreen(conversationId: String, onBack: () -> Unit) {
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Đợt fix 11/11/2026 (E1): nút mở history.md của session này, ở
+            // trên cùng màn. Chỉ hiện khi file đã có.
+            if (historyExists && historyPath != null) {
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Button(
+                            onClick = {
+                                openFileAt(context, container.fs, historyPath, onError = { historyError = it }, inSessionStorage = true)
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Open history.md") }
+                        if (historyError != null) {
+                            Text(historyError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
             item {
                 Text(
                     "Editing or deleting here changes what the model sees from that point on, " +
@@ -182,7 +217,12 @@ fun MessagesScreen(conversationId: String, onBack: () -> Unit) {
     }
 }
 
-/** Thẻ Files ở trên cùng màn Messages: file đính kèm + file model đã dùng. */
+/**
+ * Thẻ Files ở trên cùng màn Messages: file đính kèm + file model đã dùng.
+ * Đợt fix 11/11/2026 (E1): thẻ cỡ cố định — thu gọn chỉ hiện chú thích bao
+ * nhiêu file (trống hoặc số lượng), ấn vào mới hiện rõ các file (AI có thể
+ * đọc cả chục file, bày hết ra sẽ chiếm hết màn hình).
+ */
 @Composable
 private fun FilesCard(
     messages: List<MessageEntity>,
@@ -198,9 +238,24 @@ private fun FilesCard(
     }
     // Chỉ hiện file còn tồn tại khi đã kiểm chứng được; file không còn thì bỏ.
     val shownUsed = usedFiles.filter { fileExists[it.path] != false }
-    Card(Modifier.fillMaxWidth()) {
+    val total = attachments.size + shownUsed.size
+    var expanded by remember { mutableStateOf(false) }
+    val countText = when (total) {
+        0 -> "No files"
+        1 -> "1 file"
+        else -> "$total files"
+    }
+    Card(Modifier.fillMaxWidth().clickable { expanded = !expanded }) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Files", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Files", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Text(countText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(
+                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Hide files" else "Show files",
+                )
+            }
+            if (!expanded) return@Column
             Text("User attachments", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             if (attachments.isEmpty()) {
                 Text("No files attached.", style = MaterialTheme.typography.bodySmall)
