@@ -13,6 +13,9 @@ import java.time.format.DateTimeFormatter
 /** Loại thẻ trong Request panel (Đợt C). Thứ tự thẻ trong danh sách là thứ tự gửi. */
 enum class CardKind { METADATA, SYSTEM, TIME, FREE, HISTORY, LAST_TURN, TOOLS }
 
+/** Nguồn nội dung của thẻ Tools: gõ trực tiếp vào thẻ (TEXT) hay file .md (FILE). */
+enum class ToolsSource { TEXT, FILE }
+
 /** Vai của thẻ Free khi gửi. */
 enum class FreeRole { SYSTEM, USER }
 
@@ -59,6 +62,13 @@ data class RequestCard(
      * 1 file (xem [toolFiles]).
      */
     val files: List<String> = emptyList(),
+    /**
+     * Thẻ Tools: nguồn nội dung — TEXT (gõ trực tiếp vào thẻ, parse như
+     * tools.md) hay FILE (các file .md đã chọn). Mặc định FILE (thẻ cũ
+     * chỉ có file). Nguồn FILE mà chưa chọn file nào thì lần gửi bị chặn
+     * (xem resolveToolFiles); nguồn TEXT để trống thì 0 tool, không lỗi.
+     */
+    val toolsSource: ToolsSource = ToolsSource.FILE,
 ) {
     /** File tools.md của thẻ Tools: [files] nếu có, không thì [file] cũ. */
     fun toolFiles(): List<String> = if (files.isNotEmpty()) files else listOfNotNull(file)
@@ -260,23 +270,32 @@ data class RequestLayout(val cards: List<RequestCard>) {
     }
 
     /**
-     * Kết quả resolve file tools.md của thẻ Tools (Đợt E).
-     * - exposed == null: không có thẻ Tools, hoặc thẻ có nhưng chưa chọn
-     *   file nào → đường "legacy": mọi tool Settings cho phép, tên/mô tả gốc.
-     * - exposed == danh sách rỗng: thẻ Tools tắt, hoặc file rỗng → 0 tool.
-     * - errors rỗng = parse được hết; có lỗi thì exposed rỗng và lần gửi bị
-     *   chặn (báo lỗi rõ ràng thay vì gửi với danh sách tool sai).
+     * Kết quả resolve nguồn tools.md của thẻ Tools (Đợt E; luật nguồn sửa
+     * theo quyết định 11/11/2026).
+     * - exposed == null: không có thẻ Tools → đường "legacy": mọi tool
+     *   Settings cho phép, tên/mô tả gốc. (Chỉ còn trường hợp này là
+     *   legacy; thẻ Tools bật mà chưa chọn file thì KHÔNG còn legacy nữa.)
+     * - exposed == danh sách rỗng: thẻ Tools tắt, nguồn Text để trống,
+     *   hoặc file rỗng → 0 tool.
+     * - errors rỗng = resolve được hết; có lỗi thì exposed rỗng và lần gửi
+     *   bị chặn (báo lỗi rõ ràng thay vì gửi với danh sách tool sai).
      */
     data class ToolsResolution(val exposed: List<ParsedTool>?, val errors: List<String>)
 
     /**
-     * Đợt E: đọc + parse các file tools.md của thẻ Tools, gộp lại theo thứ
-     * tự file đã chọn, trong mỗi file theo thứ tự khối. Parse lại mỗi lần
-     * gửi (gọi ở đầu mỗi lần gửi + trước preview, như resolveFiles).
+     * Đợt E: resolve danh sách tool của thẻ Tools theo nguồn đã chọn.
+     * Parse lại mỗi lần gửi (gọi ở đầu mỗi lần gửi + trước preview, như
+     * resolveFiles). Luật nguồn (quyết định 11/11/2026):
+     * - Nguồn Text: parse văn bản trong thẻ như tools.md. Để trống → 0
+     *   tool, KHÔNG lỗi, vẫn gửi được. Lỗi cú pháp → báo lỗi, chặn gửi.
+     * - Nguồn File: đọc + parse các file tools.md đã chọn, gộp lại theo
+     *   thứ tự file đã chọn, trong mỗi file theo thứ tự khối. Chưa chọn
+     *   file nào → BÁO LỖI + chặn gửi (không còn đường "legacy" offer tất
+     *   cả tool). File rỗng được phép (0 tool); chỉ báo lỗi khi không
+     *   parse được.
      * - Cùng một tool ở hai file: mô tả GIỐNG HỆT nhau thì gộp bình thường
      *   (dedupe, giữ khối đầu tiên); mô tả KHÁC nhau thì BÁO LỖI nêu rõ tool
      *   nào và ở file nào, KHÔNG tự chọn một bên.
-     * - File rỗng được phép (0 tool); chỉ báo lỗi khi không parse được.
      * - Không có thẻ Tools → legacy (exposed null); thẻ Tools tắt → 0 tool.
      */
     fun resolveToolFiles(
@@ -285,8 +304,29 @@ data class RequestLayout(val cards: List<RequestCard>) {
     ): ToolsResolution {
         val card = toolsCard() ?: return ToolsResolution(null, emptyList())
         if (!card.enabled) return ToolsResolution(emptyList(), emptyList())
+        if (card.toolsSource == ToolsSource.TEXT) {
+            // Nguồn Text: parse văn bản trong thẻ như tools.md. Để trống
+            // thì 0 tool, không lỗi; lỗi cú pháp thì chặn gửi như file
+            // không parse được.
+            if (card.text.isBlank()) return ToolsResolution(emptyList(), emptyList())
+            return try {
+                ToolsResolution(ToolsMdParser.parse(card.text, origins), emptyList())
+            } catch (e: ToolsMdParseException) {
+                ToolsResolution(emptyList(), listOf("In the Tools card text: ${e.message}"))
+            }
+        }
         val files = card.toolFiles()
-        if (files.isEmpty()) return ToolsResolution(null, emptyList())
+        // Nguồn File mà chưa chọn file nào thì chặn gửi + báo rõ (quyết
+        // định 11/11/2026): không còn đường "legacy" offer tất cả tool.
+        if (files.isEmpty()) {
+            return ToolsResolution(
+                emptyList(),
+                listOf(
+                    "No file selected for the Tools card. " +
+                        "Choose one or more tools.md files, or switch the card to Text input.",
+                ),
+            )
+        }
         val errors = mutableListOf<String>()
         val merged = mutableListOf<ParsedTool>()
         val seenByUid = mutableMapOf<String, ParsedTool>()

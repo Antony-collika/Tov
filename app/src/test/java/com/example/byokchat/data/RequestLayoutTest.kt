@@ -229,10 +229,17 @@ class RequestLayoutTest {
         "time.now" to "Get the current date and time.",
     )
 
-    private fun toolsLayout(vararg files: String, enabled: Boolean = true): RequestLayout =
+    private fun toolsLayout(
+        vararg files: String,
+        enabled: Boolean = true,
+        toolsSource: ToolsSource = ToolsSource.FILE,
+        text: String = "",
+    ): RequestLayout =
         RequestLayout.defaultLayout("x").copy(
             cards = RequestLayout.defaultLayout("x").cards.map {
-                if (it.kind == CardKind.TOOLS) it.copy(enabled = enabled, files = files.toList()) else it
+                if (it.kind == CardKind.TOOLS) {
+                    it.copy(enabled = enabled, files = files.toList(), toolsSource = toolsSource, text = text)
+                } else it
             }
         )
 
@@ -277,12 +284,46 @@ class RequestLayoutTest {
         val disabled = toolsLayout("a.md", enabled = false).resolveToolFiles({ Result.success("## x") }, origins)
         assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), disabled.exposed)
 
-        val noFiles = toolsLayout().resolveToolFiles({ Result.success("") }, origins)
-        assertEquals(null, noFiles.exposed)
-
         val empty = toolsLayout("a.md").resolveToolFiles({ Result.success("> only notes\n") }, origins)
         assertTrue(empty.errors.isEmpty())
         assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), empty.exposed)
+    }
+
+    @Test
+    fun fileSourceWithNoFilesIsAnError() {
+        // Sửa luật nguồn 11/11/2026: nguồn File mà chưa chọn file nào thì
+        // chặn gửi + báo rõ, không còn đường "legacy" offer tất cả tool.
+        val res = toolsLayout().resolveToolFiles({ Result.success("") }, origins)
+        assertTrue(res.errors.any { it.contains("No file selected for the Tools card") })
+        assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), res.exposed)
+    }
+
+    @Test
+    fun textSourceBlankIsZeroTools() {
+        val blank = toolsLayout(toolsSource = ToolsSource.TEXT, text = "").resolveToolFiles({ Result.success("") }, origins)
+        assertTrue(blank.errors.isEmpty())
+        assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), blank.exposed)
+
+        val notesOnly = toolsLayout(toolsSource = ToolsSource.TEXT, text = "> just a note\n").resolveToolFiles({ Result.success("") }, origins)
+        assertTrue(notesOnly.errors.isEmpty())
+        assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), notesOnly.exposed)
+    }
+
+    @Test
+    fun textSourceParsesContentAndReportsSyntaxErrors() {
+        val ok = toolsLayout(
+            toolsSource = ToolsSource.TEXT,
+            text = block("time.now", "current_time", "Get the current date and time."),
+        ).resolveToolFiles({ Result.success("") }, origins)
+        assertTrue(ok.errors.isEmpty())
+        assertEquals(listOf("time.now"), ok.exposed?.map { it.uid })
+
+        val bad = toolsLayout(
+            toolsSource = ToolsSource.TEXT,
+            text = "## nope\nuid: nope\nname: nope\ndescription: No such tool.\n",
+        ).resolveToolFiles({ Result.success("") }, origins)
+        assertTrue(bad.errors.any { it.contains("Tools card text") && it.contains("nope") })
+        assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), bad.exposed)
     }
 
     @Test

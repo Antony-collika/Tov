@@ -58,6 +58,7 @@ import com.example.byokchat.container
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.RequestCard
+import com.example.byokchat.data.ToolsSource
 import kotlinx.coroutines.launch
 
 /**
@@ -310,10 +311,17 @@ private fun cardSummary(
         if (extras.isEmpty()) base else base + " · " + extras.joinToString(" · ")
     }
     CardKind.LAST_TURN -> "Your latest message and the tool round in progress. Always sent."
-    CardKind.TOOLS -> {
-        val files = card.toolFiles()
-        if (files.isEmpty()) "All tools, with their original names. Tap Edit to choose tools.md files."
-        else "Tools from: " + files.joinToString(", ") { fileName(it) }
+    CardKind.TOOLS -> when (card.toolsSource) {
+        ToolsSource.TEXT -> {
+            val first = card.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(80)
+            if (first.isNullOrBlank()) "Text input (empty — no tools)."
+            else "Text input: $first"
+        }
+        ToolsSource.FILE -> {
+            val files = card.toolFiles()
+            if (files.isEmpty()) "No file selected — the send will be blocked. Tap Edit to choose tools.md files."
+            else "Tools from: " + files.joinToString(", ") { fileName(it) }
+        }
     }
 }
 

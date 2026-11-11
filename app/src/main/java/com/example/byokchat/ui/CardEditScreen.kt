@@ -58,6 +58,8 @@ import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.ProviderType
+import com.example.byokchat.data.ToolsSource
+import com.example.byokchat.tools.ToolsMdParseException
 import com.example.byokchat.tools.ToolsMdParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -103,6 +105,9 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     }
     // Đợt E: thẻ Tools giữ NHIỀU file tools.md (file cũ chuyển thành danh sách 1 file).
     var toolFiles by remember(cardId) { mutableStateOf(card?.toolFiles().orEmpty()) }
+    // Sửa luật nguồn 11/11/2026: thẻ Tools có nguồn Text (gõ trực tiếp) hoặc
+    // File (file .md đã chọn); mặc định File như thẻ cũ.
+    var toolsSource by remember(cardId) { mutableStateOf(card?.toolsSource ?: ToolsSource.FILE) }
     var newToolFile by remember(cardId) { mutableStateOf("") }
     var toolsPreview by remember(cardId) { mutableStateOf<String?>(null) }
     var toolsPreviewError by remember(cardId) { mutableStateOf<String?>(null) }
@@ -134,6 +139,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
             turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
             file.trim() != (card.file ?: "") || toolFiles != card.toolFiles() ||
+            toolsSource != (card?.toolsSource ?: ToolsSource.FILE) ||
             source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             toolChoice != savedMetadata.toolChoice || structured != savedMetadata.structuredOutput ||
@@ -145,16 +151,40 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Thẻ Tools CÓ Save (danh sách file) từ Đợt E.
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.LAST_TURN
 
-    // Đợt E: xem trước danh sách tool các file sẽ offer (đọc + parse lại mỗi khi đổi file).
-    LaunchedEffect(toolFiles, card?.kind) {
+    // Đợt E: xem trước danh sách tool thẻ sẽ offer (đọc + parse lại mỗi khi
+    // đổi nguồn/file/văn bản). Nguồn Text parse ngay tại chỗ (không cần I/O);
+    // nguồn File đọc + parse lại như lúc gửi.
+    LaunchedEffect(toolFiles, toolsSource, text, card?.kind) {
         if (card?.kind != CardKind.TOOLS) return@LaunchedEffect
         toolsPreview = null
         toolsPreviewError = null
-        if (toolFiles.isEmpty()) return@LaunchedEffect
-        val layout = store.storedLayout.value
-        val previewCard = layout.toolsCard()?.copy(files = toolFiles) ?: return@LaunchedEffect
-        val previewLayout = layout.copy(cards = layout.cards.map { if (it.id == previewCard.id) previewCard else it })
         val origins = container.registry.originDescriptions()
+        if (toolsSource == ToolsSource.TEXT) {
+            if (text.isBlank()) {
+                toolsPreview = "No tools — the card text is empty."
+                return@LaunchedEffect
+            }
+            try {
+                val parsed = ToolsMdParser.parse(text, origins)
+                toolsPreview = if (parsed.isEmpty()) "No tools — the card text lists no tools."
+                else "Offers ${parsed.size} tool(s): " + parsed.joinToString(", ") { it.name }
+            } catch (e: ToolsMdParseException) {
+                toolsPreviewError = "In the Tools card text: ${e.message}"
+            }
+            return@LaunchedEffect
+        }
+        // Nguồn File mà chưa chọn file nào thì báo ngay ở đây (lúc gửi cũng
+        // chặn với cùng lỗi này — xem RequestLayout.resolveToolFiles).
+        if (toolFiles.isEmpty()) {
+            toolsPreviewError = "No file selected for the Tools card. " +
+                "Choose one or more tools.md files, or switch the card to Text input."
+            return@LaunchedEffect
+        }
+        val layout = store.storedLayout.value
+        // Ép toolsSource = FILE cho bản xem trước: user đang sửa ở nguồn File
+        // nhưng chưa Save (bố cục đã lưu có thể còn là TEXT).
+        val previewCard = layout.toolsCard()?.copy(files = toolFiles, toolsSource = ToolsSource.FILE) ?: return@LaunchedEffect
+        val previewLayout = layout.copy(cards = layout.cards.map { if (it.id == previewCard.id) previewCard else it })
         val res = withContext(Dispatchers.IO) {
             previewLayout.resolveToolFiles({ path -> runCatching { container.fs.readText(path) } }, origins)
         }
@@ -210,6 +240,9 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 else if (source == CardSource.FILE) file.trim().ifEmpty { null }
                 else null,
                 files = if (c.kind == CardKind.TOOLS) toolFiles else it.files,
+                // Sửa luật nguồn 11/11/2026: chỉ thẻ Tools dùng toolsSource;
+                // thẻ khác giữ nguyên giá trị đã lưu (mặc định FILE).
+                toolsSource = if (c.kind == CardKind.TOOLS) toolsSource else it.toolsSource,
             )
         }
         onBack()
@@ -628,78 +661,98 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     // quyền ở Settings/Manage Tools, tầng RCP ở đây).
                     Text(
                         "This card is not a message: it is the tool list sent with the request, " +
-                            "so its position in the panel changes nothing. Choose one or more " +
-                            "tools.md files — every tool listed in them is offered to the model, " +
-                            "in file order, then block order. A tool not listed in any file is " +
-                            "not offered. Delete a block in the file to hide that tool.",
+                            "so its position in the panel changes nothing. Every tool listed is " +
+                            "offered to the model, in file order, then block order. A tool not " +
+                            "listed is not offered. Delete a block to hide that tool. Turn the " +
+                            "card off to offer no tools at all.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Text(
-                        "No file chosen yet means every tool is offered with its original " +
-                            "name and description (as before). Turn the card off to offer no tools at all.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    Text("Source", style = MaterialTheme.typography.labelLarge)
+                    PolicyOption(
+                        selected = toolsSource == ToolsSource.TEXT,
+                        title = "Text input",
+                        desc = "Type the tools list here, in tools.md format. Leave it empty to offer no tools.",
+                        onClick = { toolsSource = ToolsSource.TEXT },
                     )
-                    Text("Files", style = MaterialTheme.typography.labelLarge)
-                    if (toolFiles.isEmpty()) {
+                    PolicyOption(
+                        selected = toolsSource == ToolsSource.FILE,
+                        title = "External file",
+                        desc = "Read from one or more tools.md files in the workspace, again on every send.",
+                        onClick = { toolsSource = ToolsSource.FILE },
+                    )
+                    if (toolsSource == ToolsSource.TEXT) {
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { text = it },
+                            label = { Text("Tools list (tools.md format)") },
+                            minLines = 6,
+                            maxLines = 12,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                         Text(
-                            "(no files chosen)",
+                            "One block per tool, starting with \"## <name>\"; each block needs " +
+                                "uid, origin_description, name and description. Lines starting " +
+                                "with \">\" are notes.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
-                    toolFiles.forEach { path ->
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
+                    } else {
+                        Text("Files", style = MaterialTheme.typography.labelLarge)
+                        if (toolFiles.isEmpty()) {
                             Text(
-                                path,
-                                modifier = Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyMedium,
+                                "(no files chosen)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            IconButton(onClick = { toolFiles = toolFiles - path }) {
-                                Icon(Icons.Default.Close, contentDescription = "Remove file")
+                        }
+                        toolFiles.forEach { path ->
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    path,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                IconButton(onClick = { toolFiles = toolFiles - path }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Remove file")
+                                }
                             }
                         }
-                    }
-                    OutlinedTextField(
-                        value = newToolFile,
-                        onValueChange = { newToolFile = it; fileError = null },
-                        label = { Text("File path, e.g. Tov/prompts/tools.md") },
-                        singleLine = true,
-                        isError = !newToolFileValid,
-                        supportingText = { if (!newToolFileValid) Text("The file must end with .md.") },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            enabled = newToolFile.isNotBlank() && newToolFileValid &&
-                                newToolFile.trim() !in toolFiles,
-                            onClick = {
-                                toolFiles = toolFiles + newToolFile.trim()
-                                fileError = null
-                            },
-                        ) { Text("Add file") }
-                        OutlinedButton(onClick = ::createTemplate) { Text("Create template") }
-                        OutlinedButton(
-                            enabled = newToolFile.isNotBlank(),
-                            onClick = { openFileAt(newToolFile.trim()) },
-                        ) { Text("Open file") }
-                    }
-                    if (fileError != null) {
-                        Text(fileError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        OutlinedTextField(
+                            value = newToolFile,
+                            onValueChange = { newToolFile = it; fileError = null },
+                            label = { Text("File path, e.g. Tov/prompts/tools.md") },
+                            singleLine = true,
+                            isError = !newToolFileValid,
+                            supportingText = { if (!newToolFileValid) Text("The file must end with .md.") },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                enabled = newToolFile.isNotBlank() && newToolFileValid &&
+                                    newToolFile.trim() !in toolFiles,
+                                onClick = {
+                                    toolFiles = toolFiles + newToolFile.trim()
+                                    fileError = null
+                                },
+                            ) { Text("Add file") }
+                            OutlinedButton(onClick = ::createTemplate) { Text("Create template") }
+                            OutlinedButton(
+                                enabled = newToolFile.isNotBlank(),
+                                onClick = { openFileAt(newToolFile.trim()) },
+                            ) { Text("Open file") }
+                        }
+                        if (fileError != null) {
+                            Text(fileError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
                     }
                     Text("What the model will see", style = MaterialTheme.typography.labelLarge)
                     if (toolsPreviewError != null) {
                         Text(toolsPreviewError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                     } else if (toolsPreview != null) {
                         Text(toolsPreview!!, style = MaterialTheme.typography.bodySmall)
-                    } else if (toolFiles.isEmpty()) {
-                        Text(
-                            "All tools, with their original names and descriptions.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
                     }
                 }
                 CardKind.LAST_TURN -> {
