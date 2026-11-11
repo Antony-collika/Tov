@@ -11,7 +11,7 @@ import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
 /** Loại thẻ trong Request panel (Đợt C). Thứ tự thẻ trong danh sách là thứ tự gửi. */
-enum class CardKind { SYSTEM, TIME, FREE, HISTORY, LAST_TURN, TOOLS }
+enum class CardKind { METADATA, SYSTEM, TIME, FREE, HISTORY, LAST_TURN, TOOLS }
 
 /** Vai của thẻ Free khi gửi. */
 enum class FreeRole { SYSTEM, USER }
@@ -64,6 +64,7 @@ data class RequestCard(
     fun toolFiles(): List<String> = if (files.isNotEmpty()) files else listOfNotNull(file)
     /** Tên hiển thị trên Panel. */
     fun displayName(): String = when (kind) {
+        CardKind.METADATA -> "Metadata"
         CardKind.SYSTEM -> "System"
         CardKind.TIME -> "Time"
         CardKind.FREE -> label.ifBlank { "Free card" }
@@ -72,8 +73,13 @@ data class RequestCard(
         CardKind.TOOLS -> "Tools"
     }
 
-    /** Thẻ cố định: không xóa được, luôn đúng 1 thẻ, không tắt được. */
-    fun isFixed(): Boolean = kind == CardKind.HISTORY || kind == CardKind.LAST_TURN
+    /**
+     * Thẻ cố định: không xóa được, luôn đúng 1 thẻ, không tắt được.
+     * Metadata cố định như FPilot (luôn đầu tiên) — model/effort/max tokens
+     * là thứ mọi request đều có, không có trạng thái "tắt metadata".
+     */
+    fun isFixed(): Boolean =
+        kind == CardKind.METADATA || kind == CardKind.HISTORY || kind == CardKind.LAST_TURN
 }
 
 /**
@@ -84,6 +90,7 @@ data class RequestCard(
 data class RequestLayout(val cards: List<RequestCard>) {
 
     companion object {
+        const val METADATA_ID = "metadata"
         const val SYSTEM_ID = "system"
         const val TIME_ID = "time"
         const val TOOLS_ID = "tools"
@@ -121,9 +128,10 @@ data class RequestLayout(val cards: List<RequestCard>) {
             )
         }
 
-        /** Bố cục mặc định: đúng thứ mà app vẫn gửi trước Đợt C. */
+        /** Bố cục mặc định: đúng thứ mà app vẫn gửi trước Đợt C, thêm thẻ Metadata cố định lên đầu (như FPilot). */
         fun defaultLayout(systemPrompt: String): RequestLayout = RequestLayout(
             listOf(
+                RequestCard(METADATA_ID, CardKind.METADATA),
                 RequestCard(SYSTEM_ID, CardKind.SYSTEM, text = systemPrompt),
                 RequestCard(TIME_ID, CardKind.TIME),
                 RequestCard(TOOLS_ID, CardKind.TOOLS),
@@ -140,6 +148,7 @@ data class RequestLayout(val cards: List<RequestCard>) {
     }
 
     fun card(id: String): RequestCard? = cards.firstOrNull { it.id == id }
+    fun metadataCard(): RequestCard? = cards.firstOrNull { it.kind == CardKind.METADATA }
     fun systemCard(): RequestCard? = cards.firstOrNull { it.kind == CardKind.SYSTEM }
     fun timeCard(): RequestCard? = cards.firstOrNull { it.kind == CardKind.TIME }
     fun toolsCard(): RequestCard? = cards.firstOrNull { it.kind == CardKind.TOOLS }
@@ -153,8 +162,14 @@ data class RequestLayout(val cards: List<RequestCard>) {
      */
     fun validate(): List<String> {
         val errors = mutableListOf<String>()
+        val metadata = cards.filter { it.kind == CardKind.METADATA }
         val history = cards.filter { it.kind == CardKind.HISTORY }
         val lastTurn = cards.filter { it.kind == CardKind.LAST_TURN }
+        if (metadata.size != 1) errors += "The Metadata card must appear exactly once (found ${metadata.size})."
+        if (metadata.size == 1) {
+            if (cards.indexOf(metadata[0]) != 0) errors += "The Metadata card must be first."
+            if (!metadata[0].enabled) errors += "The Metadata card cannot be turned off."
+        }
         if (history.size != 1) errors += "The History card must appear exactly once (found ${history.size})."
         if (lastTurn.size != 1) errors += "The Last turn card must appear exactly once (found ${lastTurn.size})."
         if (history.size == 1 && lastTurn.size == 1) {

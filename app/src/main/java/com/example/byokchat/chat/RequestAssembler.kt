@@ -166,7 +166,7 @@ object RequestAssembler {
                         )
                     }
                 }
-                else -> { /* SYSTEM/TIME/TOOLS không phải tin nhắn */ }
+                else -> { /* METADATA/SYSTEM/TIME/TOOLS không phải tin nhắn */ }
             }
         }
 

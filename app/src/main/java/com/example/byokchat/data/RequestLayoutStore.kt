@@ -100,7 +100,20 @@ class RequestLayoutStore(context: Context, private val settings: SettingsReposit
     private fun load(): RequestLayout {
         val raw = plain.getString("layout_json", null)
             ?: return RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value)
-        return runCatching { json.decodeFromString(RequestLayout.serializer(), raw) }
+        val decoded = runCatching { json.decodeFromString(RequestLayout.serializer(), raw) }
             .getOrDefault(RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value))
+        // Đợt 6: bố cục lưu từ trước chưa có thẻ Metadata — thêm vào đầu,
+        // giữ nguyên mọi thẻ còn lại (kể cả thứ tự user đã sắp), rồi lưu lại
+        // để lần sau không migrate nữa. Bố cục nào Metadata đã có nhưng
+        // không ở đầu thì KHÔNG tự sửa: validate() báo lỗi và chat dùng mặc
+        // định như các lỗi bố cục khác.
+        if (decoded.cards.none { it.kind == CardKind.METADATA }) {
+            val migrated = decoded.copy(
+                cards = listOf(RequestCard(RequestLayout.METADATA_ID, CardKind.METADATA)) + decoded.cards
+            )
+            plain.edit().putString("layout_json", json.encodeToString(RequestLayout.serializer(), migrated)).apply()
+            return migrated
+        }
+        return decoded
     }
 }
