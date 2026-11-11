@@ -23,7 +23,8 @@ import kotlinx.serialization.json.contentOrNull
  * Danh sách toàn bộ công cụ + cầu nối với vòng chat.
  * - UID cố định do app đặt; tên/mô tả GỐC lấy từ code, không bao giờ mất.
  *   Tên/mô tả model nhìn thấy chỉ còn đến từ file tools.md của thẻ Tools
- *   (đường "legacy" khi không có thẻ thì dùng tên/mô tả gốc).
+ *   (đường "legacy" khi chưa chọn workspace — fs == null — thì dùng tên/mô
+ *   tả gốc; xóa thẻ Tools = 0 tool).
  * - Chế độ Auto/Ask/Off (tầng quyền) vẫn ở trong app (ToolPrefs); tool tắt
  *   vẫn được offer cho model, chỉ chặn lúc gọi (quyết định 8, Đợt E).
  * - Mọi thay đổi trong ToolPrefs có hiệu lực từ request kế tiếp (definitions() đọc lại mỗi lần).
@@ -85,8 +86,9 @@ class ToolRegistry(
 
     /**
      * Danh sách công cụ đưa cho model (Đợt E).
-     * - exposed == null (legacy, không có thẻ Tools): mọi tool dùng được,
-     *   tên/mô tả/schema gốc.
+     * - exposed == null (legacy, CHỈ khi chưa chọn workspace — fs == null):
+     *   mọi tool dùng được, tên/mô tả/schema gốc. Không có thẻ Tools
+     *   KHÔNG còn cho null nữa (xóa thẻ = 0 tool).
      * - exposed != null: chỉ các tool trong file, đúng thứ tự file/khối,
      *   tên/mô tả từ file, schema tham số lấy từ tool thật theo uid (file
      *   không đổi được schema).

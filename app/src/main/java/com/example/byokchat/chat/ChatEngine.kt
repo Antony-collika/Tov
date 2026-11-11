@@ -114,7 +114,8 @@ class ChatEngine(
             var error: String? = null
             var cancelled: CancellationException? = null
             // Danh sách tool đã parse từ file tools.md của lượt này (null =
-            // legacy); vòng gọi tool sau khối try cũng cần nó để map tên.
+            // chưa resolve, hoặc legacy khi chưa chọn workspace — fs == null);
+            // vòng gọi tool sau khối try cũng cần nó để map tên.
             var exposed: List<com.example.byokchat.tools.ParsedTool>? = null
             try {
                 // Nhà cung cấp và mô hình dùng cho mọi cuộc trò chuyện đều là lựa chọn toàn cục trong Settings.

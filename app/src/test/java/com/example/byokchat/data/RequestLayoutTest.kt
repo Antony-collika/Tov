@@ -275,11 +275,13 @@ class RequestLayoutTest {
     }
 
     @Test
-    fun noToolsCardIsLegacyDisabledCardIsZeroToolsEmptyFileIsZeroTools() {
+    fun noToolsCardIsZeroToolsDisabledCardIsZeroToolsEmptyFileIsZeroTools() {
+        // Quyết định 11/11/2026: xóa hẳn thẻ Tools = không gửi tool nào
+        // (0 tool, không lỗi) — app không tự fallback offer-all sau lưng user.
         val noCard = RequestLayout(listOf(RequestCard(RequestLayout.SYSTEM_ID, CardKind.SYSTEM, text = "x")))
-        val legacy = noCard.resolveToolFiles({ Result.success("") }, origins)
-        assertEquals(null, legacy.exposed)
-        assertTrue(legacy.errors.isEmpty())
+        val deleted = noCard.resolveToolFiles({ Result.success("") }, origins)
+        assertTrue(deleted.errors.isEmpty())
+        assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), deleted.exposed)
 
         val disabled = toolsLayout("a.md", enabled = false).resolveToolFiles({ Result.success("## x") }, origins)
         assertEquals(emptyList<com.example.byokchat.tools.ParsedTool>(), disabled.exposed)
