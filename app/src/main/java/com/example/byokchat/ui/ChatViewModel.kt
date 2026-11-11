@@ -122,7 +122,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             baseLayout.resolveFiles { path -> runCatching { app.fs.readText(path) } }
         }
         app.layoutStore.setFileErrors(fileErrors)
-        val toolDefs = layout.effectiveToolDefs(app.registry.definitions(), app.registry.nameForUid(RequestLayout.TIME_NOW_UID))
+        val toolDefs = layout.effectiveToolDefs(app.registry.definitions())
         val system = layout.systemText(vars)
         val budget = ContextBuilder.budget(
             cfg, modelName, system,

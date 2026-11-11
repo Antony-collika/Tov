@@ -117,9 +117,11 @@ class ChatEngine(
                 }
 
                 // Request đi theo bố cục Request panel (Đợt C): thẻ System
-                // thay ô "Default system prompt"; ngày giờ KHÔNG chèn vào
-                // system nữa — `time.now` là công cụ như trước, để system
-                // prompt ổn định và giữ được bộ nhớ đệm.
+                // thay ô "Default system prompt"; thẻ Time BẬT thì dòng giờ
+                // "Current time: YYYY-MM-DD HH:MM" được chèn vào cuối system
+                // (RequestLayout.systemParts) — dòng giờ đổi mỗi phút nên cache
+                // không dùng lại được khi thẻ bật. `time.now` vẫn là công cụ
+                // bình thường trong danh sách Tools.
                 val baseLayout = layoutStore?.effectiveLayout?.value
                     ?: RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value)
                 val vars = RequestLayout.requestVars(model, cfg.name)
@@ -128,7 +130,7 @@ class ChatEngine(
                     baseLayout.resolveFiles { path -> runCatching { fs.readText(path) } }
                 }
                 layoutStore?.setFileErrors(fileErrors)
-                val toolDefs = layout.effectiveToolDefs(tools.definitions(), tools.nameForUid(RequestLayout.TIME_NOW_UID))
+                val toolDefs = layout.effectiveToolDefs(tools.definitions())
                 val system = layout.systemText(vars)
                 val budget = ContextBuilder.budget(
                     cfg, model, system,

@@ -77,8 +77,22 @@ data class RequestLayout(val cards: List<RequestCard>) {
         const val HISTORY_ID = "history"
         const val LAST_TURN_ID = "last-turn"
 
-        /** UID của công cụ giờ (DailyTools): thẻ Time điều khiển việc offer nó. */
+        /** UID của công cụ giờ (DailyTools). time.now luôn được offer như một
+         * tool bình thường; thẻ Time chỉ điều khiển việc chèn dòng giờ vào
+         * cuối system (xem systemParts), không lọc tool nữa. */
         const val TIME_NOW_UID = "time.now"
+
+        /**
+         * Dòng giờ chèn vào cuối system khi thẻ Time BẬT (Đợt 2, quyết định 1):
+         * chỉ ngày + giờ, không múi giờ, không vị trí, không giây, không weekday.
+         * Lấy từ vars (requestVars) khi có; nếu không có thì lấy giờ máy lúc gọi.
+         */
+        fun currentTimeLine(vars: Map<String, String>): String {
+            val now = LocalDateTime.now()
+            val date = vars["date"] ?: now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"))
+            val time = vars["time"] ?: now.format(DateTimeFormatter.ofPattern("HH:mm"))
+            return "Current time: $date $time"
+        }
 
         /**
          * Biến {date}, {time}, {model}, {provider} cho lần gửi này.
@@ -158,7 +172,15 @@ data class RequestLayout(val cards: List<RequestCard>) {
         return out
     }
 
-    /** Các phần system prompt, theo thứ tự thẻ (System + Free vai system). */
+    /**
+     * Các phần system prompt, theo thứ tự thẻ (System + Free vai system),
+     * rồi dòng giờ ở cuối khi thẻ Time BẬT.
+     *
+     * Thẻ Time BẬT: thêm "Current time: YYYY-MM-DD HH:MM" vào CUỐI phần
+     * system, gắn nhãn APP_ADDED (dòng giờ do app thêm, không phải user viết).
+     * Thẻ Time TẮT, hoặc không có thẻ Time: không chèn gì. Dòng giờ đổi mỗi
+     * phút nên cache không dùng lại được khi thẻ bật.
+     */
     fun systemParts(vars: Map<String, String>): List<SystemPart> {
         val parts = mutableListOf<SystemPart>()
         for (card in cards) {
@@ -172,6 +194,9 @@ data class RequestLayout(val cards: List<RequestCard>) {
                     }
                 else -> { /* Time/Tools/History/Last turn không phải system */ }
             }
+        }
+        if (timeCard()?.enabled == true) {
+            parts += SystemPart(currentTimeLine(vars), SystemSource.APP_ADDED)
         }
         return parts
     }
@@ -204,15 +229,15 @@ data class RequestLayout(val cards: List<RequestCard>) {
     }
 
     /**
-     * Lọc danh sách công cụ đã resolve theo thẻ Time/Tools.
-     * - Không có thẻ Tools (hoặc thẻ đang bật): giữ nguyên. Thẻ Tools tắt = không offer công cụ nào.
-     * - Không có thẻ Time (hoặc thẻ đang bật): giữ nguyên. Thẻ Time tắt = không offer time.now
-     *   (nhận ra bằng tên hiệu dụng, vì definitions() dùng cùng tên đó).
+     * Lọc danh sách công cụ đã resolve theo thẻ Tools.
+     * - Thẻ Tools tắt = không offer công cụ nào.
+     * - Thẻ Time KHÔNG lọc tool nữa (Đợt 2, quyết định 1): time.now luôn
+     *   được offer như một tool bình thường; tắt time.now ở tầng quản lý
+     *   tool thì xử lý như các tool khác (vẫn offer, chặn lúc gọi).
      * Vị trí thẻ Time/Tools không ảnh hưởng gì: công cụ không phải tin nhắn, mà đi ở trường riêng.
      */
-    fun effectiveToolDefs(defs: List<ToolDef>, timeToolName: String?): List<ToolDef> {
+    fun effectiveToolDefs(defs: List<ToolDef>): List<ToolDef> {
         if (toolsCard()?.enabled == false) return emptyList()
-        if (timeCard()?.enabled != false || timeToolName == null) return defs
-        return defs.filter { it.name != timeToolName }
+        return defs
     }
 }
