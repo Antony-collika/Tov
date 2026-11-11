@@ -40,7 +40,6 @@ import com.example.byokchat.container
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.RequestCard
-import com.example.byokchat.data.RequestLayout
 
 /**
  * Màn "Request panel" (Đợt C): danh sách thẻ từ trên xuống — thứ tự thẻ là
@@ -62,11 +61,6 @@ fun RequestPanelScreen(
     val layout by store.storedLayout.collectAsState()
     val layoutError by store.layoutError.collectAsState()
     val fileErrors by store.fileErrors.collectAsState()
-    // Đọc prefs để dòng tóm tắt thẻ Time hiện đúng mode khi mode đổi.
-    val toolPrefs by container.toolPrefs.prefs.collectAsState()
-    val timeMode = remember(toolPrefs) {
-        container.registry.tool(RequestLayout.TIME_NOW_UID)?.let { container.registry.mode(it).label }
-    }
     var confirmReset by remember { mutableStateOf(false) }
 
     Scaffold(
@@ -91,7 +85,8 @@ fun RequestPanelScreen(
                     "Cards are sent top to bottom. The layout applies to every chat. " +
                         "You can use {date}, {time}, {model} and {provider} in card text — " +
                         "they are replaced when sending. Note: {time} changes every minute, " +
-                        "so the AI's cache is not reused while it is in the prompt.",
+                        "so the AI's cache is not reused while it is in the prompt. " +
+                        "The Time card has the same effect when it is on: its time line changes every minute.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -133,7 +128,7 @@ fun RequestPanelScreen(
                     card = card,
                     isFirst = index == 0,
                     isLast = index == layout.cards.lastIndex,
-                    summary = cardSummary(card, timeMode),
+                    summary = cardSummary(card),
                     onToggle = { store.updateCard(card.id) { it.copy(enabled = !it.enabled) } },
                     onMoveUp = { store.moveCard(card.id, up = true) },
                     onMoveDown = { store.moveCard(card.id, up = false) },
@@ -163,12 +158,13 @@ fun RequestPanelScreen(
 }
 
 /** Một dòng tóm tắt cho từng thẻ. */
-private fun cardSummary(card: RequestCard, timeMode: String?): String = when (card.kind) {
+private fun cardSummary(card: RequestCard): String = when (card.kind) {
     CardKind.SYSTEM -> card.file?.let { "From file: $it" }
         ?: card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(no system prompt)" }
         ?: "(no system prompt)"
     CardKind.TIME -> {
-        "Offers the time tool to the AI (mode: ${timeMode ?: "?"}). Its position changes nothing — time is a tool, not a message."
+        "Adds \"Current time: YYYY-MM-DD HH:MM\" at the end of the system prompt when on. " +
+            "When off, no time is added — the model can still call the time.now tool."
     }
     CardKind.FREE -> (if (card.role.name == "USER") "User" else "System") + " · " +
         (card.file?.let { "From file: $it" }

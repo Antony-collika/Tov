@@ -49,8 +49,6 @@ import com.example.byokchat.container
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
-import com.example.byokchat.data.RequestLayout
-import com.example.byokchat.tools.ToolMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -358,46 +356,29 @@ private fun SwitchRow(title: String, desc: String, checked: Boolean, onChange: (
     )
 }
 
-/** Thẻ Time: mode của công cụ time.now (ghi thẳng vào ToolPrefs, một nguồn duy nhất). */
+/**
+ * Thẻ Time: BẬT = chèn dòng giờ vào cuối system; TẮT = không chèn
+ * (Đợt 2, quyết định 1). Không còn chọn mode cho time.now ở đây: mode
+ * AUTO/ASK/OFF vẫn tồn tại cho các tool khác ở tầng quản lý tool, nhưng
+ * thẻ Time không ghi vào ToolPrefs nữa.
+ */
 @Composable
 private fun TimeCardEditor() {
-    val container = LocalContext.current.container
-    val registry = container.registry
-    val toolPrefs by container.toolPrefs.prefs.collectAsState()
-    val tool = remember { registry.tool(RequestLayout.TIME_NOW_UID) }
-    if (tool == null) {
-        Text("The time tool is not available.", style = MaterialTheme.typography.bodyMedium)
-        return
-    }
-    val mode = remember(toolPrefs) { registry.mode(tool) }
     Text(
-        "The Time card controls whether the AI is offered the time tool (time.now). " +
-            "Time is a tool, not a message: the card's position in the list changes nothing, " +
-            "and the cache is kept because the system prompt stays stable.",
+        "When this card is on, the current time is added at the end of the system prompt " +
+            "as \"Current time: YYYY-MM-DD HH:MM\" (date and time only — no time zone, " +
+            "no location, no seconds). When it is off, no time is added. Either way, the " +
+            "model can still call the time tool (time.now) from the Tools list whenever " +
+            "it wants the time.",
         style = MaterialTheme.typography.bodyMedium,
     )
-    Text("Mode", style = MaterialTheme.typography.labelLarge)
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        ToolMode.entries.forEachIndexed { index, m ->
-            SegmentedButton(
-                selected = mode == m,
-                onClick = { registry.setMode(tool, m) },
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = ToolMode.entries.size),
-                label = { Text(m.label) },
-            )
-        }
-    }
     Text(
-        when (mode) {
-            ToolMode.AUTO -> "Auto: the AI can call time.now whenever it wants."
-            ToolMode.ASK -> "Ask first: you confirm each time the AI wants the time."
-            ToolMode.OFF -> "Off: time.now is not offered at all."
-        },
+        "Bật thẻ này thì dòng giờ thay đổi mỗi phút, nên cache không dùng lại được.",
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = MaterialTheme.colorScheme.error,
     )
     Text(
-        "Turn the card off in the panel to stop offering the tool without changing its mode.",
+        "Turn the card on or off with the switch on the Request panel.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
