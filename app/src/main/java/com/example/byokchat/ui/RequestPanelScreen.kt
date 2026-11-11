@@ -54,6 +54,8 @@ fun RequestPanelScreen(
     onEditCard: (String) -> Unit,
     onOpenTools: () -> Unit,
     onOpenInspector: (() -> Unit)?,
+    /** Đợt 7: nút Request log dời từ Settings sang đây, cạnh nút Preview. */
+    onOpenRequestLog: (() -> Unit)?,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -78,6 +80,9 @@ fun RequestPanelScreen(
                 actions = {
                     if (onOpenInspector != null) {
                         TextButton(onClick = onOpenInspector) { Text("Preview") }
+                    }
+                    if (onOpenRequestLog != null) {
+                        TextButton(onClick = onOpenRequestLog) { Text("Request log") }
                     }
                     TextButton(onClick = { confirmReset = true }) { Text("Reset") }
                 },

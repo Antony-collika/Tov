@@ -134,6 +134,7 @@ fun AppNav() {
                     onEditCard = { cardId -> nav.navigate("card-edit/$cardId" + if (id != null) "?cid=$id" else "") },
                     onOpenTools = { nav.navigate("tools") },
                     onOpenInspector = id?.let { { nav.navigate("inspector/$id") } },
+                    onOpenRequestLog = { nav.navigate("request-log") },
                 )
             }
             composable(
