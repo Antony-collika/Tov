@@ -765,7 +765,7 @@ private fun TimeCardEditor() {
         style = MaterialTheme.typography.bodyMedium,
     )
     Text(
-        "Bật thẻ này thì dòng giờ thay đổi mỗi phút, nên cache không dùng lại được.",
+        "When this card is on, the time line changes every minute, so the cache can't be reused.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error,
     )
