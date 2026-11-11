@@ -2,6 +2,8 @@ package com.example.byokchat.ui
 
 import android.content.Intent
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +66,15 @@ import kotlinx.coroutines.withContext
 private const val VARS_HELP = "You can use {date}, {time}, {model} and {provider} — they are replaced when sending. " +
     "Note: {time} changes every minute, so the AI's cache is not reused while it is in the prompt."
 
+/**
+ * Đợt 8: nguồn nội dung của thẻ System/Free — gõ trực tiếp hay đọc file .md
+ * ngoài (như SourceRadio của FPilot). Chỉ là trạng thái nháp của màn sửa:
+ * lúc Save, TEXT ghi file = null (bỏ liên kết file), FILE ghi đường dẫn
+ * vào trường file của thẻ (có file = External file, không file = Text input)
+ * — mô hình thẻ lưu trữ không đổi, cơ chế đọc lại file mỗi lần gửi giữ nguyên.
+ */
+private enum class CardSource { TEXT, FILE }
+
 /** Sửa một thẻ trong Request panel (Đợt C). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,6 +96,11 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Đợt D: file .md mà thẻ trỏ tới (trống = không trỏ file).
     var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
     var fileError by remember(cardId) { mutableStateOf<String?>(null) }
+    // Đợt 8: nguồn nội dung của thẻ System/Free — khởi đầu theo file đã trỏ
+    // (có file = External file, không file = Text input).
+    var source by remember(cardId) {
+        mutableStateOf(if (card?.file != null) CardSource.FILE else CardSource.TEXT)
+    }
     // Đợt E: thẻ Tools giữ NHIỀU file tools.md (file cũ chuyển thành danh sách 1 file).
     var toolFiles by remember(cardId) { mutableStateOf(card?.toolFiles().orEmpty()) }
     var newToolFile by remember(cardId) { mutableStateOf("") }
@@ -110,13 +126,15 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     val scope = rememberCoroutineScope()
 
     val lastTurnsValid = lastTurns.toIntOrNull()?.let { it in 1..100 } == true
-    val fileValid = file.isBlank() || file.trim().endsWith(".md")
+    // Đợt 8: chỉ kiểm tra đuôi .md khi nguồn là External file.
+    val fileValid = source != CardSource.FILE || file.isBlank() || file.trim().endsWith(".md")
     val newToolFileValid = newToolFile.isBlank() || newToolFile.trim().endsWith(".md")
     val dirty = card != null && (
         text != card.text || label != card.label || role != card.role || policy != card.policy ||
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
             turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
             file.trim() != (card.file ?: "") || toolFiles != card.toolFiles() ||
+            source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             toolChoice != savedMetadata.toolChoice || structured != savedMetadata.structuredOutput ||
             serviceTier != savedMetadata.serviceTier ||
@@ -185,8 +203,12 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 turnTags = turnTags,
                 includeErrorTurns = includeErrors,
                 // Thẻ Tools dùng danh sách files (file đơn cũ gộp vào đó);
-                // thẻ khác giữ nguyên file/files của chúng.
-                file = if (c.kind == CardKind.TOOLS) null else file.trim().ifEmpty { null },
+                // thẻ khác giữ nguyên file/files của chúng. Đợt 8: nguồn
+                // Text input ghi file = null (bỏ liên kết file cũ), nguồn
+                // External file ghi đường dẫn đã chọn/gõ.
+                file = if (c.kind == CardKind.TOOLS) null
+                else if (source == CardSource.FILE) file.trim().ifEmpty { null }
+                else null,
                 files = if (c.kind == CardKind.TOOLS) toolFiles else it.files,
             )
         }
@@ -231,7 +253,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     container.fs.writeText(path, templateText(c.kind))
                 }
             }.onSuccess {
-                withContext(Dispatchers.Main) { file = path; fileError = null }
+                withContext(Dispatchers.Main) { file = path; fileError = null; source = CardSource.FILE }
             }.onFailure { e ->
                 withContext(Dispatchers.Main) { fileError = e.message ?: "Could not create the file." }
             }
@@ -432,23 +454,49 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     }
                 }
                 CardKind.SYSTEM -> {
+                    // Đợt 8: ô Name (lưu vào label đã có; tên hiện trên Panel).
                     OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("System prompt") },
-                        minLines = 6,
-                        maxLines = 12,
+                        value = label,
+                        onValueChange = { label = it },
+                        label = { Text("Card name") },
+                        singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    FileSection(
-                        file = file,
-                        onFileChange = { file = it; fileError = null },
-                        fileValid = fileValid,
-                        fileError = fileError,
-                        onCreateTemplate = ::createTemplate,
-                        onOpenFile = ::openFile,
+                    Text("Source", style = MaterialTheme.typography.labelLarge)
+                    PolicyOption(
+                        selected = source == CardSource.TEXT,
+                        title = "Text input",
+                        desc = "Type the system prompt here.",
+                        onClick = { source = CardSource.TEXT },
                     )
+                    PolicyOption(
+                        selected = source == CardSource.FILE,
+                        title = "External file",
+                        desc = "Read from a .md file in the workspace, again on every send.",
+                        onClick = { source = CardSource.FILE },
+                    )
+                    if (source == CardSource.TEXT) {
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { text = it },
+                            label = { Text("System prompt") },
+                            minLines = 6,
+                            maxLines = 12,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        FileSection(
+                            file = file,
+                            onFileChange = { file = it; fileError = null },
+                            fileValid = fileValid,
+                            fileError = fileError,
+                            onCreateTemplate = ::createTemplate,
+                            onOpenFile = ::openFile,
+                            onFilePicked = { file = it; fileError = null; source = CardSource.FILE },
+                            onPickError = { fileError = it },
+                        )
+                    }
                 }
                 CardKind.FREE -> {
                     OutlinedTextField(
@@ -475,23 +523,42 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    OutlinedTextField(
-                        value = text,
-                        onValueChange = { text = it },
-                        label = { Text("Text") },
-                        minLines = 4,
-                        maxLines = 10,
-                        modifier = Modifier.fillMaxWidth(),
+                    // Đợt 8: chọn nguồn rạch ròi như thẻ System (dùng chung FileSection).
+                    Text("Source", style = MaterialTheme.typography.labelLarge)
+                    PolicyOption(
+                        selected = source == CardSource.TEXT,
+                        title = "Text input",
+                        desc = "Type the text here.",
+                        onClick = { source = CardSource.TEXT },
                     )
-                    Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    FileSection(
-                        file = file,
-                        onFileChange = { file = it; fileError = null },
-                        fileValid = fileValid,
-                        fileError = fileError,
-                        onCreateTemplate = ::createTemplate,
-                        onOpenFile = ::openFile,
+                    PolicyOption(
+                        selected = source == CardSource.FILE,
+                        title = "External file",
+                        desc = "Read from a .md file in the workspace, again on every send.",
+                        onClick = { source = CardSource.FILE },
                     )
+                    if (source == CardSource.TEXT) {
+                        OutlinedTextField(
+                            value = text,
+                            onValueChange = { text = it },
+                            label = { Text("Text") },
+                            minLines = 4,
+                            maxLines = 10,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        FileSection(
+                            file = file,
+                            onFileChange = { file = it; fileError = null },
+                            fileValid = fileValid,
+                            fileError = fileError,
+                            onCreateTemplate = ::createTemplate,
+                            onOpenFile = ::openFile,
+                            onFilePicked = { file = it; fileError = null; source = CardSource.FILE },
+                            onPickError = { fileError = it },
+                        )
+                    }
                 }
                 CardKind.TIME -> TimeCardEditor()
                 CardKind.HISTORY -> {
@@ -715,7 +782,7 @@ private fun templateText(kind: CardKind): String = when (kind) {
     else -> "# Note for the AI\n\nWrite here what the AI should know. This file is read again on every send.\n"
 }
 
-/** Mục "File" trong màn sửa thẻ System/Free (Đợt D). */
+/** Mục "File" trong màn sửa thẻ System/Free (Đợt D, nút "Change file" thêm ở Đợt 8). */
 @Composable
 private fun FileSection(
     file: String,
@@ -724,7 +791,27 @@ private fun FileSection(
     fileError: String?,
     onCreateTemplate: () -> Unit,
     onOpenFile: () -> Unit,
+    /** File vừa chọn bằng hộp chọn của hệ thống (đường dẫn tương đối trong workspace). */
+    onFilePicked: (String) -> Unit,
+    /** File đã chọn không dùng được (nằm ngoài workspace, không phải .md, ...). */
+    onPickError: (String) -> Unit,
 ) {
+    // Đợt 8: chưa từng có file picker trong app (chỉ có FolderPicker cho
+    // thư mục) — thêm bằng SAF OpenDocument như FPilot. Chỉ nhận file .md
+    // NẰM TRONG workspace: đường dẫn tương đối suy ra từ document ID (xem
+    // WorkspaceFs.relativePathForDocument); file ngoài workspace thì báo lỗi
+    // và giữ nguyên giá trị cũ — cơ chế đọc lại file mỗi lần gửi và fallback
+    // văn bản cũ khi lỗi không đổi.
+    val fs = LocalContext.current.container.fs
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val relative = fs.relativePathForDocument(uri)
+        when {
+            relative == null -> onPickError("Choose a file inside the workspace folder.")
+            !relative.endsWith(".md") -> onPickError("The file must end with .md.")
+            else -> onFilePicked(relative)
+        }
+    }
     Text("File (.md in the workspace)", style = MaterialTheme.typography.labelLarge)
     OutlinedTextField(
         value = file,
@@ -744,6 +831,7 @@ private fun FileSection(
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = onCreateTemplate) { Text("Create template") }
+        OutlinedButton(onClick = { pickFile.launch(arrayOf("text/markdown", "text/plain")) }) { Text("Change file") }
         OutlinedButton(enabled = file.isNotBlank(), onClick = onOpenFile) { Text("Open file") }
     }
     if (fileError != null) {
