@@ -38,11 +38,12 @@ enum class ServiceTier { AUTO, DEFAULT, FLEX, FAST, PRIORITY, STANDARD_ONLY }
  * SettingsRepository (trừ max output tokens vẫn theo từng provider như cũ,
  * ở ProviderConfig.maxOutputTokens; stream luôn bật nên không lưu).
  *
- * Mặc định effort = MEDIUM. App KHÔNG tự đoán model có suy luận hay không:
- * danh sách model là chuỗi do user nhập, không có metadata về khả năng của
- * model, nên không thể tự chuyển sang NONE cho model thường — user chọn
- * NONE khi dùng model không suy luận (hoặc khi muốn gọi tool với OpenAI,
- * xem [suppressesTools]).
+ * Mặc định effort theo hãng (quyết định 15, phương án c — xem
+ * [defaultFor]): NONE cho OpenAI(-compatible) vì luật tool của OpenAI,
+ * MEDIUM cho Claude/Gemini. App KHÔNG tự đoán model có suy luận hay
+ * không: danh sách model là chuỗi do user nhập, không có metadata về
+ * khả năng của model — user đổi effort khi dùng model không suy luận
+ * (xem [suppressesTools]).
  */
 @Serializable
 data class MetadataParams(
@@ -186,4 +187,22 @@ data class MetadataParams(
     /** Dòng tóm tắt cho thẻ Metadata trên Panel: "model · effort medium · max 8192 · stream on". */
     fun summary(model: String, maxOutputTokens: Int): String =
         "${model.ifBlank { "no model" }} · effort ${effort.name.lowercase()} · max $maxOutputTokens · stream on"
+
+    companion object {
+        /**
+         * Mặc định Metadata theo hãng đang dùng (quyết định 15, phương án
+         * c): effort NONE cho OpenAI(-compatible) vì luật tool của OpenAI
+         * (effort != NONE thì không gửi được tool — xem
+         * [toolsSuppressedByReasoning]), MEDIUM cho Claude/Gemini (effort
+         * nào tool cũng gửi được) và khi chưa biết hãng (giữ mặc định cũ).
+         * Chỉ dùng khi user chưa từng lưu Metadata — giá trị user đã chọn
+         * luôn được tôn trọng (xem SettingsRepository).
+         */
+        fun defaultFor(type: ProviderType?): MetadataParams = MetadataParams(
+            effort = when (type) {
+                ProviderType.OPENAI, ProviderType.CUSTOM -> ReasoningEffort.NONE
+                else -> ReasoningEffort.MEDIUM
+            },
+        )
+    }
 }

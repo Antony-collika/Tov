@@ -62,6 +62,13 @@ class SettingsRepository(context: Context) {
         _currentModelProviderId.value = providerId
         _currentModel.value = model
         plain.edit().putString("current_model_provider", providerId).putString("current_model", model).apply()
+        // Mặc định effort theo hãng (quyết định 15): khi user chưa từng
+        // lưu Metadata thì mặc định đi theo provider vừa chọn (NONE cho
+        // OpenAI, MEDIUM cho Claude/Gemini). Chỉ đổi giá trị trong bộ
+        // nhớ, KHÔNG ghi ra file — giá trị user đã lưu luôn được tôn trọng.
+        if (plain.getString("metadata_json", null) == null) {
+            _metadata.value = MetadataParams.defaultFor(provider(providerId)?.type)
+        }
     }
 
     /** Nhà cung cấp của lựa chọn mô hình toàn cục (null nếu chưa chọn hoặc provider đã bị xóa). */
@@ -248,6 +255,14 @@ class SettingsRepository(context: Context) {
         if (_ready.value) return
         _providers.value = migrateIncludeUsage(loadProviders())
         _searchKey.value = secure.getString("search_key", "") ?: ""
+        // Mặc định effort theo hãng (quyết định 15): khi user chưa từng
+        // lưu Metadata thì mặc định đi theo provider đang chọn (NONE cho
+        // OpenAI, MEDIUM cho Claude/Gemini). Chỉ đổi giá trị trong bộ
+        // nhớ, KHÔNG ghi ra file — để mặc định vẫn đi theo provider khi
+        // user đổi provider, cho tới khi user tự chọn rồi lưu.
+        if (plain.getString("metadata_json", null) == null) {
+            _metadata.value = MetadataParams.defaultFor(currentModelProvider()?.type)
+        }
         _ready.value = true
     }
 
