@@ -59,7 +59,7 @@ private const val VARS_HELP = "You can use {date}, {time}, {model} and {provider
 /** Sửa một thẻ trong Request panel (Đợt C). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenTools: () -> Unit) {
+fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenTools: () -> Unit, onOpenMessages: (() -> Unit)? = null) {
     val context = LocalContext.current
     val container = context.container
     val store = container.layoutStore
@@ -301,6 +301,16 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenTools: () -> Unit) 
                         checked = includeErrors,
                         onChange = { includeErrors = it },
                     )
+                    // Đợt 4: đường vào màn Messages — quản lý từng lượt của cuộc này.
+                    if (onOpenMessages != null) {
+                        Text("Messages of this chat", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            "See every turn, edit or delete single messages, and delete whole turns.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        OutlinedButton(onClick = onOpenMessages) { Text("Manage messages of this chat") }
+                    }
                 }
                 CardKind.TOOLS -> {
                     Text(

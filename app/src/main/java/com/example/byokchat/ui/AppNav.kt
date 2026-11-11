@@ -131,16 +131,33 @@ fun AppNav() {
                 RequestPanelScreen(
                     conversationId = id,
                     onBack = { nav.popBackStack() },
-                    onEditCard = { cardId -> nav.navigate("card-edit/$cardId") },
+                    onEditCard = { cardId -> nav.navigate("card-edit/$cardId" + if (id != null) "?cid=$id" else "") },
                     onOpenTools = { nav.navigate("tools") },
                     onOpenInspector = id?.let { { nav.navigate("inspector/$id") } },
                 )
             }
-            composable("card-edit/{cardId}", arguments = listOf(navArgument("cardId") { type = NavType.StringType })) { entry ->
+            composable(
+                "card-edit/{cardId}?cid={cid}",
+                arguments = listOf(
+                    navArgument("cardId") { type = NavType.StringType },
+                    navArgument("cid") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { entry ->
                 CardEditScreen(
                     cardId = entry.arguments?.getString("cardId") ?: "",
                     onBack = { nav.popBackStack() },
                     onOpenTools = { nav.navigate("tools") },
+                    // Đợt 4: chỉ thẻ History của một cuộc cụ thể mới mở được màn
+                    // Messages (panel mở từ Settings thì không có cuộc nào).
+                    onOpenMessages = entry.arguments?.getString("cid")?.let { cid -> { nav.navigate("messages/$cid") } },
+                )
+            }
+            composable("messages/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                MessagesScreen(
+                    conversationId = entry.arguments?.getString("id") ?: "",
+                    // Back quay về Request panel, không dừng ở màn sửa thẻ
+                    // History (như FPilot): pop màn Messages rồi pop card-edit.
+                    onBack = { nav.popBackStack(); nav.popBackStack() },
                 )
             }
             composable("tools") {
