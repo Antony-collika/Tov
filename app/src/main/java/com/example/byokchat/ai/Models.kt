@@ -39,6 +39,20 @@ data class AiRequest(
     val messages: List<AiMessage>,
     val tools: List<ToolDef>,
     val maxOutputTokens: Int,
+    /**
+     * Metadata của thẻ Metadata (Đợt 6): effort, stop sequences, tool
+     * choice, structured output, service tier. Model/max tokens/stream
+     * không nằm ở đây: model là lựa chọn toàn cục, max tokens theo từng
+     * provider (ProviderConfig.maxOutputTokens), stream luôn bật.
+     * KHÔNG có temperature/top_p/top_k — xem Metadata.kt.
+     */
+    val metadata: MetadataParams = MetadataParams(),
+    /**
+     * True khi tool đã bị lược khỏi [tools] RIÊNG vì reasoning đang bật
+     * với OpenAI(-compatible) — để Inspector báo cho user biết, thay vì
+     * lặng lẽ gửi request không có tool (xem MetadataParams).
+     */
+    val toolsSuppressedByReasoning: Boolean = false,
 )
 
 sealed interface AiEvent {

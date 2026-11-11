@@ -3,6 +3,7 @@ package com.example.byokchat.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
+import com.example.byokchat.ai.MetadataParams
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -157,6 +158,31 @@ class SettingsRepository(context: Context) {
     fun setOpenAiIncludeUsage(enabled: Boolean) {
         _openAiIncludeUsage.value = enabled
         plain.edit().putBoolean("openai_include_usage", enabled).apply()
+    }
+
+    /**
+     * Metadata của thẻ Metadata (Đợt 6): effort, stop sequences, tool
+     * choice, structured output, service tier — lưu TOÀN CỤC (mọi provider
+     * dùng chung, mỗi hãng tự map sang trường riêng, xem MetadataParams).
+     * max output tokens KHÔNG ở đây: vẫn theo từng provider
+     * (ProviderConfig.maxOutputTokens). Stream luôn bật nên không lưu.
+     */
+    private val metadataJson = Json { ignoreUnknownKeys = true }
+    private val _metadata = MutableStateFlow(
+        runCatching {
+            plain.getString("metadata_json", null)?.let {
+                metadataJson.decodeFromString(MetadataParams.serializer(), it)
+            }
+        }.getOrNull() ?: MetadataParams()
+    )
+    val metadata: StateFlow<MetadataParams> = _metadata.asStateFlow()
+
+    fun setMetadata(params: MetadataParams) {
+        _metadata.value = params
+        plain.edit().putString(
+            "metadata_json",
+            metadataJson.encodeToString(MetadataParams.serializer(), params),
+        ).apply()
     }
 
     fun provider(id: String?): ProviderConfig? = _providers.value.firstOrNull { it.id == id }
