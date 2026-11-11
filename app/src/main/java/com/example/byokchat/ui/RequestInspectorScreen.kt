@@ -36,7 +36,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.byokchat.ai.Role
+import com.example.byokchat.ai.ServiceTier
+import com.example.byokchat.ai.ToolChoiceMode
 import com.example.byokchat.ai.ToolDef
+import com.example.byokchat.data.ProviderType
 import com.example.byokchat.chat.AssembledMessage
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.SystemSource
@@ -93,7 +96,7 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
                 actions = {
                     val a = assembled
                     if (a != null && ready != null) {
-                        TextButton(onClick = { clipboard.setText(AnnotatedString(inspectorMarkdown(a, ready.providerName, ready.model))) }) { Text("Copy") }
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(inspectorMarkdown(a, ready))) }) { Text("Copy") }
                     }
                 },
             )
@@ -150,14 +153,19 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
                         )
                     }
                 }
-                InspectorContent(assembled!!, ready!!.providerName, ready.model, Modifier.weight(1f))
+                InspectorContent(assembled!!, ready!!, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun InspectorContent(a: AssembledRequest, providerName: String, model: String, modifier: Modifier = Modifier) {
+private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, modifier: Modifier = Modifier) {
+    val providerName = ready.providerName
+    val model = ready.model
+    val metadata = ready.metadata
+    val type = ready.providerType
+    val suppressedByReasoning = metadata.toolsSuppressedByReasoning(type)
     // Nhãn lượt lấy từ số lượt ổn định (Đợt 4) mà RequestAssembler tính từ
     // turnNo đã lưu, không đếm lại theo vị trí: tin user thứ k lấy số thứ k.
     // Lượt bị cắt (đứng đầu danh sách) giữ số của nó.
@@ -184,6 +192,45 @@ private fun InspectorContent(a: AssembledRequest, providerName: String, model: S
                     "(system ${formatTokens(TokenEstimator.text(a.system))} · " +
                     "history ${formatTokens(a.historyTokens)})",
                 style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(12.dp))
+        }
+        item { SectionTitle("Metadata") }
+        item {
+            // Đợt 6: hiện đúng metadata lần gửi này dùng — cùng giá trị
+            // ChatEngine gửi, kể cả khi tool bị tắt vì reasoning đang bật.
+            val effortValue = metadata.effortValueFor(type)
+            val toolsLine = when {
+                suppressedByReasoning ->
+                    "Tools are off for this request: reasoning is on (OpenAI Chat Completions " +
+                        "only allows tool calls with effort \"none\")."
+                metadata.toolChoice == ToolChoiceMode.NONE ->
+                    "Tools are off for this request (tool choice: none) — the Tools card stays on for later requests."
+                else -> "Tools: auto — ${a.toolDefs.size} tool(s) offered."
+            }
+            val tierLine = when (type) {
+                ProviderType.GEMINI -> "Service tier: not available for Gemini (its tier is output-only, not a request field)."
+                else -> {
+                    val tier = metadata.serviceTier
+                    if (tier == ServiceTier.AUTO) "Service tier: auto (project default — not sent)."
+                    else "Service tier: ${tier.name.lowercase().replace('_', ' ')}."
+                }
+            }
+            val structuredLine = if (metadata.structuredOutput) {
+                if (type == ProviderType.CLAUDE) "Structured output: on — but not sent to Claude (it needs a JSON schema, which this app does not set yet)."
+                else "Structured output: on (JSON)."
+            } else "Structured output: off."
+            Text(
+                "Model: $model\n" +
+                    "Reasoning effort: ${metadata.effort.name.lowercase()}" +
+                    (if (effortValue != null) " (${metadata.effortFieldName(type)}: $effortValue)" else " (not sent — the provider uses its default)") + "\n" +
+                    "Max output tokens: ${ready.maxOutputTokens}\n" +
+                    "Stream: on (always on — this app only streams)\n" +
+                    "Stop sequences: " + (if (metadata.stopSequences.isEmpty()) "none" else metadata.stopSequences.joinToString(", ")) + "\n" +
+                    toolsLine + "\n" +
+                    structuredLine + "\n" +
+                    tierLine,
+                style = MaterialTheme.typography.bodySmall,
             )
             Spacer(Modifier.height(12.dp))
         }
@@ -287,10 +334,36 @@ private fun ToolCard(t: ToolDef) {
 }
 
 /** Bản Markdown để Copy: cùng nội dung với màn hình, để đối chiếu với Request log. */
-private fun inspectorMarkdown(a: AssembledRequest, providerName: String, model: String): String = buildString {
+private fun inspectorMarkdown(a: AssembledRequest, ready: PreviewResult.Ready): String = buildString {
+    val providerName = ready.providerName
+    val model = ready.model
+    val metadata = ready.metadata
+    val type = ready.providerType
     appendLine("# What the AI will see")
     appendLine("Provider: $providerName · Model: $model")
     appendLine("Estimated tokens: ${a.estimatedTokens} (history ${a.historyTokens})")
+    appendLine()
+    appendLine("## Metadata")
+    val effortValue = metadata.effortValueFor(type)
+    appendLine("Model: $model")
+    appendLine("Reasoning effort: ${metadata.effort.name.lowercase()}" + (if (effortValue != null) " (${metadata.effortFieldName(type)}: $effortValue)" else " (not sent — the provider uses its default)"))
+    appendLine("Max output tokens: ${ready.maxOutputTokens}")
+    appendLine("Stream: on (always on)")
+    appendLine("Stop sequences: " + if (metadata.stopSequences.isEmpty()) "none" else metadata.stopSequences.joinToString(", "))
+    when {
+        metadata.toolsSuppressedByReasoning(type) ->
+            appendLine("Tools: off for this request — reasoning is on (OpenAI Chat Completions only allows tool calls with effort \"none\")")
+        metadata.toolChoice == ToolChoiceMode.NONE ->
+            appendLine("Tools: off for this request (tool choice: none)")
+        else -> appendLine("Tools: auto — ${a.toolDefs.size} tool(s) offered")
+    }
+    appendLine("Structured output: " + if (metadata.structuredOutput) "on (JSON)" + if (type == ProviderType.CLAUDE) " — not sent to Claude (needs a JSON schema)" else "" else "off")
+    appendLine(
+        when (type) {
+            ProviderType.GEMINI -> "Service tier: not available for Gemini"
+            else -> "Service tier: " + if (metadata.serviceTier == ServiceTier.AUTO) "auto (not sent)" else metadata.serviceTier.name.lowercase()
+        }
+    )
     appendLine()
     appendLine("## System")
     if (a.systemParts.isEmpty()) appendLine("(no system prompt)") else {

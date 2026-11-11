@@ -171,7 +171,19 @@ class ChatEngine(
                     nameForUid = { uid -> tools.nameForUid(uid, exposed) },
                     vars = vars,
                 )
-                val request = AiRequest(model, assembled.system, assembled.sentMessages, assembled.toolDefs, cfg.maxOutputTokens)
+                // Đợt 6: Metadata (một nguồn duy nhất với previewAssembled):
+                // cùng đọc settings.metadata, cùng lọc tool bằng
+                // MetadataParams.effectiveTools — Inspector thấy đúng thứ gửi đi.
+                val metadata = settings.metadata.value
+                val request = AiRequest(
+                    model,
+                    assembled.system,
+                    assembled.sentMessages,
+                    metadata.effectiveTools(cfg.type, assembled.toolDefs),
+                    cfg.maxOutputTokens,
+                    metadata,
+                    metadata.toolsSuppressedByReasoning(cfg.type),
+                )
 
                 var lastFlush = System.currentTimeMillis()
                 var lastLive = 0L

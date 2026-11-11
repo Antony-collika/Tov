@@ -9,6 +9,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.byokchat.AppContainer
 import com.example.byokchat.ai.ImageStore
+import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
@@ -20,6 +21,7 @@ import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.isDefaultTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.ProviderConfig
+import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.RequestLayout
 import com.example.byokchat.data.encodeImages
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +46,17 @@ data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int, val 
 
 /** Kết quả xem trước request: sẵn sàng, hoặc lý do cụ thể vì sao chưa có gì để gửi. */
 sealed interface PreviewResult {
-    data class Ready(val request: AssembledRequest, val providerName: String, val model: String) : PreviewResult
+    data class Ready(
+        val request: AssembledRequest,
+        val providerName: String,
+        val model: String,
+        /** Hãng đang dùng — Inspector cần để hiện đúng tên trường metadata (vd reasoning_effort vs thinkingLevel). */
+        val providerType: ProviderType,
+        /** Metadata của lần gửi này (cùng giá trị ChatEngine dùng — một nguồn duy nhất). */
+        val metadata: MetadataParams,
+        /** Max output tokens của provider đang dùng (theo từng provider). */
+        val maxOutputTokens: Int,
+    ) : PreviewResult
     data class Unavailable(val reason: PreviewUnavailable) : PreviewResult
 }
 
@@ -142,17 +154,33 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             cfg, modelName, system,
             toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) },
         )
+        val assembled = RequestAssembler.assemble(
+            layout = layout,
+            rows = rows,
+            toolDefs = toolDefs,
+            budget = budget,
+            nameForUid = { uid -> app.registry.nameForUid(uid, exposed) },
+            vars = vars,
+        )
+        // Đợt 6: cùng logic metadata với ChatEngine.run (một nguồn duy nhất):
+        // cùng đọc settings.metadata, cùng lọc tool — Inspector thấy đúng
+        // thứ sẽ gửi đi, kể cả khi tool bị tắt vì reasoning đang bật.
+        // Token ước lượng trừ đi phần tool đã lược để khỏi đếm thừa.
+        val metadata = app.settings.metadata.value
+        val effectiveTools = metadata.effectiveTools(cfg.type, assembled.toolDefs)
+        val droppedToolTokens = (assembled.toolDefs - effectiveTools.toSet()).sumOf {
+            TokenEstimator.text(it.name + it.description + it.schema.toString())
+        }
         PreviewResult.Ready(
-            request = RequestAssembler.assemble(
-                layout = layout,
-                rows = rows,
-                toolDefs = toolDefs,
-                budget = budget,
-                nameForUid = { uid -> app.registry.nameForUid(uid, exposed) },
-                vars = vars,
+            request = assembled.copy(
+                toolDefs = effectiveTools,
+                estimatedTokens = assembled.estimatedTokens - droppedToolTokens,
             ),
             providerName = cfg.name,
             model = modelName,
+            providerType = cfg.type,
+            metadata = metadata,
+            maxOutputTokens = cfg.maxOutputTokens,
         )
     }
 
