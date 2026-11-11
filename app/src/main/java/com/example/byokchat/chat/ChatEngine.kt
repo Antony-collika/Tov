@@ -108,6 +108,9 @@ class ChatEngine(
             var calls: List<AiToolCall> = emptyList()
             var error: String? = null
             var cancelled: CancellationException? = null
+            // Danh sách tool đã parse từ file tools.md của lượt này (null =
+            // legacy); vòng gọi tool sau khối try cũng cần nó để map tên.
+            var exposed: List<com.example.byokchat.tools.ParsedTool>? = null
             try {
                 // Nhà cung cấp và mô hình dùng cho mọi cuộc trò chuyện đều là lựa chọn toàn cục trong Settings.
                 val cfg = settings.currentModelProvider()
@@ -134,8 +137,22 @@ class ChatEngine(
                 val (layout, fileErrors) = if (fs == null) baseLayout to emptyList() else withContext(Dispatchers.IO) {
                     baseLayout.resolveFiles { path -> runCatching { fs.readText(path) } }
                 }
-                layoutStore?.setFileErrors(fileErrors)
-                val toolDefs = layout.effectiveToolDefs(tools.definitions())
+                // Đợt E phần A: file tools.md của thẻ Tools cũng đọc + parse
+                // lại mỗi lần gửi. Parse lỗi thì CHẶN lần gửi và báo rõ lỗi
+                // (như FPilot) — không gửi với danh sách tool sai.
+                val toolsResolution = if (fs == null) {
+                    RequestLayout.ToolsResolution(null, emptyList())
+                } else withContext(Dispatchers.IO) {
+                    layout.resolveToolFiles({ path -> runCatching { fs.readText(path) } }, tools.originDescriptions())
+                }
+                layoutStore?.setFileErrors(fileErrors + toolsResolution.errors)
+                if (toolsResolution.errors.isNotEmpty()) {
+                    throw AiException(
+                        "The Tools card file could not be used:\n" + toolsResolution.errors.joinToString("\n"),
+                    )
+                }
+                exposed = toolsResolution.exposed
+                val toolDefs = layout.effectiveToolDefs(tools.definitions(exposed))
                 val system = layout.systemText(vars)
                 val budget = ContextBuilder.budget(
                     cfg, model, system,
@@ -146,7 +163,7 @@ class ChatEngine(
                     rows = msgDao.getAll(conversationId).filter { it.id != assistantId },
                     toolDefs = toolDefs,
                     budget = budget,
-                    nameForUid = tools::nameForUid,
+                    nameForUid = { uid -> tools.nameForUid(uid, exposed) },
                     vars = vars,
                 )
                 val request = AiRequest(model, assembled.system, assembled.sentMessages, assembled.toolDefs, cfg.maxOutputTokens)
@@ -176,7 +193,7 @@ class ChatEngine(
                 error = e.message ?: e.toString()
             }
 
-            calls = calls.map { it.copy(uid = tools.uidForName(it.name)) }
+            calls = calls.map { it.copy(uid = tools.uidForName(it.name, exposed)) }
 
             withContext(NonCancellable) {
                 // Show the complete text right away, then persist it and drop the in-memory copy.
@@ -223,7 +240,7 @@ class ChatEngine(
                 return
             }
             for (call in calls) {
-                val outcome = tools.execute(call, turnId)
+                val outcome = tools.execute(call, turnId, exposed)
                 msgDao.upsert(
                     MessageEntity(
                         id = UUID.randomUUID().toString(),

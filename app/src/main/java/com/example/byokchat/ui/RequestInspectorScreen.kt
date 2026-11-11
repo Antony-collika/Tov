@@ -115,8 +115,15 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
                         PreviewUnavailable.NO_MODEL ->
                             "No model is selected yet, so there is nothing to send. " +
                                 "Tap the model name in the message box to choose one."
+                        PreviewUnavailable.TOOLS_FILE_ERROR ->
+                            "The Tools card file could not be read, so there is nothing to send. " +
+                                "Fix the file and try again."
                     }
                 )
+                if (fileErrors.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(fileErrors.joinToString("\n"), style = MaterialTheme.typography.bodySmall)
+                }
             }
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
                 if (layoutError != null) {

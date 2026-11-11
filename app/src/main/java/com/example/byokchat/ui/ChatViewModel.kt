@@ -56,6 +56,8 @@ enum class PreviewUnavailable {
     PROVIDER_UNAVAILABLE,
     /** Đã chọn provider nhưng chưa chọn model (kể cả model rỗng). */
     NO_MODEL,
+    /** File tools.md của thẻ Tools đọc/parse lỗi (xem fileErrors để biết chi tiết). */
+    TOOLS_FILE_ERROR,
 }
 
 /** Danh sách mô hình chỉ làm mới lại sau 5 phút kể từ lần thành công trước. */
@@ -121,8 +123,19 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         val (layout, fileErrors) = withContext(Dispatchers.IO) {
             baseLayout.resolveFiles { path -> runCatching { app.fs.readText(path) } }
         }
-        app.layoutStore.setFileErrors(fileErrors)
-        val toolDefs = layout.effectiveToolDefs(app.registry.definitions())
+        // Đợt E phần A: file tools.md của thẻ Tools cũng đọc + parse lại mỗi lần xem trước.
+        val toolsResolution = withContext(Dispatchers.IO) {
+            layout.resolveToolFiles(
+                { path -> runCatching { app.fs.readText(path) } },
+                app.registry.originDescriptions(),
+            )
+        }
+        app.layoutStore.setFileErrors(fileErrors + toolsResolution.errors)
+        if (toolsResolution.errors.isNotEmpty()) {
+            return@withContext PreviewResult.Unavailable(PreviewUnavailable.TOOLS_FILE_ERROR)
+        }
+        val exposed = toolsResolution.exposed
+        val toolDefs = layout.effectiveToolDefs(app.registry.definitions(exposed))
         val system = layout.systemText(vars)
         val budget = ContextBuilder.budget(
             cfg, modelName, system,
@@ -134,7 +147,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 rows = rows,
                 toolDefs = toolDefs,
                 budget = budget,
-                nameForUid = app.registry::nameForUid,
+                nameForUid = { uid -> app.registry.nameForUid(uid, exposed) },
                 vars = vars,
             ),
             providerName = cfg.name,
