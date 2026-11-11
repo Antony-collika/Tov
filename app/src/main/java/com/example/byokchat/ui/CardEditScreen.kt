@@ -195,7 +195,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     /** Mở file đã trỏ bằng app ngoài (trình soạn .md). */
     fun openFile() = openFileAt(file.trim())
 
-    private fun openFileAt(path: String) {
+    fun openFileAt(path: String) {
         if (path.isEmpty()) return
         try {
             val doc = container.fs.find(path)
