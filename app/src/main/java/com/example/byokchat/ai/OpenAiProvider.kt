@@ -15,8 +15,6 @@ import java.util.UUID
 class OpenAiProvider(
     private val cfg: ProviderConfig,
     private val log: RequestLog? = null,
-    /** Xin thêm số token thật trong luồng stream; tắt đi nếu máy chủ tự dựng từ chối trường này. */
-    private val includeUsage: Boolean = true,
 ) : AiProvider {
     private val base: String get() = cfg.effectiveBaseUrl().trimEnd('/')
 
@@ -99,7 +97,10 @@ class OpenAiProvider(
         put("max_completion_tokens", request.maxOutputTokens)
         put("reasoning_effort", request.metadata.openAiReasoningEffort())
         put("stream", true)
-        if (includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
+        // Số token thật: xin thêm stream_options.include_usage theo từng
+        // provider (cfg.includeUsage, Đợt 7); tắt đi nếu máy chủ tự dựng
+        // từ chối trường này.
+        if (cfg.includeUsage) put("stream_options", buildJsonObject { put("include_usage", true) })
         val stops = request.metadata.stopSequences.filter { it.isNotBlank() }.take(4)
         if (stops.isNotEmpty()) put("stop", JsonArray(stops.map { JsonPrimitive(it) }))
         if (request.metadata.structuredOutput) {

@@ -7,10 +7,11 @@ object ProviderFactory {
     fun create(
         cfg: ProviderConfig,
         log: RequestLog? = null,
-        openAiIncludeUsage: Boolean = true,
     ): AiProvider = when (cfg.type) {
         ProviderType.CLAUDE -> ClaudeProvider(cfg, log)
         ProviderType.GEMINI -> GeminiProvider(cfg, log)
-        ProviderType.OPENAI, ProviderType.CUSTOM -> OpenAiProvider(cfg, log, openAiIncludeUsage)
+        // Đợt 7: include_usage đọc từ chính provider (cfg.includeUsage),
+        // không còn giá trị toàn cục truyền vào đây nữa.
+        ProviderType.OPENAI, ProviderType.CUSTOM -> OpenAiProvider(cfg, log)
     }
 }

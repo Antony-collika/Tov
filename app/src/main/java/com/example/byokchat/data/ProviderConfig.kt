@@ -22,6 +22,15 @@ data class ProviderConfig(
     /** 0 = tự đoán theo tên mô hình. */
     val contextTokens: Int = 0,
     val maxOutputTokens: Int = 8192,
+    /**
+     * OpenAI / Custom: xin thêm số token thật trong luồng stream
+     * (`stream_options.include_usage`). Mặc định bật; máy chủ tự dựng có
+     * thể từ chối trường này thì tắt đi để gửi như cũ. Chỉ có ý nghĩa với
+     * loại OpenAI/Custom — Claude/Gemini tự gửi usage nên không có trường
+     * này. Có giá trị mặc định nên dữ liệu provider cũ vẫn đọc được (đợt 7
+     * migrate giá trị toàn cục cũ sang đây, xem SettingsRepository).
+     */
+    val includeUsage: Boolean = true,
     /** Các mô hình người dùng ghim lên đầu danh sách chọn. Có giá trị mặc định nên dữ liệu cũ vẫn đọc được. */
     val pinnedModels: List<String> = emptyList(),
 ) {

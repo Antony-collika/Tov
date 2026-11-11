@@ -148,17 +148,7 @@ class SettingsRepository(context: Context) {
         plain.edit().putBoolean("request_log_enabled", enabled).apply()
     }
 
-    /**
-     * OpenAI: xin thêm số token thật trong luồng stream (`stream_options.include_usage`).
-     * Mặc định bật; máy chủ tự dựng có thể từ chối trường này thì tắt đi để gửi như cũ.
-     */
-    private val _openAiIncludeUsage = MutableStateFlow(plain.getBoolean("openai_include_usage", true))
-    val openAiIncludeUsage: StateFlow<Boolean> = _openAiIncludeUsage.asStateFlow()
-
-    fun setOpenAiIncludeUsage(enabled: Boolean) {
-        _openAiIncludeUsage.value = enabled
-        plain.edit().putBoolean("openai_include_usage", enabled).apply()
-    }
+    /** Nhật ký request (Đợt B): ghi mỗi lần gọi model ra file, mặc định bật. */
 
     /**
      * Metadata của thẻ Metadata (Đợt 6): effort, stop sequences, tool
@@ -225,6 +215,28 @@ class SettingsRepository(context: Context) {
         plain.edit().putString("default_prompt", text).apply()
     }
 
+    /**
+     * Đợt 7: include_usage từng là cài đặt toàn cục (key
+     * "openai_include_usage", mặc định bật). Nay nó là trường theo từng
+     * provider (ProviderConfig.includeUsage). Migrate một lần khi đọc kho:
+     * giá trị toàn cục cũ áp cho mọi provider OpenAI/Custom hiện có, rồi
+     * xóa key cũ để không migrate lại. Provider mới thêm sau này mặc định
+     * bật. Trường hợp góc: user từng tắt toàn cục mà chưa có provider nào
+     * thì không còn gì để migrate — provider thêm sau mặc định bật.
+     */
+    private fun migrateIncludeUsage(list: List<ProviderConfig>): List<ProviderConfig> {
+        if (!plain.contains("openai_include_usage")) return list
+        val global = plain.getBoolean("openai_include_usage", true)
+        plain.edit().remove("openai_include_usage").apply()
+        val migrated = list.map {
+            if (it.type == ProviderType.OPENAI || it.type == ProviderType.CUSTOM) it.copy(includeUsage = global) else it
+        }
+        if (migrated != list) {
+            secure.edit().putString("providers", json.encodeToString(listSer, migrated)).apply()
+        }
+        return migrated
+    }
+
     private fun loadProviders(): List<ProviderConfig> {
         val raw = secure.getString("providers", null) ?: return emptyList()
         return runCatching { json.decodeFromString(listSer, raw) }.getOrDefault(emptyList())
@@ -234,7 +246,7 @@ class SettingsRepository(context: Context) {
     @Synchronized
     private fun ensureSecureLoaded() {
         if (_ready.value) return
-        _providers.value = loadProviders()
+        _providers.value = migrateIncludeUsage(loadProviders())
         _searchKey.value = secure.getString("search_key", "") ?: ""
         _ready.value = true
     }

@@ -69,6 +69,9 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     val models = remember { mutableStateListOf<String>().apply { addAll(existing?.models ?: emptyList()) } }
     var contextText by remember { mutableStateOf(existing?.contextTokens?.takeIf { it > 0 }?.toString() ?: "") }
     var maxOutText by remember { mutableStateOf((existing?.maxOutputTokens ?: 8192).toString()) }
+    // Đợt 7: include_usage theo từng provider — chỉ có ý nghĩa với loại
+    // OpenAI/Custom (Claude/Gemini tự gửi usage). Provider mới mặc định bật.
+    var includeUsage by remember { mutableStateOf(existing?.includeUsage ?: true) }
     var makeDefault by remember { mutableStateOf(existing == null || existing.id == activeId) }
     var fetching by remember { mutableStateOf(false) }
     /** Kết quả lần fetch gần nhất: null = chưa fetch. */
@@ -89,6 +92,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
             models = list,
             contextTokens = contextText.trim().toIntOrNull() ?: 0,
             maxOutputTokens = maxOutText.trim().toIntOrNull()?.coerceAtLeast(256) ?: 8192,
+            includeUsage = includeUsage,
         )
     }
 
@@ -207,6 +211,21 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
+            // Chỉ loại OpenAI/Custom mới có trường này: Claude/Gemini tự gửi
+            // usage nên không cần xin thêm, ẩn hẳn để user không nhầm.
+            if (type == ProviderType.OPENAI || type == ProviderType.CUSTOM) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Ask for real token counts")
+                        Text(
+                            "Sends stream_options.include_usage so the log shows real counts. Some self-hosted servers reject this — turn it off if requests fail.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = includeUsage, onCheckedChange = { includeUsage = it })
+                }
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Use as the default for new conversations", modifier = Modifier.weight(1f))
                 Switch(checked = makeDefault, onCheckedChange = { makeDefault = it })

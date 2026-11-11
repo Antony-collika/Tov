@@ -60,6 +60,23 @@ class ProviderBodyTest {
     // ---- OpenAI ----
 
     @Test
+    fun openAiIncludeUsageOnByDefault() {
+        val body = OpenAiProvider(cfg(ProviderType.OPENAI)).buildBody(request(ProviderType.OPENAI))
+        assertTrue(body["stream_options"]?.jsonObject?.get("include_usage")?.jsonPrimitive?.content == "true")
+    }
+
+    @Test
+    fun openAiIncludeUsageOffPerProviderOmitsStreamOptions() {
+        // Đợt 7: include_usage theo từng provider — tắt ở provider này thì
+        // body không còn stream_options, provider khác không bị ảnh hưởng.
+        val off = cfg(ProviderType.OPENAI).copy(includeUsage = false)
+        val body = OpenAiProvider(off).buildBody(request(ProviderType.OPENAI))
+        assertNull(body["stream_options"])
+        val onBody = OpenAiProvider(cfg(ProviderType.OPENAI)).buildBody(request(ProviderType.OPENAI))
+        assertTrue(onBody.containsKey("stream_options"))
+    }
+
+    @Test
     fun openAiUsesMaxCompletionTokensNotMaxTokens() {
         val body = OpenAiProvider(cfg(ProviderType.OPENAI)).buildBody(request(ProviderType.OPENAI))
         assertEquals(8192, body["max_completion_tokens"]?.jsonPrimitive?.content?.toInt())

@@ -187,7 +187,7 @@ class ChatEngine(
 
                 var lastFlush = System.currentTimeMillis()
                 var lastLive = 0L
-                ProviderFactory.create(cfg, requestLog, settings.openAiIncludeUsage.value).stream(request).collect { ev ->
+                ProviderFactory.create(cfg, requestLog).stream(request).collect { ev ->
                     when (ev) {
                         is AiEvent.Text -> {
                             text.append(ev.delta)
