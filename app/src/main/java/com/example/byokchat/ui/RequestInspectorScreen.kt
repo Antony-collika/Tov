@@ -70,15 +70,18 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
     val vm: ChatViewModel = viewModel(key = conversationId, factory = viewModelFactory {
         initializer { ChatViewModel(container, conversationId) }
     })
-    var assembled by remember { mutableStateOf<AssembledRequest?>(null) }
+    var preview by remember { mutableStateOf<PreviewResult?>(null) }
     var loading by remember { mutableStateOf(true) }
     // Bố cục không hợp lệ thì Inspector hiện request của bố cục mặc định + báo lỗi.
     val layoutError by container.layoutStore.layoutError.collectAsState()
     val fileErrors by container.layoutStore.fileErrors.collectAsState()
     LaunchedEffect(conversationId) {
-        assembled = vm.previewAssembled()
+        preview = vm.previewAssembled()
         loading = false
     }
+    // Đọc DB trực tiếp (xem ChatViewModel.previewAssembled) nên một lần gọi là đủ.
+    val ready = preview as? PreviewResult.Ready
+    val assembled = ready?.request
 
     Scaffold(
         topBar = {
@@ -89,8 +92,8 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
                 },
                 actions = {
                     val a = assembled
-                    if (a != null) {
-                        TextButton(onClick = { clipboard.setText(AnnotatedString(inspectorMarkdown(a))) }) { Text("Copy") }
+                    if (a != null && ready != null) {
+                        TextButton(onClick = { clipboard.setText(AnnotatedString(inspectorMarkdown(a, ready.providerName, ready.model))) }) { Text("Copy") }
                     }
                 },
             )
@@ -98,8 +101,22 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
     ) { padding ->
         when {
             loading -> Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) { Text("Loading…") }
-            assembled == null -> Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-                Text("No provider or model is selected yet, so there is nothing to send.")
+            preview is PreviewResult.Unavailable -> Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+                Text(
+                    when (preview.reason) {
+                        PreviewUnavailable.CONVERSATION_NOT_FOUND ->
+                            "This chat no longer exists, so there is nothing to preview."
+                        PreviewUnavailable.NO_PROVIDER ->
+                            "No AI provider is selected yet, so there is nothing to send. " +
+                                "Go to Settings → AI providers to add one, then tap the model name in the message box to choose a model."
+                        PreviewUnavailable.PROVIDER_UNAVAILABLE ->
+                            "The selected provider is no longer available (it may have been deleted). " +
+                                "Tap the model name in the message box to choose another one."
+                        PreviewUnavailable.NO_MODEL ->
+                            "No model is selected yet, so there is nothing to send. " +
+                                "Tap the model name in the message box to choose one."
+                    }
+                )
             }
             else -> Column(Modifier.fillMaxSize().padding(padding)) {
                 if (layoutError != null) {
@@ -126,14 +143,14 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
                         )
                     }
                 }
-                InspectorContent(assembled!!, Modifier.weight(1f))
+                InspectorContent(assembled!!, ready!!.providerName, ready.model, Modifier.weight(1f))
             }
         }
     }
 }
 
 @Composable
-private fun InspectorContent(a: AssembledRequest, modifier: Modifier = Modifier) {
+private fun InspectorContent(a: AssembledRequest, providerName: String, model: String, modifier: Modifier = Modifier) {
     // Đánh số lượt: mỗi tin user mở một lượt mới. Lượt bị cắt (đứng đầu danh sách) giữ số của nó.
     var turn = 0
     val numbered = a.messages.map { m ->
@@ -145,6 +162,10 @@ private fun InspectorContent(a: AssembledRequest, modifier: Modifier = Modifier)
 
     LazyColumn(modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         item {
+            Text(
+                "Provider: $providerName · Model: $model",
+                style = MaterialTheme.typography.bodyMedium,
+            )
             Text(
                 "Estimated tokens: ${formatTokens(a.estimatedTokens)} " +
                     "(system ${formatTokens(TokenEstimator.text(a.system))} · " +
@@ -253,8 +274,9 @@ private fun ToolCard(t: ToolDef) {
 }
 
 /** Bản Markdown để Copy: cùng nội dung với màn hình, để đối chiếu với Request log. */
-private fun inspectorMarkdown(a: AssembledRequest): String = buildString {
+private fun inspectorMarkdown(a: AssembledRequest, providerName: String, model: String): String = buildString {
     appendLine("# What the AI will see")
+    appendLine("Provider: $providerName · Model: $model")
     appendLine("Estimated tokens: ${a.estimatedTokens} (history ${a.historyTokens})")
     appendLine()
     appendLine("## System")
