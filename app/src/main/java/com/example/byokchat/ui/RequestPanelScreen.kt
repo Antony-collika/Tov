@@ -173,7 +173,7 @@ fun RequestPanelScreen(
             }
             items(layout.cards, key = { it.id }) { card ->
                 val index = layout.cards.indexOf(card)
-                val row = @Composable {
+                val row: @Composable () -> Unit = {
                     CardRow(
                         card = card,
                         isFirst = index == 0,

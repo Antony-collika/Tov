@@ -327,4 +327,19 @@ class RequestLayoutTest {
         assertTrue(off.validate().any { it.contains("Metadata") && it.contains("turned off") })
         assertTrue(RequestLayout.defaultLayout("x").metadataCard()?.isFixed() == true)
     }
+
+    // ---------- Đợt 8 (ui-polish): tên thẻ System dùng label ----------
+
+    @Test
+    fun systemDisplayNameUsesLabelWhenSet() {
+        // Mặc định vẫn là "System" (bố cục cũ có label rỗng không đổi tên).
+        assertEquals("System", RequestLayout.defaultLayout("x").systemCard()?.displayName())
+        val named = RequestCard(RequestLayout.SYSTEM_ID, CardKind.SYSTEM, label = "My rules", text = "x")
+        assertEquals("My rules", named.displayName())
+        val blank = RequestCard(RequestLayout.SYSTEM_ID, CardKind.SYSTEM, label = "   ", text = "x")
+        assertEquals("System", blank.displayName())
+        // Thẻ Free giữ nguyên luật cũ.
+        assertEquals("Free card", RequestCard("f", CardKind.FREE).displayName())
+        assertEquals("Note", RequestCard("f", CardKind.FREE, label = "Note").displayName())
+    }
 }
