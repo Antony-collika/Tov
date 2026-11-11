@@ -2,8 +2,8 @@ package com.example.byokchat.ui
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.ManagedActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -298,7 +298,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
 
     /** Mở file đã trỏ bằng app ngoài (trình soạn .md) — dùng helper chung (OpenFile.kt). */
     fun openFile() {
-        openFileAt(context, container.fs, file.trim()) { fileError = it }
+        openFileAt(context, container.fs, file.trim(), onError = { fileError = it })
     }
 
     Scaffold(
@@ -640,7 +640,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                                     modifier = Modifier.weight(1f),
                                     style = MaterialTheme.typography.bodyMedium,
                                 )
-                                IconButton(onClick = { openFileAt(context, container.fs, path) { fileError = it } }) {
+                                IconButton(onClick = { openFileAt(context, container.fs, path, onError = { fileError = it }) }) {
                                     Icon(Icons.Default.OpenInNew, contentDescription = "Open file")
                                 }
                                 IconButton(onClick = { toolFiles = toolFiles - path }) {
