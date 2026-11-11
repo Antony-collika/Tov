@@ -168,8 +168,14 @@ object HistoryExporter {
         val resultsByTurn = turns.flatMap { (_, rs) -> rs.filter { it.role == "tool" } }
             .groupBy { it.turnId }
         val messages = LinkedHashMap<String, HistoryMetaMessage>()
+        // Mỗi kết quả tool chỉ gắn cho một tin assistant trong lượt (tin đã gọi
+        // tool đó); tin assistant sau trong cùng lượt không nhận lại.
+        val claimedByTurn = mutableMapOf<String, MutableSet<String?>>()
         for (m in exported) {
-            val rounds = if (m.role != "assistant") emptyList() else toolRoundsOf(m, resultsByTurn[m.turnId].orEmpty())
+            val rounds = if (m.role != "assistant") emptyList() else {
+                val claimed = claimedByTurn.getOrPut(m.turnId) { mutableSetOf() }
+                toolRoundsOf(m, resultsByTurn[m.turnId].orEmpty(), claimed)
+            }
             messages[m.id] = HistoryMetaMessage(
                 attachments = if (m.role == "user") m.images() else emptyList(),
                 createdAt = m.createdAt,
@@ -181,7 +187,11 @@ object HistoryExporter {
     }
 
     /** Vòng tool của một tin assistant: lệnh gọi + kết quả đã ghép theo toolCallId. */
-    private fun toolRoundsOf(assistant: MessageEntity, toolRows: List<MessageEntity>): List<HistoryToolRound> {
+    private fun toolRoundsOf(
+        assistant: MessageEntity,
+        toolRows: List<MessageEntity>,
+        claimed: MutableSet<String?>,
+    ): List<HistoryToolRound> {
         val calls = assistant.toolCallsJson
             ?.let { runCatching { json.decodeFromString(callsSer, it) }.getOrNull() }
             .orEmpty()
@@ -189,7 +199,10 @@ object HistoryExporter {
         val matched = mutableSetOf<String?>()
         val rounds = calls.map { call ->
             val result = byCallId[call.id]
-            if (result != null) matched += call.id
+            if (result != null) {
+                matched += call.id
+                claimed += call.id
+            }
             HistoryToolRound(
                 id = call.id,
                 uid = result?.toolUid,
@@ -200,7 +213,9 @@ object HistoryExporter {
             )
         }
         // Kết quả tool không gắn được với lệnh gọi nào (vd lượt bị ngắt giữa chừng).
-        val unmatched = toolRows.filter { it.toolCallId !in matched }.map { m ->
+        // Chỉ gắn những kết quả chưa ai nhận trong lượt (xem claimed).
+        val unmatched = toolRows.filter { it.toolCallId !in matched && it.toolCallId !in claimed }.map { m ->
+            claimed += m.toolCallId
             HistoryToolRound(
                 id = m.toolCallId ?: "?",
                 uid = m.toolUid,

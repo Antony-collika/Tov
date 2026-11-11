@@ -176,7 +176,7 @@ class RequestLayoutTest {
         assertEquals("Current time: 2026-11-10 14:32", layout.systemParts(vars)[2].text)
         assertEquals(SystemSource.APP_ADDED, layout.systemParts(vars)[2].source)
         assertEquals(
-            "You are claude-x from Anthropic\n\nToday is 2026-11-10 14:32.\n\nCurrent time: 2026-11-10 14:32.",
+            "You are claude-x from Anthropic\n\nToday is 2026-11-10 14:32.\n\nCurrent time: 2026-11-10 14:32",
             layout.systemText(vars),
         )
     }
