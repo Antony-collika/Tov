@@ -37,15 +37,16 @@ class HistoryExporterTest {
         val out = HistoryExporter.renderHistory(conv, rows)
 
         assertTrue(out.contains("session: conv-abcdefgh"))
-        assertTrue(out.contains("title: Test chat"))
+        assertTrue(out.contains("title: \"Test chat\""))
+        assertTrue(out.contains("created: 2023-11-14T22:13:20Z"))
         assertTrue(out.contains("next_turn: 3"))
-        assertTrue(out.contains("## T1 user\nWhat time is it?"))
+        assertTrue(out.contains("## T1 user\n{\"id\":\"m1\"}\nWhat time is it?"))
         assertTrue(out.contains("## T1 round 1"))
         assertTrue(out.contains("### call call-1 current_time"))
         assertTrue(out.contains("### result call-1\n2026-11-10 09:00"))
-        assertTrue(out.contains("## T1 assistant\nIt is 09:00."))
-        assertTrue(out.contains("## T2 user\nThanks"))
-        assertTrue(out.contains("## T2 assistant\nYou are welcome."))
+        assertTrue(out.contains("## T1 assistant\n{\"id\":\"m4\"}\nIt is 09:00."))
+        assertTrue(out.contains("## T2 user\n{\"id\":\"m5\"}\nThanks"))
+        assertTrue(out.contains("## T2 assistant\n{\"id\":\"m6\"}\nYou are welcome."))
         // Lượt 1 đứng trước lượt 2.
         assertTrue(out.indexOf("## T1") < out.indexOf("## T2"))
     }
@@ -59,7 +60,8 @@ class HistoryExporterTest {
             msg("m3", "t1", 3, "assistant", "", { copy(status = "error", error = "Network failed") }),
         )
         val out = HistoryExporter.renderHistory(conv, rows)
-        assertTrue(out.contains("## T1 assistant"))
+        assertTrue(out.contains("## T1 user\n{\"id\":\"m1\"}\nHi"))
+        assertTrue(out.contains("## T1 assistant\n{\"id\":\"m3\"}"))
         assertTrue(out.contains("(error: Network failed)"))
     }
 

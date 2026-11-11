@@ -9,6 +9,7 @@ import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.Instant
 import java.time.ZoneId
@@ -25,7 +26,6 @@ object HistoryExporter {
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
     private val dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
-    private val dateTimeFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
     /** Thư mục của cuộc trò chuyện: Tov/chats/<ngày>_<id 8 ký tự>/history.md */
     fun historyPath(conversation: ConversationEntity): String {
@@ -38,12 +38,12 @@ object HistoryExporter {
     fun renderHistory(conversation: ConversationEntity, rows: List<MessageEntity>): String {
         val turns = LinkedHashMap<String, MutableList<MessageEntity>>()
         rows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
-        val created = Instant.ofEpochMilli(conversation.createdAt)
-            .atZone(ZoneId.systemDefault()).toLocalDateTime().format(dateTimeFmt)
+        val created = DateTimeFormatter.ISO_INSTANT
+            .format(Instant.ofEpochMilli(conversation.createdAt))
         return buildString {
             appendLine("---")
             appendLine("session: ${conversation.id}")
-            appendLine("title: ${conversation.title.ifBlank { "Untitled" }}")
+            appendLine("title: ${json.encodeToString(conversation.title.ifBlank { "Untitled" })}")
             appendLine("created: $created")
             appendLine("next_turn: ${turns.size + 1}")
             appendLine("---")
@@ -62,6 +62,7 @@ object HistoryExporter {
             when (m.role) {
                 "user" -> {
                     appendLine("## T$n user")
+                    appendLine("{\"id\":\"${m.id}\"}")
                     appendLine(m.text)
                     val images = m.images()
                     if (images.isNotEmpty()) appendLine("(+ ${images.size} image(s))")
@@ -94,6 +95,7 @@ object HistoryExporter {
                         }
                     } else if (m.text.isNotBlank() || m.error != null) {
                         appendLine("## T$n assistant")
+                        appendLine("{\"id\":\"${m.id}\"}")
                         if (m.text.isNotBlank()) appendLine(m.text)
                         if (m.error != null) appendLine("(error: ${m.error})")
                         appendLine()
