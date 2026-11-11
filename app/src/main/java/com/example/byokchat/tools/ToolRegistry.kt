@@ -131,11 +131,13 @@ class ToolRegistry(
             .sumOf { TokenEstimator.text(it.defaultName + it.defaultDescription + it.schema.toString()) }
 
     /**
-     * Kiểm tra giới hạn ghi của AI (Đợt E, quyết định 6). Trả về câu báo lỗi
+     * Kiểm tra giới hạn ghi của AI (Đợt E, quyết định 6 + quyết định 14). Trả về câu báo lỗi
      * cho model nếu vi phạm, null nếu được phép.
      * - Mọi đường dẫn ghi phải nằm dưới allowedWriteSubfolder (nếu có).
      * - Tool ghi nội dung văn bản (txt.* WRITE) thì đích phải là file
-     *   .md/.markdown. note.save/update không có đường dẫn trong args (app
+     *   dạng text — xét theo NỘI DUNG, không theo extension (quyết định
+     *   14): file text sửa được bất kể đuôi nào, file nhị phân thì không.
+     *   note.save/update không có đường dẫn trong args (app
      *   tự ghi Tov/notes/<id>.md) nên mặc nhiên đúng.
      * - Tool ghi khác (fs.copy/move/rename/zip, convert.*, csv.*, json.*):
      *   đích là file đầu ra theo đúng chức năng của tool (.zip/.json/.csv...)
@@ -153,9 +155,19 @@ class ToolRegistry(
             val p = path.trim().replace('\\', '/').trim('/')
             return p.startsWith("$sub/")
         }
-        fun isMarkdown(path: String): Boolean {
-            val n = path.trim().lowercase()
-            return n.endsWith(".md") || n.endsWith(".markdown")
+        /**
+         * Đích ghi có phải file dạng text không (quyết định 14): xét theo
+         * nội dung (không có byte NUL trong 2000 byte đầu — xem
+         * WorkspaceFs.isTextFile), không theo extension.
+         * - File chưa có → file mới, nội dung ghi là text nên cho phép mọi đuôi.
+         * - Không đọc được đích (chưa chọn workspace / đường dẫn sai) →
+         *   cho qua để tool tự báo lỗi như cũ, không crash ở đây.
+         * - Thư mục → cho qua để tool tự báo lỗi như cũ.
+         */
+        fun isTextTarget(path: String): Boolean {
+            val doc = runCatching { env.fs.find(path) }.getOrNull() ?: return true
+            if (env.fs.isDir(doc)) return true
+            return env.fs.isTextFile(doc)
         }
         // Đích ghi dạng file của từng tool ("path" của fs.copy/move là NGUỒN
         // đọc nên không tính; đích của chúng nằm ở "dest").
@@ -172,12 +184,12 @@ class ToolRegistry(
         val textWriter = tool.uid.startsWith("txt.")
         for (key in fileDestKeys) {
             val p = args.str(key) ?: continue
-            if (textWriter && !isMarkdown(p)) return ModelFacingText.notMarkdown(p)
+            if (textWriter && !isTextTarget(p)) return ModelFacingText.notTextFile(p)
             if (!underSubfolder(p)) return ModelFacingText.outsideWriteSubfolder(p, sub)
         }
         if (tool.uid == "txt.replace_many") {
             args.strList("paths")?.forEach { p ->
-                if (!isMarkdown(p)) return ModelFacingText.notMarkdown(p)
+                if (!isTextTarget(p)) return ModelFacingText.notTextFile(p)
                 if (!underSubfolder(p)) return ModelFacingText.outsideWriteSubfolder(p, sub)
             }
         }
@@ -230,7 +242,8 @@ class ToolRegistry(
             return ToolOutcome(tool.uid, ModelFacingText.invalidArgsJson(e.message), true)
         }
 
-        // Đợt E, quyết định 6: "Allowed write subfolder" + AI chỉ ghi file .md —
+        // Đợt E, quyết định 6 + quyết định 14: "Allowed write subfolder" +
+        // AI chỉ ghi file dạng text (theo nội dung, không theo extension) —
         // thực thi ở tầng tool (không phải tầng SAF), chặn ngay trước khi hỏi
         // user để không hỏi về một lần ghi vốn đã bị chặn.
         aiWriteViolation(tool, args)?.let { return ToolOutcome(tool.uid, it, true) }

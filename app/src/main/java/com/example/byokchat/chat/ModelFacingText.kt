@@ -27,9 +27,9 @@ object ModelFacingText {
     fun toolTurnedOff(name: String): String =
         "The tool '$name' is turned off in the app settings, so it cannot run. Tell the user they can turn it on in Settings → Manage tools."
 
-    /** AI chỉ được ghi file Markdown (Đợt E, quyết định 6). */
-    fun notMarkdown(path: String): String =
-        "The AI can only write Markdown (.md) files. '$path' is not a Markdown file, so this write was not done."
+    /** AI chỉ được ghi file dạng text (quyết định 14): file nhị phân không ghi được. */
+    fun notTextFile(path: String): String =
+        "The AI can only write text files. '$path' is not a text file, so this write was not done."
 
     /** Đường dẫn ghi nằm ngoài thư mục con cho phép (Đợt E, quyết định 6). */
     fun outsideWriteSubfolder(path: String, subfolder: String): String =
