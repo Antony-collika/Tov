@@ -141,6 +141,9 @@ class SettingsRepository(context: Context) {
         _providers.value = list
         secure.edit().putString("providers", json.encodeToString(listSer, list)).apply()
         if (_activeProviderId.value == id) setActiveProvider(list.firstOrNull()?.id)
+        // Lựa chọn model toàn cục đang trỏ tới provider vừa xóa thì cũng
+        // phải dọn, không thì preview/gửi đều kẹt ở provider không còn tồn tại.
+        if (_currentModelProviderId.value == id) setCurrentModel(null, null)
     }
 
     fun setActiveProvider(id: String?) {
