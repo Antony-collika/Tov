@@ -51,16 +51,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
-import com.example.byokchat.ai.ClaudeThinkingMode
 import com.example.byokchat.ai.MetadataParams
-import com.example.byokchat.ai.claudeThinkingModeFor
 import com.example.byokchat.ai.ReasoningEffort
-import com.example.byokchat.chat.THINKING_SEAL_CARD_BLOCK_MESSAGE
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
-import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.ToolsSource
 import com.example.byokchat.tools.ToolsMdParseException
 import com.example.byokchat.tools.ToolsMdParser
@@ -83,7 +79,7 @@ private enum class CardSource { TEXT, FILE }
 /** Sửa một thẻ trong Request panel (Đợt C). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Unit)? = null, conversationId: String? = null, onOpenConversation: ((String) -> Unit)? = null) {
+fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Unit)? = null) {
     val context = LocalContext.current
     val container = context.container
     val store = container.layoutStore
@@ -101,9 +97,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Đợt D: file mà thẻ trỏ tới (trống = không trỏ file).
     var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
     var fileError by remember(cardId) { mutableStateOf<String?>(null) }
-    // Đợt provider 12/11/2026 (KHÓA CỨNG): thông báo chặn khi sửa thẻ trong
-    // cuộc có thinking của Claude (hiện dưới nút Save), hoặc lỗi khác lúc Save.
-    var lockError by remember(cardId) { mutableStateOf<String?>(null) }
     // Đợt 8: nguồn nội dung của thẻ System/Free — khởi đầu theo file đã trỏ
     // (có file = External file, không file = Text input).
     var source by remember(cardId) {
@@ -135,10 +128,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var effort by remember(cardId) { mutableStateOf(savedMetadata.effort) }
     var stopText by remember(cardId) { mutableStateOf(savedMetadata.stopSequences.joinToString("\n")) }
     var keepSignature by remember(cardId) { mutableStateOf(savedMetadata.keepThoughtSignature) }
-    // Đợt provider 12/11/2026: thinking của Claude (mặc định TẮT — câu hỏi mở
-    // cho Duy, xem báo cáo cuối).
-    var thinkingEnabled by remember(cardId) { mutableStateOf(savedMetadata.thinkingEnabled) }
-    var thinkingBudgetText by remember(cardId) { mutableStateOf(savedMetadata.thinkingBudget.toString()) }
     var maxTokens by remember(cardId) { mutableStateOf((currentProvider?.maxOutputTokens ?: 8192).toString()) }
     val stopLines = stopText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     val stopsValid = stopLines.size <= 4
@@ -149,16 +138,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     val lastTurnsValid = lastTurns.toIntOrNull()?.let { it in 1..100 } == true
     // Đợt fix 11/11/2026 (I1): file thẻ trỏ tới có thể ở bất cứ đâu, đuôi
     // bất kỳ — không còn kiểm tra đuôi .md nữa.
-    // Đợt provider 12/11/2026: chế độ thinking của model Claude đang chọn
-    // (để quyết định có hiện ô budget không). Model chưa chọn thì coi như
-    // cần budget (còn đặt được giá trị trước).
-    val thinkingMode = if (providerType == ProviderType.CLAUDE) claudeThinkingModeFor(currentModel ?: "") else null
-    val showThinkingBudget = thinkingEnabled && (thinkingMode == ClaudeThinkingMode.MANUAL || currentModel.isNullOrBlank())
-    // Đợt provider 12/11/2026: budget thinking (chỉ khi ô budget đang hiện)
-    // phải ≥ 1024 token và nhỏ hơn độ dài tối đa của câu trả lời — quy định
-    // của Anthropic, sai thì báo rõ chứ không tự sửa.
-    val thinkingBudgetValid = !showThinkingBudget ||
-        (thinkingBudgetText.toIntOrNull()?.let { it in 1024 until (maxTokens.toIntOrNull() ?: 8192) } ?: false)
     val dirty = card != null && (
         text != card.text || label != card.label || role != card.role || policy != card.policy ||
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
@@ -168,11 +147,9 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             keepSignature != savedMetadata.keepThoughtSignature ||
-            thinkingEnabled != savedMetadata.thinkingEnabled ||
-            thinkingBudgetText != savedMetadata.thinkingBudget.toString() ||
             (currentProvider != null && maxTokens != currentProvider.maxOutputTokens.toString())
         )
-    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && stopsValid && maxTokensValid && thinkingBudgetValid
+    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && stopsValid && maxTokensValid
     // Thẻ Time/Last turn không có gì để Save (sửa trực tiếp hoặc chỉ đọc).
     // Thẻ Tools CÓ Save (danh sách file) từ Đợt E.
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.LAST_TURN
@@ -236,8 +213,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     effort = effort,
                     stopSequences = stopLines.take(4),
                     keepThoughtSignature = keepSignature,
-                    thinkingEnabled = thinkingEnabled,
-                    thinkingBudget = thinkingBudgetText.toIntOrNull() ?: savedMetadata.thinkingBudget,
                 )
             )
             val cfg = currentProvider
@@ -246,24 +221,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 container.settings.saveProvider(cfg.copy(maxOutputTokens = max))
             }
             onBack()
-            return
-        }
-        // Đợt provider 12/11/2026 (quyết định của Duy — KHÓA CỨNG thay vì
-        // branch): cuộc có thinking của Claude thì không sửa được thẻ
-        // System/Tools/Free nữa (thẻ lưu chung cho mọi cuộc nên sửa sẽ phá
-        // mạch suy luận của cuộc này); muốn đổi thì mở cuộc mới rồi sửa thẻ
-        // ở đó. Chỉ chặn khi đủ 3 điều kiện (niêm phong + provider Claude +
-        // thinking đang bật) — như cổng của thẻ Free ở Q4.
-        if ((c.kind == CardKind.SYSTEM || c.kind == CardKind.TOOLS || c.kind == CardKind.FREE) && conversationId != null) {
-            scope.launch {
-                val sealedBlocked = container.ops.hasThinkingSeal(conversationId) &&
-                    providerType == ProviderType.CLAUDE && savedMetadata.thinkingEnabled
-                if (sealedBlocked) {
-                    lockError = THINKING_SEAL_CARD_BLOCK_MESSAGE
-                } else {
-                    saveCard(c)
-                }
-            }
             return
         }
         saveCard(c)
@@ -298,8 +255,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 toolsSource = if (c.kind == CardKind.TOOLS) toolsSource else it.toolsSource,
             )
         }
-        // Đợt provider 12/11/2026 (Q2): khi sửa thẻ trong cuộc có thinking
-        // của Claude thì không quay về panel (màn sẽ mở cuộc nhánh mới).
         if (goBack) onBack()
     }
 
@@ -377,11 +332,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Đợt provider 12/11/2026: thông báo khóa thẻ vì thinking của
-            // Claude (hiện khi user bấm Save mà cuộc đang bị niêm phong).
-            if (lockError != null) {
-                Text(lockError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-            }
             when (card.kind) {
                 CardKind.METADATA -> {
                     // Đợt 6: model chỉ đọc (chọn ở thanh nhập chat như cũ).
@@ -399,9 +349,9 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     )
                     // Đợt provider 12/11/2026: mọi hãng đều có lựa chọn mức
                     // suy luận (OpenAI dùng Responses API — suy luận với tool
-                    // dùng chung được; DeepSeek gửi lại reasoning_content;
-                    // Claude/Gemini như cũ). D3 cũ (Chat Completions ép
-                    // effort "none" cho OpenAI) đã bỏ.
+                    // dùng chung được; máy chủ tương thích gửi lại
+                    // reasoning_content; Gemini như cũ). D3 cũ (Chat
+                    // Completions ép effort "none" cho OpenAI) đã bỏ.
                     Text("How hard the model thinks", style = MaterialTheme.typography.labelLarge)
                     Text(
                         "How hard the model thinks before it answers. Harder thinking " +
@@ -424,46 +374,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                             },
                             onClick = { effort = option },
                         )
-                    }
-                    // Đợt provider 12/11/2026: thinking của Claude — chỉ
-                    // hãng này mới có công tắc riêng (OpenAI/DeepSeek dùng
-                    // chung lựa chọn "How hard the model thinks" ở trên).
-                    if (providerType == ProviderType.CLAUDE) {
-                        SwitchRow(
-                            title = "Extended thinking",
-                            desc = "Let Claude think before it answers. The thinking is shown in the chat under \"Suy luận\" and sent back to Claude with the next request.",
-                            checked = thinkingEnabled,
-                            onChange = { thinkingEnabled = it },
-                        )
-                        if (thinkingEnabled && thinkingMode == ClaudeThinkingMode.ADAPTIVE) {
-                            Text(
-                                "This model manages its own thinking depth — \"How hard the model thinks\" above controls it. No separate budget for this model.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (thinkingEnabled && thinkingMode == ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON) {
-                            Text(
-                                "This model thinks by default — Anthropic doesn't let it be turned off. Turning the switch off only stops the app from asking for a readable summary.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        if (showThinkingBudget) {
-                            OutlinedTextField(
-                                value = thinkingBudgetText,
-                                onValueChange = { thinkingBudgetText = it.filter { ch -> ch.isDigit() }.take(7) },
-                                label = { Text("Thinking budget (tokens)") },
-                                singleLine = true,
-                                isError = !thinkingBudgetValid,
-                                supportingText = {
-                                    if (!thinkingBudgetValid) Text("Enter a number from 1024 up to the longest answer above, minus 1.")
-                                    else Text("How many tokens Claude may spend thinking. At least 1024, and less than the longest answer.")
-                                },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
                     }
                     if (currentProvider != null) {
                         OutlinedTextField(

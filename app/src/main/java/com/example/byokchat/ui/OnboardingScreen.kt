@@ -272,7 +272,6 @@ private fun StepChooseProvider(vm: OnboardingViewModel) {
             "Pick one. You need an API key (like a password for using the AI) from your account there.",
             style = MaterialTheme.typography.bodyMedium,
         )
-        ProviderChoiceCard(ProviderType.CLAUDE, "Use a key from your Anthropic account page.") { vm.chooseType(ProviderType.CLAUDE) }
         ProviderChoiceCard(ProviderType.OPENAI, "Use a key from your OpenAI account page.") { vm.chooseType(ProviderType.OPENAI) }
         ProviderChoiceCard(ProviderType.GEMINI, "Use a key from your Google account.") { vm.chooseType(ProviderType.GEMINI) }
         ProviderChoiceCard(

@@ -116,8 +116,16 @@ object ContextBuilder {
                     ?.let { runCatching { json.decodeFromString(callsSer, it) }.getOrNull() }
                     .orEmpty()
                     .map { c -> c.uid?.takeIf { it.isNotEmpty() }?.let(nameForUid)?.let { n -> c.copy(name = n) } ?: c }
+                // Hãng đã bỏ (Anthropic): khối thinking cũ trong lịch sử thì
+                // bỏ qua hẳn ở request — không gửi lại cho hãng nào, không
+                // làm hỏng request, và Preview cũng không hiện nó (Preview
+                // chỉ hiện thứ thật sự gửi). Tin nhắn trong DB giữ nguyên;
+                // khối "Suy luận" ở màn chat vẫn đọc trực tiếp từ DB nên
+                // user vẫn xem được chữ suy luận đã lưu.
+                val reasoningProvider = m.reasoningProvider?.takeIf { it != "anthropic" }
                 AiMessage(Role.ASSISTANT, text = m.text, toolCalls = calls, thoughtSignature = m.thoughtSignature,
-                    reasoningText = m.reasoningText, reasoningReplay = m.reasoningReplay, reasoningProvider = m.reasoningProvider)
+                    reasoningText = if (reasoningProvider == null) null else m.reasoningText,
+                    reasoningReplay = if (reasoningProvider == null) null else m.reasoningReplay, reasoningProvider = reasoningProvider)
             }
         }
         "tool" -> AiMessage(

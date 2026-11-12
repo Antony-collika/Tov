@@ -66,8 +66,10 @@ abstract class AppDatabase : RoomDatabase() {
          * v6 -> v7 (Đợt provider 12/11/2026): suy luận của provider cho tin
          * assistant — `reasoningText` (chuỗi đọc được, hiện ở khối "Suy luận"
          * + Preview), `reasoningReplay` (JSON gửi lại nguyên vẹn: output
-         * items của Responses / khối thinking của Claude), `reasoningProvider`
-         * (hãng đã sinh ra suy luận: "openai" / "deepseek" / "anthropic").
+         * items của Responses), `reasoningProvider`
+         * (hãng đã sinh ra suy luận: "openai" / "custom" / "deepseek" —
+         * "deepseek" là dữ liệu cũ, nay DeepSeek dùng qua Custom; "anthropic"
+         * là dữ liệu cũ, hãng đó đã bỏ — app bỏ qua khi đọc).
          * Hàng cũ để null — request sau chỉ gửi lại khi có, không lỗi.
          */
         private val MIGRATION_6_7 = object : Migration(6, 7) {

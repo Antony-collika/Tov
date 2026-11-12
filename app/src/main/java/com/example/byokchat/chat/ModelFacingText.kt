@@ -13,9 +13,6 @@ object ModelFacingText {
     /** Kết quả tool khi user từ chối cho chạy (ToolRegistry.execute, mode ASK). */
     const val DENIED_ACTION = "The user denied this action. Do not try again unless they ask you to."
 
-    /** Kết quả tool rỗng, chỉ Claude mới thay bằng chuỗi này (ClaudeProvider). */
-    const val NO_RESULT = "(no result)"
-
     /** Ghi chú khi kết quả tool bị cắt ngắn (cap, tối đa 30 000 ký tự). */
     fun truncatedNote(moreChars: Int): String = "\n…[truncated, $moreChars more characters]"
 

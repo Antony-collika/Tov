@@ -37,7 +37,7 @@ fun ChatEmptyState(
             noProvider -> Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("No AI connected yet", style = MaterialTheme.typography.titleMedium)
-                    Text("Connect an AI (Claude, OpenAI, Gemini...) to start chatting.")
+                    Text("Connect an AI (OpenAI, Gemini, or a compatible server...) to start chatting.")
                     Button(onClick = onConnect) { Text("Connect AI") }
                 }
             }

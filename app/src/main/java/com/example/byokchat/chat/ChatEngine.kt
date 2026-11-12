@@ -209,7 +209,6 @@ class ChatEngine(
                 reasoningProvider = when (cfg.type) {
                     ProviderType.OPENAI -> "openai"
                     ProviderType.DEEPSEEK -> "deepseek"
-                    ProviderType.CLAUDE -> "anthropic"
                     else -> null
                 }
                 ProviderFactory.create(cfg, requestLog).stream(request).collect { ev ->

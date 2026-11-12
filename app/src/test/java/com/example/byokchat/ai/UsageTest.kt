@@ -10,16 +10,6 @@ class UsageTest {
     private fun obj(s: String) = Json.parseToJsonElement(s).jsonObject
 
     @Test
-    fun parsesClaudeUsage() {
-        val u = Usage.fromClaude(obj("""{"input_tokens":1200,"output_tokens":56,"cache_read_input_tokens":1000,"cache_creation_input_tokens":200}"""))
-        assertEquals(1200, u.inputTokens)
-        assertEquals(56, u.outputTokens)
-        assertEquals(1000, u.cachedTokens)
-        assertEquals(200, u.cacheCreationTokens)
-        assertEquals("[usage] prompt 1200 · cached 1000 · cache write 200 · completion 56", u.summaryLine())
-    }
-
-    @Test
     fun parsesOpenAiUsage() {
         val u = Usage.fromOpenAi(obj("""{"prompt_tokens":300,"completion_tokens":40,"prompt_tokens_details":{"cached_tokens":250},"completion_tokens_details":{"reasoning_tokens":15}}"""))
         assertEquals(300, u.inputTokens)
@@ -38,12 +28,6 @@ class UsageTest {
         assertEquals(5, u.cacheCreationTokens)
         assertEquals(30, u.reasoningTokens)
         assertEquals("[usage] prompt 100 · cached 80 · cache write 5 · completion 50 · reasoning 30", u.summaryLine())
-    }
-
-    @Test
-    fun parsesClaudeThinkingTokens() {
-        val u = Usage.fromClaude(obj("""{"input_tokens":1200,"output_tokens":56,"output_tokens_details":{"thinking_tokens":40}}"""))
-        assertEquals(40, u.reasoningTokens)
     }
 
     @Test

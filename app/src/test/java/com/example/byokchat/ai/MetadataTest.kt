@@ -34,10 +34,8 @@ class MetadataTest {
         assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.CUSTOM))
         assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.DEEPSEEK))
         assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.GEMINI))
-        assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.CLAUDE))
         // Tóm tắt trên panel hiện effort thật sự áp cho hãng đó.
         assertEquals("gpt-5 · effort high · max 8192", high.summary("gpt-5", 8192, ProviderType.OPENAI))
-        assertEquals("gpt-5 · effort high · max 8192", high.summary("gpt-5", 8192, ProviderType.CLAUDE))
     }
 
     @Test
@@ -63,13 +61,6 @@ class MetadataTest {
     }
 
     @Test
-    fun thinkingDefaultsAreOffWithBudget4096() {
-        val m = MetadataParams()
-        assertFalse(m.thinkingEnabled)
-        assertEquals(4096, m.thinkingBudget)
-    }
-
-    @Test
     fun geminiThinkingLevelOmitsNoneAndClampsXhighMaxToHigh() {
         val m = MetadataParams()
         assertNull(m.copy(effort = ReasoningEffort.NONE).geminiThinkingLevel())
@@ -80,43 +71,12 @@ class MetadataTest {
     }
 
     @Test
-    fun claudeEffortOmitsNoneAndClampsMinimalToLow() {
-        val m = MetadataParams()
-        assertNull(m.copy(effort = ReasoningEffort.NONE).claudeEffort("claude-opus-5"))
-        assertEquals("low", m.copy(effort = ReasoningEffort.MINIMAL).claudeEffort("claude-opus-5"))
-        assertEquals("medium", m.claudeEffort("claude-opus-5"))
-        assertEquals("xhigh", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("claude-opus-5"))
-        assertEquals("max", m.copy(effort = ReasoningEffort.MAX).claudeEffort("claude-opus-5"))
-    }
-
-    @Test
-    fun claudeEffortDependsOnModelSupport() {
-        // Đợt provider 12/11/2026 (Q6): chỉ gửi effort cho model hãng hỗ trợ.
-        val m = MetadataParams()
-        // Model không hỗ trợ effort thì không gửi gì (gửi là lỗi 400).
-        assertNull(m.claudeEffort("claude-sonnet-4-5"))
-        assertNull(m.claudeEffort("claude-haiku-4-5"))
-        assertNull(m.claudeEffort("claude-3-5-sonnet"))
-        assertNull(m.claudeEffort("claude-opus-4-4"))
-        // Opus 4.5 chỉ có low/medium/high: xhigh/max kẹp về high.
-        assertEquals("high", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("claude-opus-4-5"))
-        assertEquals("high", m.copy(effort = ReasoningEffort.MAX).claudeEffort("claude-opus-4-5"))
-        assertEquals("medium", m.claudeEffort("claude-opus-4-5"))
-        // Opus 4.6 / Sonnet 4.6: có max nhưng không có xhigh.
-        assertEquals("high", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("claude-opus-4-6"))
-        assertEquals("max", m.copy(effort = ReasoningEffort.MAX).claudeEffort("claude-sonnet-4-6"))
-        // Model mới không nhận ra tên thì coi là hỗ trợ đủ.
-        assertEquals("xhigh", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("unknown-model"))
-    }
-
-    @Test
     fun effortOptionsArePerProvider() {
         val m = MetadataParams()
         assertEquals(7, m.effortOptionsFor(ProviderType.OPENAI).size)
         assertEquals(listOf(ReasoningEffort.NONE, ReasoningEffort.LOW, ReasoningEffort.HIGH, ReasoningEffort.MAX), m.effortOptionsFor(ProviderType.DEEPSEEK))
         assertFalse(m.effortOptionsFor(ProviderType.GEMINI).contains(ReasoningEffort.XHIGH))
         assertFalse(m.effortOptionsFor(ProviderType.GEMINI).contains(ReasoningEffort.MAX))
-        assertFalse(m.effortOptionsFor(ProviderType.CLAUDE).contains(ReasoningEffort.MINIMAL))
     }
 
     @Test
@@ -126,11 +86,9 @@ class MetadataTest {
         assertEquals("reasoning_effort", m.effortFieldName(ProviderType.CUSTOM))
         assertEquals("reasoning_effort", m.effortFieldName(ProviderType.DEEPSEEK))
         assertEquals("thinkingLevel", m.effortFieldName(ProviderType.GEMINI))
-        assertEquals("output_config.effort", m.effortFieldName(ProviderType.CLAUDE))
         assertEquals("medium", m.effortValueFor(ProviderType.OPENAI))
         assertEquals("high", m.copy(effort = ReasoningEffort.MEDIUM).effortValueFor(ProviderType.DEEPSEEK))
         assertEquals("MEDIUM", m.effortValueFor(ProviderType.GEMINI))
-        assertEquals("medium", m.effortValueFor(ProviderType.CLAUDE))
         assertNull(m.copy(effort = ReasoningEffort.NONE).effortValueFor(ProviderType.GEMINI))
     }
 }

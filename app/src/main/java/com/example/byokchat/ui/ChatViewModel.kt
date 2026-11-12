@@ -15,8 +15,6 @@ import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RequestAssembler
-import com.example.byokchat.chat.THINKING_SEAL_BLOCK_MESSAGE
-import com.example.byokchat.chat.THINKING_SEAL_EXTERNAL_REJECTED_MESSAGE
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
@@ -225,12 +223,6 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                     _events.emit(ChatEvent.Error("Could not sync history.md: ${r.error}"))
                 HistorySync.SyncResult.ExternalEditDiscarded ->
                     _events.emit(ChatEvent.Error("Your edit to history.md while the AI was answering had no effect — the file was overwritten when the answer finished."))
-                // Đợt provider 12/11/2026 (quyết định của Duy — phương án A,
-                // thay cho rẽ nhánh Q2 trước đó): sửa ngoài chạm vào lịch sử
-                // đã niêm phong thì không áp, không tách nhánh; file đã được
-                // ghi lại từ Room để khôi phục — chỉ báo user.
-                HistorySync.SyncResult.SealedExternalEditRejected ->
-                    _events.emit(ChatEvent.Error(THINKING_SEAL_EXTERNAL_REJECTED_MESSAGE))
                 else -> Unit
             }
         } finally {
@@ -265,32 +257,14 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         pendingImages.clear()
         viewModelScope.launch {
             val turnId = UUID.randomUUID().toString()
-            // Đợt provider 12/11/2026: đổi model giữa session khi cuộc có
-            // thinking của Claude — gửi tiếp sang hãng khác sẽ mang theo khối
-            // thinking niêm phong (hãng khác không đọc được, chữ ký lại gắn
-            // với lịch sử cũ). Rẽ nhánh sang cuộc mới, bỏ khối đó, rồi gửi
-            // tin mới ở cuộc mới; màn chat mở cuộc mới (như regenerateInBranch).
-            var targetId = conversationId
-            val currentType = app.settings.currentModelProvider()?.type
-            if (currentType != null && currentType != ProviderType.CLAUDE &&
-                app.ops.hasThinkingSeal(conversationId)
-            ) {
-                try {
-                    targetId = app.ops.branchForModelSwitch(conversationId).conversationId
-                    _events.emit(ChatEvent.OpenBranch(targetId))
-                } catch (e: Exception) {
-                    _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
-                    return@launch
-                }
-            }
             // Đợt 4: số lượt ổn định — lượt mới lấy (số lớn nhất hiện có + 1),
             // chỉ tăng không giảm nên số của lượt đã xóa không dùng lại.
-            val turnNo = (db.messages().maxTurnNo(targetId) ?: 0) + 1
-            val seq = (db.messages().maxSeq(targetId) ?: 0) + 1
+            val turnNo = (db.messages().maxTurnNo(conversationId) ?: 0) + 1
+            val seq = (db.messages().maxSeq(conversationId) ?: 0) + 1
             db.messages().upsert(
                 MessageEntity(
                     id = UUID.randomUUID().toString(),
-                    conversationId = targetId,
+                    conversationId = conversationId,
                     turnId = turnId,
                     turnNo = turnNo,
                     seq = seq,
@@ -300,12 +274,12 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                     createdAt = System.currentTimeMillis(),
                 )
             )
-            val conv = db.conversations().get(targetId)
+            val conv = db.conversations().get(conversationId)
             if (conv != null && isDefaultTitle(conv.title)) {
                 val title = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(40) ?: "Image"
-                db.conversations().rename(targetId, title)
+                db.conversations().rename(conversationId, title)
             }
-            app.engine.start(targetId, turnId)
+            app.engine.start(conversationId, turnId)
         }
     }
 
@@ -374,30 +348,10 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     // ---------- Menu tin nhắn ----------
 
-    /**
-     * Chặn sửa trong app khi cả 3 điều kiện đúng (quyết định của Duy
-     * 12/11/2026 — KHÓA CỨNG thay vì branch): cuộc có thinking của Claude
-     * đã niêm phong, provider hiện tại là Claude, thinking đang bật. Ngoài
-     * 3 điều kiện đó thì sửa bình thường như cũ.
-     */
-    private suspend fun sealedEditBlocked(): Boolean {
-        if (!app.ops.hasThinkingSeal(conversationId)) return false
-        if (app.settings.currentModelProvider()?.type != ProviderType.CLAUDE) return false
-        if (!app.settings.metadata.value.thinkingEnabled) return false
-        return true
-    }
-
     /** Edit message: chỉ lưu nội dung đã sửa, từ lần gửi sau dùng nội dung đó. */
     fun saveEdit(messageId: String, text: String) {
         if (generating.value) return
         viewModelScope.launch {
-            // Đợt provider 12/11/2026 (quyết định của Duy — KHÓA CỨNG thay
-            // vì branch): cuộc có thinking của Claude thì không sửa được
-            // tin nữa; muốn đổi thì mở cuộc mới.
-            if (sealedEditBlocked()) {
-                _events.emit(ChatEvent.Error(THINKING_SEAL_BLOCK_MESSAGE))
-                return@launch
-            }
             app.ops.editMessage(messageId, text)
             app.engine.exportHistory(conversationId)
         }
@@ -407,11 +361,6 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun deleteTurn(turnId: String) {
         if (generating.value) return
         viewModelScope.launch {
-            // Đợt provider 12/11/2026 (KHÓA CỨNG — như saveEdit).
-            if (sealedEditBlocked()) {
-                _events.emit(ChatEvent.Error(THINKING_SEAL_BLOCK_MESSAGE))
-                return@launch
-            }
             val backup = app.ops.deleteTurn(conversationId, turnId)
             app.engine.exportHistory(conversationId)
             _events.emit(ChatEvent.Deleted(backup))
@@ -431,13 +380,6 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun regenerateHere(turnId: String, newUserText: String?) {
         if (generating.value) return
         viewModelScope.launch {
-            // Đợt provider 12/11/2026 (KHÓA CỨNG — như saveEdit): cuộc có
-            // thinking của Claude thì không tạo lại ở đây được nữa; muốn
-            // tạo lại thì chọn tạo ở cuộc mới trong hộp thoại.
-            if (sealedEditBlocked()) {
-                _events.emit(ChatEvent.Error(THINKING_SEAL_BLOCK_MESSAGE))
-                return@launch
-            }
             // Đợt E: xung đột khi regenerate — file đổi ngoài app thì giữ bản
             // sửa ngoài, hủy việc tạo lại, báo lỗi.
             if (app.historySync?.hasExternalChange(conversationId) == true) {
@@ -450,7 +392,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     }
 
     /** Tạo lại ở cuộc mới; cuộc gốc giữ nguyên. */
-    fun regenerateInBranch(turnId: String, newUserText: String?, stripThinking: Boolean = false) {
+    fun regenerateInBranch(turnId: String, newUserText: String?) {
         if (generating.value) return
         viewModelScope.launch {
             // Đợt E: xung đột khi regenerate — như regenerateHere.
@@ -460,11 +402,6 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             }
             try {
                 val r = app.ops.branchForRegenerate(conversationId, turnId, newUserText)
-                // Đợt provider 12/11/2026 (Q2): rẽ nhánh từ cuộc có thinking
-                // của Claude thì bỏ khối thinking cũ ở nhánh (lịch sử đã
-                // đổi — chữ sửa mới hoặc câu trả lời mới — nên khối cũ gắn
-                // với lịch sử cũ sẽ lỗi 400 nếu gửi lại).
-                if (stripThinking) app.ops.stripThinkingSeal(r.conversationId)
                 app.engine.start(r.conversationId, r.turnMap.getValue(turnId))
                 _events.emit(ChatEvent.OpenBranch(r.conversationId))
             } catch (e: Exception) {

@@ -62,7 +62,7 @@ fun ModelPickerSheet(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text("No AI connected yet", style = MaterialTheme.typography.titleMedium)
-                Text("Connect an AI (Claude, OpenAI, Gemini...) to choose a model.")
+                Text("Connect an AI (OpenAI, Gemini, or a compatible server...) to choose a model.")
                 Button(onClick = onConnect) { Text("Connect AI") }
             }
         } else {

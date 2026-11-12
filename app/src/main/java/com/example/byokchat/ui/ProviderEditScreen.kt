@@ -15,7 +15,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -54,17 +53,9 @@ import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-/** Đợt provider 12/11/2026: nội dung giáo dục về thinking của Claude — hiện
- * trong popup khi Save provider Anthropic lần đầu, và ở footnote cuối màn sửa
- * provider Anthropic để đọc lại. */
-internal const val CLAUDE_THINKING_INFO =
-    "Claude's extended thinking: once a chat has used thinking, Claude requires the system prompt, tools, and earlier messages to stay exactly the same — changing them breaks the reasoning chain and the request fails. In this app, those parts are locked for that chat once thinking has been used. To change them, start a new chat. Switching to a different model mid-chat starts a new branch instead."
-
 fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit) {
     val context = LocalContext.current
     val settings = context.container.settings
-    val activeId by settings.activeProviderId.collectAsState()
-    val educated by settings.claudeThinkingEducated.collectAsState()
     val existing = remember { providerId?.let { settings.provider(it) } }
     val type = existing?.type ?: runCatching { ProviderType.valueOf(newType ?: "") }.getOrDefault(ProviderType.OPENAI)
     val scope = rememberCoroutineScope()
@@ -77,7 +68,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     var contextText by remember { mutableStateOf(existing?.contextTokens?.takeIf { it > 0 }?.toString() ?: "") }
     var maxOutText by remember { mutableStateOf((existing?.maxOutputTokens ?: 8192).toString()) }
     // Đợt 7: include_usage theo từng provider — chỉ có ý nghĩa với loại
-    // Custom/DeepSeek (OpenAI Responses và Claude/Gemini tự gửi usage).
+    // Custom/DeepSeek (OpenAI Responses và Gemini tự gửi usage).
     // Provider mới mặc định bật.
     var includeUsage by remember { mutableStateOf(existing?.includeUsage ?: true) }
     var makeDefault by remember { mutableStateOf(existing == null || existing.id == activeId) }
@@ -86,8 +77,6 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     var fetchMessage by remember { mutableStateOf<String?>(null) }
     var fetchFailed by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
-    // Đợt provider 12/11/2026: popup giáo dục về thinking của Claude.
-    var showThinkingInfo by remember { mutableStateOf(false) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
 
@@ -133,12 +122,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     }
                 },
                 actions = {
-                    TextButton(onClick = {
-                        // Đợt provider 12/11/2026: lần đầu Save provider
-                        // Anthropic thì hiện popup giáo dục về thinking trước
-                        // (đã đọc rồi thì lưu thẳng).
-                        if (type == ProviderType.CLAUDE && !educated) showThinkingInfo = true else save()
-                    }) { Text("Save") }
+                    TextButton(onClick = { save() }) { Text("Save") }
                 },
             )
         },
@@ -229,7 +213,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 modifier = Modifier.fillMaxWidth(),
             )
             // Chỉ loại Custom/DeepSeek mới có trường này: OpenAI Responses tự
-            // gửi usage trong event response.completed, Claude/Gemini tự gửi
+            // gửi usage trong event response.completed, Gemini tự gửi
             // usage nên không cần xin thêm, ẩn hẳn để user không nhầm.
             if (type == ProviderType.CUSTOM || type == ProviderType.DEEPSEEK) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -254,35 +238,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     modifier = Modifier.padding(bottom = 24.dp),
                 ) { Text("Delete this provider", color = MaterialTheme.colorScheme.error) }
             }
-            // Đợt provider 12/11/2026: footnote đọc lại nội dung popup giáo
-            // dục về thinking của Claude.
-            if (type == ProviderType.CLAUDE) {
-                Text(
-                    CLAUDE_THINKING_INFO,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 24.dp),
-                )
-            }
         }
-    }
-
-    if (showThinkingInfo) {
-        AlertDialog(
-            onDismissRequest = { showThinkingInfo = false },
-            title = { Text("Before you use Claude thinking") },
-            text = { Text(CLAUDE_THINKING_INFO) },
-            confirmButton = {
-                TextButton(onClick = {
-                    settings.setClaudeThinkingEducated()
-                    showThinkingInfo = false
-                    save()
-                }) { Text("Confirm and Close") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showThinkingInfo = false }) { Text("Close") }
-            },
-        )
     }
 
     if (confirmDelete && existing != null) {

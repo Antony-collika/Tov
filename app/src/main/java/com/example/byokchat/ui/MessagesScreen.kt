@@ -67,22 +67,20 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MessagesScreen(conversationId: String, onBack: () -> Unit, onOpenBranch: ((String) -> Unit)? = null) {
+fun MessagesScreen(conversationId: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val container = context.container
     val vm: ChatViewModel = viewModel(key = conversationId, factory = viewModelFactory {
         initializer { ChatViewModel(container, conversationId) }
     })
-    // Đợt provider 12/11/2026 (Q2): sửa/xóa trong cuộc có thinking của
-    // Claude thì ChatViewModel tạo nhánh mới thay vì chặn — phải nghe
-    // events ở đây như màn chat (mở nhánh + thông báo), nếu không lệnh mở
-    // nhánh sẽ không tới được user.
+    // Nghe events của ChatViewModel như màn chat (chủ yếu để báo lỗi
+    // bằng toast — sửa/xóa ở màn này không mở nhánh).
     LaunchedEffect(Unit) {
         vm.events.collect { ev ->
             when (ev) {
                 // Xóa lượt ở màn này vốn không có Hoàn tác (như trước đây).
                 is ChatEvent.Deleted -> Unit
-                is ChatEvent.OpenBranch -> onOpenBranch?.invoke(ev.id)
+                is ChatEvent.OpenBranch -> Unit
                 is ChatEvent.Error -> Toast.makeText(context, ev.message, Toast.LENGTH_LONG).show()
             }
         }

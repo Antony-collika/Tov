@@ -35,11 +35,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.example.byokchat.ai.ClaudeThinkingMode
 import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.Role
 import com.example.byokchat.ai.ToolDef
-import com.example.byokchat.ai.claudeThinkingModeFor
 import com.example.byokchat.chat.AssembledMessage
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.SystemSource
@@ -161,21 +159,6 @@ fun RequestInspectorScreen(conversationId: String, onBack: () -> Unit) {
     }
 }
 
-/** Đợt provider 12/11/2026: dòng thinking của Claude cho Preview (màn hình + bản Markdown). */
-private fun thinkingLine(metadata: MetadataParams, type: ProviderType, model: String): String? {
-    if (type != ProviderType.CLAUDE) return null
-    val mode = claudeThinkingModeFor(model)
-    return when {
-        !metadata.thinkingEnabled && mode == ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON ->
-            "Thinking: off in this app — but this model thinks by default and can't be turned off"
-        !metadata.thinkingEnabled -> "Thinking: off"
-        mode == ClaudeThinkingMode.MANUAL -> "Thinking: on (manual, budget ${metadata.thinkingBudget} tokens)"
-        mode == ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON ->
-            "Thinking: on (adaptive — this model always thinks; depth set by \"How hard the model thinks\" above)"
-        else -> "Thinking: on (adaptive — depth set by \"How hard the model thinks\" above)"
-    }
-}
-
 /** Đợt provider 12/11/2026: dòng stop sequences — Responses API (OpenAI) không có param stop nên không gửi. */
 private fun stopLine(metadata: MetadataParams, type: ProviderType): String =
     if (type == ProviderType.OPENAI) "Stop sequences: not sent — the Responses API doesn't support stop phrases"
@@ -220,13 +203,12 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
         item {
             // Đợt 6: hiện đúng metadata lần gửi này dùng — cùng giá trị
             // ChatEngine gửi. Tool luôn được gửi đủ, với mọi hãng.
-            // Đợt provider 12/11/2026: thêm dòng thinking của Claude, ghi chú
-            // stop của Responses và định dạng request của OpenAI. Đợt provider
-            // 12/11/2026 (Q6): truyền model để hiện đúng effort Claude thực
-            // sự gửi (model không hỗ trợ effort thì không gửi).
+            // Đợt provider 12/11/2026: thêm ghi chú stop của Responses và
+            // định dạng request của OpenAI. Đợt provider 12/11/2026 (Q6):
+            // truyền model để hiện đúng effort hãng thực sự gửi (model không
+            // hỗ trợ effort thì không gửi).
             val effortValue = metadata.effortValueFor(type, model)
             val toolsLine = "Tools: ${a.toolDefs.size} tool(s) offered."
-            val thinking = thinkingLine(metadata, type, model)?.let { "\n$it" } ?: ""
             val formatNote = if (type == ProviderType.OPENAI) {
                 "\nRequest format: Responses API — reasoning, messages and tool calls are sent as items in order"
             } else ""
@@ -236,7 +218,7 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
                     (if (effortValue != null) " (${metadata.effortFieldName(type)}: $effortValue)" else " (not sent — the provider uses its default)") + "\n" +
                     "Max output tokens: ${ready.maxOutputTokens}\n" +
                     "Stream: on (always on — this app only streams)\n" +
-                    stopLine(metadata, type) + thinking + formatNote + "\n" +
+                    stopLine(metadata, type) + formatNote + "\n" +
                     toolsLine,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -330,8 +312,8 @@ private fun MessageCard(turn: Int, m: AssembledMessage) {
             }
             // Đợt provider 12/11/2026: suy luận của lượt này cũng là một phần
             // của request gửi đi (hãng nào cũng gửi lại) nên Preview hiện nó.
-            // Không có chữ đọc được (Claude display omitted) thì ghi rõ là
-            // khối thinking vẫn được gửi lại, chỉ không có bản tóm tắt.
+            // Không có chữ đọc được thì ghi rõ là khối suy luận vẫn được gửi
+            // lại, chỉ không có bản tóm tắt.
             if (!msg.reasoningText.isNullOrBlank()) {
                 Text("Suy luận", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                 ExpandableText(msg.reasoningText)
@@ -374,14 +356,13 @@ private fun inspectorMarkdown(a: AssembledRequest, ready: PreviewResult.Ready): 
     appendLine("Estimated tokens: ${a.estimatedTokens} (history ${a.historyTokens})")
     appendLine()
     appendLine("## Metadata")
-    // Đợt provider 12/11/2026 (Q6): truyền model để hiện đúng effort Claude thực sự gửi.
+    // Đợt provider 12/11/2026 (Q6): truyền model để hiện đúng effort hãng thực sự gửi.
     val effortValue = metadata.effortValueFor(type, model)
     appendLine("Model: $model")
     appendLine("Reasoning effort: ${metadata.effectiveEffort(type).name.lowercase()}" + (if (effortValue != null) " (${metadata.effortFieldName(type)}: $effortValue)" else " (not sent — the provider uses its default)"))
     appendLine("Max output tokens: ${ready.maxOutputTokens}")
     appendLine("Stream: on (always on)")
     appendLine(stopLine(metadata, type))
-    thinkingLine(metadata, type, model)?.let { appendLine(it) }
     if (type == ProviderType.OPENAI) appendLine("Request format: Responses API — reasoning, messages and tool calls are sent as items in order")
     appendLine("Tools: ${a.toolDefs.size} tool(s) offered")
     appendLine()

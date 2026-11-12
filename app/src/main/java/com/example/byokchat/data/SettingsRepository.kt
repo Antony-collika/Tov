@@ -64,7 +64,7 @@ class SettingsRepository(context: Context) {
         plain.edit().putString("current_model_provider", providerId).putString("current_model", model).apply()
         // Mặc định effort theo hãng (quyết định 15): khi user chưa từng
         // lưu Metadata thì mặc định đi theo provider vừa chọn (NONE cho
-        // OpenAI, MEDIUM cho Claude/Gemini). Chỉ đổi giá trị trong bộ
+        // OpenAI, MEDIUM cho Gemini/Custom). Chỉ đổi giá trị trong bộ
         // nhớ, KHÔNG ghi ra file — giá trị user đã lưu luôn được tôn trọng.
         if (plain.getString("metadata_json", null) == null) {
             _metadata.value = MetadataParams.defaultFor(provider(providerId)?.type)
@@ -145,16 +145,6 @@ class SettingsRepository(context: Context) {
     fun setNotifPermissionAsked(asked: Boolean) {
         _notifPermissionAsked.value = asked
         plain.edit().putBoolean("notif_permission_asked", asked).apply()
-    }
-
-    // Đợt provider 12/11/2026: đã đọc popup giáo dục về thinking của Claude
-    // (chỉ hiện một lần, khi Save provider Anthropic lần đầu).
-    private val _claudeThinkingEducated = MutableStateFlow(plain.getBoolean("claude_thinking_educated", false))
-    val claudeThinkingEducated: StateFlow<Boolean> = _claudeThinkingEducated.asStateFlow()
-
-    fun setClaudeThinkingEducated(educated: Boolean = true) {
-        _claudeThinkingEducated.value = educated
-        plain.edit().putBoolean("claude_thinking_educated", educated).apply()
     }
 
     /** Nhật ký request (Đợt B): ghi mỗi lần gọi model ra file, mặc định bật. */
@@ -268,7 +258,7 @@ class SettingsRepository(context: Context) {
         _searchKey.value = secure.getString("search_key", "") ?: ""
         // Mặc định effort theo hãng (quyết định 15): khi user chưa từng
         // lưu Metadata thì mặc định đi theo provider đang chọn (NONE cho
-        // OpenAI, MEDIUM cho Claude/Gemini). Chỉ đổi giá trị trong bộ
+        // OpenAI, MEDIUM cho Gemini/Custom). Chỉ đổi giá trị trong bộ
         // nhớ, KHÔNG ghi ra file — để mặc định vẫn đi theo provider khi
         // user đổi provider, cho tới khi user tự chọn rồi lưu.
         if (plain.getString("metadata_json", null) == null) {

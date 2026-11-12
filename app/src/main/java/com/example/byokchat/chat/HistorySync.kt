@@ -61,13 +61,6 @@ class HistorySync(
         data class Failed(val error: String) : SyncResult
         /** Sửa ngoài lúc model đang trả lời đã bị ghi đè khi lượt trả lời xong. */
         data object ExternalEditDiscarded : SyncResult
-        /**
-         * Sửa ngoài chạm vào lịch sử đã niêm phong (thinking của Claude) —
-         * KHÔNG áp vào Room, KHÔNG tách nhánh; file đã được ghi lại từ Room
-         * để khôi phục, người gọi báo cho user (phương án A, quyết định của
-         * Duy 12/11/2026, thay cho rẽ nhánh Q2 trước đó).
-         */
-        data object SealedExternalEditRejected : SyncResult
     }
 
     private fun hashKey(conversationId: String) = "hash:$conversationId"
@@ -149,52 +142,10 @@ class HistorySync(
                 "history.meta.json has no entry for message \"${missing.id}\". The file was left unchanged.",
             )
         }
-        // Phương án A (quyết định của Duy 12/11/2026, thay cho rẽ nhánh Q2
-        // trước đó): sửa ngoài mà chạm vào lịch sử đã niêm phong (đổi chữ
-        // tin cũ, xóa tin, hoặc chèn tin vào giữa) thì KHÔNG áp vào Room,
-        // KHÔNG tách nhánh — ghi lại file từ Room để khôi phục rồi báo cho
-        // user (người gọi). Chỉ thêm tin mới vào cuối thì áp thẳng như cũ
-        // (nội dung cũ không đổi nên mạch suy luận còn nguyên).
-        val sealed = db.messages().getAll(conversationId)
-            .any { it.reasoningProvider == "anthropic" && it.reasoningReplay != null }
-        if (sealed && touchesSealedHistory(conversationId, parsed)) {
-            if (!export(conversationId)) {
-                return SyncResult.Failed("Could not restore history.md from the app.")
-            }
-            return SyncResult.SealedExternalEditRejected
-        }
         val applied = applyParsed(conversationId, parsed, meta)
         storeHash(conversationId, currentHash)
         return if (applied.changed == 0 && applied.deleted == 0) SyncResult.UpToDate
         else SyncResult.Imported(applied.changed, applied.deleted)
-    }
-
-    /**
-     * File sửa ngoài có chạm vào lịch sử đã niêm phong không: đổi chữ tin
-     * cũ, xóa tin cũ, hoặc chèn tin mới vào giữa (trước tin cuối cùng).
-     * Chỉ thêm tin mới vào cuối thì không tính — nội dung cũ không đổi nên
-     * mạch suy luận còn nguyên. Điều kiện xóa khớp với [applyParsed].
-     */
-    private suspend fun touchesSealedHistory(
-        conversationId: String,
-        parsed: ParsedHistory,
-    ): Boolean {
-        val rows = db.messages().getAll(conversationId)
-        val byId = rows.associateBy { it.id }
-        val parsedById = parsed.messages.associateBy { it.id }
-        val knownTurns = (1 until parsed.nextTurn).toSet()
-        val maxTurnNo = rows.maxOfOrNull { it.turnNo } ?: 0
-        // Đổi chữ tin cũ.
-        if (parsed.messages.any { pm -> byId[pm.id]?.let { it.text != pm.text } == true }) return true
-        // Chèn tin mới vào giữa (không phải thêm vào cuối).
-        if (parsed.messages.any { pm -> pm.id !in byId && pm.turnNo <= maxTurnNo }) return true
-        // Xóa tin cũ.
-        if (rows.any { row ->
-                (row.role == "user" || row.role == "assistant") &&
-                    row.turnNo > 0 && row.turnNo in knownTurns &&
-                    row.status != "streaming" && row.id !in parsedById
-            }) return true
-        return false
     }
 
     private data class AppliedCounts(val changed: Int, val deleted: Int)
@@ -206,8 +157,9 @@ class HistorySync(
 
     /**
      * Suy luận của provider trong extra_content (Đợt provider 12/11/2026):
-     * openai {reasoning_summary, response_items}, deepseek {reasoning_content},
-     * anthropic {thinking, thinking_blocks}. Trả về (text, replayJson,
+     * openai {reasoning_summary, response_items}, deepseek {reasoning_content}.
+     * Khối thinking của hãng đã bỏ (anthropic {thinking, thinking_blocks})
+     * thì bỏ qua — không đọc lại, không gửi lại. Trả về (text, replayJson,
      * provider) — null khi không có suy luận của hãng nào.
      */
     private fun reasoningOf(entry: HistoryMetaMessage): Triple<String?, String?, String?>? {
@@ -220,11 +172,6 @@ class HistorySync(
         extra["deepseek"]?.jsonObject?.let { o ->
             val text = o["reasoning_content"]?.jsonPrimitive?.contentOrNull
             if (text != null) return Triple(text, null, "deepseek")
-        }
-        extra["anthropic"]?.jsonObject?.let { o ->
-            val text = o["thinking"]?.jsonPrimitive?.contentOrNull
-            val replay = o["thinking_blocks"]?.toString()
-            if (text != null || replay != null) return Triple(text, replay, "anthropic")
         }
         return null
     }

@@ -56,16 +56,6 @@ fun AppNav() {
         scope.launch { openChat(container.conversations.create()) }
     }
 
-    /**
-     * Mở một cuộc nhánh mới từ màn khác (Messages, sửa thẻ — Đợt provider
-     * 12/11/2026, Q2): đặt id cuộc rồi quay về màn chat (đang nằm dưới
-     * cùng của back stack). Nếu màn chat không còn trong stack thì mở mới.
-     */
-    fun openBranchChat(branchId: String, from: String?) {
-        openChat(branchId, from = from)
-        if (!nav.popBackStack("chat", inclusive = false)) nav.navigate("chat")
-    }
-
     // The app opens straight into a (new) chat.
     LaunchedEffect(Unit) {
         val cur = chatId
@@ -188,15 +178,6 @@ fun AppNav() {
                     // Đợt 4: chỉ thẻ History của một cuộc cụ thể mới mở được màn
                     // Messages (panel mở từ Settings thì không có cuộc nào).
                     onOpenMessages = entry.arguments?.getString("cid")?.let { cid -> { nav.navigate("messages/$cid") } },
-                    // Đợt provider 12/11/2026: id cuộc để rẽ nhánh khi sửa
-                    // thẻ System/Tools/Free trong cuộc có thinking của Claude
-                    // (null khi panel mở từ Settings).
-                    conversationId = entry.arguments?.getString("cid"),
-                    // Đợt provider 12/11/2026 (Q2): sửa thẻ trong cuộc có
-                    // thinking của Claude thì mở cuộc nhánh mới.
-                    onOpenConversation = { branchId ->
-                        openBranchChat(branchId, entry.arguments?.getString("cid"))
-                    },
                 )
             }
             composable("messages/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
@@ -205,11 +186,6 @@ fun AppNav() {
                     // Back quay về Request panel, không dừng ở màn sửa thẻ
                     // History (như FPilot): pop màn Messages rồi pop card-edit.
                     onBack = { nav.popBackStack(); nav.popBackStack() },
-                    // Đợt provider 12/11/2026 (Q2): sửa/xóa trong cuộc có
-                    // thinking của Claude thì mở cuộc nhánh mới.
-                    onOpenBranch = { branchId ->
-                        openBranchChat(branchId, entry.arguments?.getString("id"))
-                    },
                 )
             }
             composable("tools") {

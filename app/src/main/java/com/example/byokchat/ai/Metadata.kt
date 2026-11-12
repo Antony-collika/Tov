@@ -5,11 +5,8 @@ import kotlinx.serialization.Serializable
 
 /**
  * Mức suy luận chung cho thẻ Metadata (Đợt 6), thay cho temperature/top_p/
- * top_k — cả ba hãng đều đã bỏ/vô hiệu các núm lấy mẫu cổ điển trên model
+ * top_k — các hãng đều đã bỏ/vô hiệu các núm lấy mẫu cổ điển trên model
  * suy luận hiện tại (báo cáo API 11/11/2026):
- * - Anthropic gỡ hẳn temperature/top_p/top_k từ API version 2026-10-21
- *   (gửi kèm là lỗi 400, kể cả giá trị mặc định) nên app KHÔNG BAO GIỜ
- *   gửi chúng.
  * - Gemini mới nhất không còn hỗ trợ temperature/topK/topP/penalty/
  *   candidateCount.
  * - OpenAI dùng max_completion_tokens thay max_tokens đã deprecated.
@@ -43,9 +40,7 @@ enum class ReasoningEffort { NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX }
  * - Custom (Chat Completions): effort của user gửi nguyên vẹn dạng
  *   reasoning_effort (none/minimal/low/medium/high/xhigh/max); hãng đích
  *   tự quyết — nếu hãng đó từ chối thì API báo lỗi rõ, app không tự đổi.
- * - Claude: thinking + tool dùng chung được; effort gửi là
- *   output_config.effort. Gemini: thinkingLevel + function calling dùng
- *   chung được.
+ * - Gemini: thinkingLevel + function calling dùng chung được.
  * Vì vậy KHÔNG còn khái niệm "tool bị tắt vì reasoning" và KHÔNG còn ép
  * effort chung cho mọi hãng: tool luôn được gửi, với mọi hãng.
  */
@@ -62,24 +57,6 @@ data class MetadataParams(
      * hưởng tới chúng. Mặc định BẬT.
      */
     val keepThoughtSignature: Boolean = true,
-    /**
-     * Bật extended thinking của Claude (Đợt provider 12/11/2026) — chỉ có
-     * ý nghĩa khi provider đang dùng là Claude; hãng khác bỏ qua. TẮT =
-     * không gửi param thinking (model 4.5/4.6/4.7/4.8 thì thinking tắt hẳn;
-     * model 5.x thì thinking vẫn bật theo mặc định của hãng — xem ghi chú
-     * ở thẻ Metadata). Mặc định TẮT (chưa có quyết định của Duy — giữ hành
-     * vi hiện tại cho tới khi Duy chốt).
-     */
-    val thinkingEnabled: Boolean = false,
-    /**
-     * Ngân sách suy luận (token) cho Claude ở chế độ manual — model 4.5 trở
-     * về trước (Đợt provider 12/11/2026). Phải ≥ 1024 và < max output
-     * tokens (luật Anthropic, nếu sai API trả 400). Model 4.6+ dùng adaptive
-     * thinking nên không dùng ngân sách này (độ sâu do effort quyết). Mặc
-     * định 4096 (chưa có quyết định của Duy — giữ trong khoảng hợp lệ với
-     * max output tokens mặc định 8192 cho tới khi Duy chốt).
-     */
-    val thinkingBudget: Int = 4096,
 ) {
     /**
      * Effort thật sự áp cho hãng này. Từ đợt provider 12/11/2026: KHÔNG ép
@@ -105,43 +82,6 @@ data class MetadataParams(
         ReasoningEffort.MAX -> "HIGH"
     }
 
-    /**
-     * Claude output_config.effort — tín hiệu mềm, max_tokens vẫn là trần
-     * cứng. NONE = không gửi (dùng mặc định của hãng). MINIMAL không có ở
-     * Claude nên kẹp về "low". Đợt provider 12/11/2026 (theo tài liệu
-     * chính thức Anthropic, trang Effort, đọc 12/11/2026): chỉ gửi cho
-     * model hãng hỗ trợ effort — Sonnet 4.5, Haiku 4.5, Claude 3.x và
-     * model 4.0–4.4 thì KHÔNG gửi (gửi là lỗi 400); mức xhigh/max kẹp
-     * xuống "high" khi model không có mức đó (Opus 4.6/Sonnet 4.6/Mythos
-     * Preview không có xhigh; Opus 4.5 chỉ có low/medium/high).
-     */
-    fun claudeEffort(model: String): String? {
-        if (effort == ReasoningEffort.NONE) return null
-        return when (claudeEffortSupportFor(model)) {
-            ClaudeEffortSupport.UNSUPPORTED -> null
-            ClaudeEffortSupport.LOW_MED_HIGH -> when (effort) {
-                ReasoningEffort.MINIMAL, ReasoningEffort.LOW -> "low"
-                ReasoningEffort.MEDIUM -> "medium"
-                else -> "high"
-            }
-            ClaudeEffortSupport.NO_XHIGH -> when (effort) {
-                ReasoningEffort.MINIMAL, ReasoningEffort.LOW -> "low"
-                ReasoningEffort.MEDIUM -> "medium"
-                ReasoningEffort.HIGH -> "high"
-                ReasoningEffort.XHIGH -> "high"
-                ReasoningEffort.MAX -> "max"
-            }
-            ClaudeEffortSupport.FULL -> when (effort) {
-                ReasoningEffort.MINIMAL -> "low"
-                ReasoningEffort.LOW -> "low"
-                ReasoningEffort.MEDIUM -> "medium"
-                ReasoningEffort.HIGH -> "high"
-                ReasoningEffort.XHIGH -> "xhigh"
-                ReasoningEffort.MAX -> "max"
-            }
-        }
-    }
-
     /** Các mức effort cho user chọn theo hãng đang dùng (giá trị hãng không có thì không hiện). */
     fun effortOptionsFor(type: ProviderType?): List<ReasoningEffort> = when (type) {
         ProviderType.OPENAI, ProviderType.CUSTOM ->
@@ -151,8 +91,6 @@ data class MetadataParams(
             listOf(ReasoningEffort.NONE, ReasoningEffort.LOW, ReasoningEffort.HIGH, ReasoningEffort.MAX)
         ProviderType.GEMINI ->
             listOf(ReasoningEffort.NONE, ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH)
-        ProviderType.CLAUDE ->
-            listOf(ReasoningEffort.NONE, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX)
         null -> ReasoningEffort.entries.toList()
     }
 
@@ -161,7 +99,6 @@ data class MetadataParams(
         ProviderType.OPENAI -> "reasoning.effort"
         ProviderType.CUSTOM, ProviderType.DEEPSEEK -> "reasoning_effort"
         ProviderType.GEMINI -> "thinkingLevel"
-        ProviderType.CLAUDE -> "output_config.effort"
     }
 
     /**
@@ -169,15 +106,13 @@ data class MetadataParams(
      * OpenAI (Responses): reasoning.effort theo đúng lựa chọn của user —
      * không ép "none" nữa (Responses cho reasoning + tool dùng chung).
      * Custom/DeepSeek (Chat Completions): reasoning_effort theo lựa chọn
-     * của user; DeepSeek kẹp về low/high/max. Claude: output_config.effort
-     * theo model (model chỉ dùng cho CLAUDE — xem [claudeEffort]).
+     * của user; DeepSeek kẹp về low/high/max.
      */
     fun effortValueFor(type: ProviderType, model: String = ""): String? = when (type) {
         ProviderType.OPENAI -> responsesEffort()
         ProviderType.CUSTOM -> chatEffort()
         ProviderType.DEEPSEEK -> deepSeekEffort()
         ProviderType.GEMINI -> geminiThinkingLevel()
-        ProviderType.CLAUDE -> claudeEffort(model)
     }
 
     /**

@@ -317,7 +317,7 @@ internal fun AssistantMessage(
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
             // Đợt provider 12/11/2026: khối gập "Suy luận" — chữ suy luận của
-            // hãng (OpenAI/DeepSeek/Claude) lưu cùng tin, hiện dạng text
+            // hãng (OpenAI / máy chủ tương thích) lưu cùng tin, hiện dạng text
             // thường (không markdown — suy luận không phải câu trả lời).
             // Chỉ hiện khi tin đã lưu xong: lúc đang stream suy luận chưa
             // lưu, tránh hiện nội dung nửa chừng.

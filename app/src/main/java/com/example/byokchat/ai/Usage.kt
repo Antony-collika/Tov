@@ -15,15 +15,14 @@ import kotlinx.serialization.json.jsonPrimitive
 data class Usage(
     val inputTokens: Int? = null,
     val outputTokens: Int? = null,
-    /** Số token đầu vào đọc từ bộ nhớ đệm (Claude: cache_read_input_tokens). */
+    /** Số token đầu vào đọc từ bộ nhớ đệm (OpenAI Responses: input_tokens_details.cached_tokens). */
     val cachedTokens: Int? = null,
-    /** Số token đầu vào ghi mới vào bộ nhớ đệm (Claude: cache_creation_input_tokens). */
+    /** Số token đầu vào ghi mới vào bộ nhớ đệm (OpenAI Responses: input_tokens_details.cache_write_tokens). */
     val cacheCreationTokens: Int? = null,
     /**
      * Số token suy luận trong số output (Đợt provider 12/11/2026):
      * Responses: usage.output_tokens_details.reasoning_tokens;
-     * Chat Completions: completion_tokens_details.reasoning_tokens;
-     * Claude: output_tokens_details.thinking_tokens.
+     * Chat Completions: completion_tokens_details.reasoning_tokens.
      */
     val reasoningTokens: Int? = null,
 ) {
@@ -39,16 +38,6 @@ data class Usage(
     }
 
     companion object {
-        /** Claude: `usage` trong message_start / message_delta. */
-        fun fromClaude(usage: JsonObject): Usage = Usage(
-            inputTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull,
-            outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull,
-            cachedTokens = usage["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull,
-            cacheCreationTokens = usage["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull,
-            reasoningTokens = usage["output_tokens_details"]?.jsonObject
-                ?.get("thinking_tokens")?.jsonPrimitive?.intOrNull,
-        )
-
         /** OpenAI: `usage` trong chunk cuối khi stream_options.include_usage bật. */
         fun fromOpenAi(usage: JsonObject): Usage = Usage(
             inputTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull,
@@ -85,8 +74,7 @@ data class Usage(
 
         /**
          * Gộp hai lần đọc: giá trị mới khác null sẽ thắng (mỗi hãng gửi usage
-         * theo từng phần — Claude gửi input ở đầu, output ở cuối; Gemini gửi
-         * số cộng dồn ở mỗi chunk nên lần cuối là số đúng).
+         * theo từng phần — Gemini gửi số cộng dồn ở mỗi chunk nên lần cuối là số đúng).
          */
         fun merge(first: Usage?, second: Usage?): Usage? {
             if (first == null) return second
