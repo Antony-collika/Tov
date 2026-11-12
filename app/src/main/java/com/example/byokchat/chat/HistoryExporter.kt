@@ -143,6 +143,10 @@ object HistoryExporter {
         }
     }
 
+    /** Id các tin được xuất ra history.md (dùng cho HistorySync ghi nhớ tập đã đồng bộ). */
+    fun exportedMessageIds(rows: List<MessageEntity>): Set<String> =
+        exportedMessages(rows).map { it.id }.toSet()
+
     /** Dựng toàn bộ nội dung history.md từ DB (hàm thuần, để test được). */
     fun renderHistory(conversation: ConversationEntity, rows: List<MessageEntity>): String {
         val turns = completedTurns(rows)

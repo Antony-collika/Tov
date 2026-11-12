@@ -28,6 +28,11 @@ import java.util.UUID
  *   verify bằng đọc lại như FPilot).
  * - App dùng HASH (SHA-256) để phát hiện file đổi và chỉ đọc khi có thay đổi;
  *   hash lưu theo session trong SharedPreferences "history_sync".
+ * - App nhớ tập id tin nhắn đã đồng bộ lần cuối (cùng SharedPreferences,
+ *   key "ids:<session>") để biết tin nào user xóa khỏi file (có trong tập
+ *   lần trước, giờ mất khỏi file → xóa khỏi Room) và tin nào là lượt mới
+ *   chưa xuất (chưa từng có trong tập → giữ nguyên). Nhờ đó xóa lượt cuối
+ *   khỏi file cũng đồng bộ được, mà không xóa nhầm lượt chưa xuất.
  * - Sửa ngoài lúc model đang trả lời thì KHÔNG parse: app phát hiện bằng hash
  *   + trạng thái đang trả lời, ghi nhận lại, và báo user khi vào lại app rằng
  *   lần sửa đó không có hiệu lực (file đã bị ghi đè khi lượt trả lời xong).
@@ -74,6 +79,24 @@ class HistorySync(
 
     private fun storeHash(conversationId: String, hash: String) {
         prefs.edit().putString(hashKey(conversationId), hash).apply()
+    }
+
+    private fun syncedIdsKey(conversationId: String) = "ids:$conversationId"
+
+    /**
+     * Tập id tin nhắn (user/assistant) đã đồng bộ lần cuối — tức là các id có
+     * trong history.md ở lần sync/ghi gần nhất. Dùng để phân biệt tin user
+     * xóa khỏi file (có trong tập này, giờ mất khỏi file → xóa khỏi Room)
+     * với lượt mới chưa xuất (chưa từng có trong tập → giữ nguyên).
+     * null = chưa từng lưu (lần sync đầu, hoặc nâng cấp từ bản cũ).
+     */
+    private fun storedSyncedIds(conversationId: String): Set<String>? =
+        prefs.getString(syncedIdsKey(conversationId), null)?.let { raw ->
+            runCatching { json.decodeFromString<List<String>>(raw) }.getOrNull()?.toSet()
+        }
+
+    private fun storeSyncedIds(conversationId: String, ids: Set<String>) {
+        prefs.edit().putString(syncedIdsKey(conversationId), json.encodeToString(ids.toList())).apply()
     }
 
     /**
@@ -144,6 +167,9 @@ class HistorySync(
         }
         val applied = applyParsed(conversationId, parsed, meta)
         storeHash(conversationId, currentHash)
+        // Ghi nhớ tập id có trong file sau lần đồng bộ này — lần sau dùng làm
+        // baseline để biết tin nào bị user xóa khỏi file.
+        storeSyncedIds(conversationId, parsed.messages.map { it.id }.toSet())
         return if (applied.changed == 0 && applied.deleted == 0) SyncResult.UpToDate
         else SyncResult.Imported(applied.changed, applied.deleted)
     }
@@ -186,9 +212,13 @@ class HistorySync(
      * - Tin trong file: có id thì cập nhật chữ/số lượt/trạng thái, chưa có thì thêm mới.
      * - Vòng tool: xóa dòng tool cũ của lượt rồi ghi lại từ meta (tool không có
      *   {"id"} trong file nên không nối được theo id).
-     * - Tin trong Room mà file không còn: chỉ xóa khi thuộc lượt mà file "biết"
-     *   (số lượt < next_turn của file — lượt đã xóa khỏi file thì xóa khỏi Room,
-     *   lượt mới hơn file (vd lượt chưa xong, chưa xuất) thì giữ nguyên).
+     * - Tin trong Room mà file không còn: chỉ xóa khi file "biết" tin đó —
+     *   tức là id từng có trong tập đã đồng bộ lần cuối (xem [storedSyncedIds]):
+     *   tin đó có trong tập lần trước mà giờ mất khỏi file thì là user xóa,
+     *   xóa khỏi Room; tin chưa từng có trong tập thì là lượt mới chưa xuất,
+     *   giữ nguyên. Chưa có tập đã đồng bộ (lần sync đầu / nâng cấp từ bản
+     *   cũ) thì dùng lại chốt số lượt cũ (số lượt < next_turn của file) làm
+     *   mặc định an toàn. Khi xóa một tin thì dọn luôn dòng tool cùng lượt.
      * - Hàng turnNo == 0 (dữ liệu cũ) và tin streaming dở dang thì không xóa.
      */
     private suspend fun applyParsed(
@@ -198,6 +228,9 @@ class HistorySync(
     ): AppliedCounts {
         var changed = 0
         var deleted = 0
+        // Tập id đã đồng bộ lần cuối (đọc TRƯỚC transaction — dùng làm
+        // baseline để biết tin nào bị user xóa khỏi file). null = chưa từng lưu.
+        val syncedIds = storedSyncedIds(conversationId)
         db.withTransaction {
             val rows = db.messages().getAll(conversationId)
             val byId = rows.associateBy { it.id }
@@ -301,13 +334,34 @@ class HistorySync(
                 }
             }
 
+            // Tin Room mất khỏi file: chỉ xóa khi file "biết" tin đó. Có tập
+            // đã đồng bộ lần cuối thì theo tập đó (id từng có trong file);
+            // chưa có tập thì theo số lượt như cũ (mặc định an toàn). Lượt
+            // mới chưa xuất (id chưa từng có trong tập) thì giữ nguyên.
+            val deletedTurns = mutableSetOf<Int>()
             for (row in rows) {
                 if (row.role != "user" && row.role != "assistant") continue
-                if (row.turnNo <= 0 || row.turnNo !in knownTurns) continue
+                if (row.turnNo <= 0) continue
                 if (row.status == "streaming") continue
+                val known = if (syncedIds != null) row.id in syncedIds else row.turnNo in knownTurns
+                if (!known) continue
                 if (row.id !in parsedById) {
                     db.messages().deleteById(row.id)
                     deleted++
+                    // Chỉ ghi nhận lượt khi tin assistant bị xóa — dòng tool
+                    // gắn với lệnh gọi của tin assistant.
+                    if (row.role == "assistant") deletedTurns += row.turnNo
+                }
+            }
+            // Dọn dòng tool của các lượt mà tin assistant đã bị xóa khỏi file:
+            // vòng tool ở trên chỉ dọn các lượt trong knownTurns; lượt cuối bị
+            // xóa khỏi file không nằm trong đó nên dòng tool của nó sẽ thành
+            // mồ côi nếu không dọn ở đây. Chỉ dọn khi không còn tin assistant
+            // nào của lượt đó trong file (vd chỉ tin user bị xóa mà tin
+            // assistant còn thì vòng tool đã ghi lại đúng, không được dọn).
+            for (turnNo in deletedTurns) {
+                if (parsed.messages.none { it.turnNo == turnNo && it.role == "assistant" }) {
+                    db.messages().deleteToolRowsOfTurn(conversationId, turnNo)
                 }
             }
 
@@ -344,6 +398,9 @@ class HistorySync(
                 }
             }
             storeHash(conversationId, hashOf(md))
+            // File vừa ghi chứa đúng các tin này — ghi nhớ làm baseline cho
+            // lần đồng bộ sau (biết tin nào bị user xóa khỏi file).
+            storeSyncedIds(conversationId, HistoryExporter.exportedMessageIds(rows))
             true
         }.getOrDefault(false)
     }
@@ -366,6 +423,10 @@ class HistorySync(
             val conv = db.conversations().get(conversationId) ?: return false
             val rows = db.messages().getAll(conversationId)
             val stored = storedHash(conversationId) ?: return false
+            // Chưa có tập id đã đồng bộ (nâng cấp từ bản cũ — có hash nhưng
+            // chưa lưu tập id): ghi đủ một lần để lưu tập id, thay vì append
+            // rồi mới phát hiện không cập nhật được tập.
+            val baseIds = storedSyncedIds(conversationId) ?: return false
             val (section, metaLines) = withContext(Dispatchers.IO) {
                 HistoryExporter.renderTurnSection(turnNo, rows) to
                     HistoryExporter.renderMetaLines(turnNo, rows)
@@ -403,6 +464,11 @@ class HistorySync(
             }
             val hash = newHash ?: return false
             storeHash(conversationId, hash)
+            // File sau append = file cũ + lượt mới: tập đã đồng bộ = tập cũ
+            // + id các tin của lượt vừa append (id trong các dòng meta vừa ghi
+            // trùng đúng với id trong phần .md vừa append).
+            val appendedIds = lines.map { json.decodeFromString(HistoryMetaEntry.serializer(), it).id }.toSet()
+            storeSyncedIds(conversationId, baseIds + appendedIds)
             true
         }.getOrDefault(false)
     }
