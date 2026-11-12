@@ -26,26 +26,28 @@ enum class ReasoningEffort { NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX }
  * SettingsRepository (trừ max output tokens vẫn theo từng provider như cũ,
  * ở ProviderConfig.maxOutputTokens; stream luôn bật nên không lưu).
  *
- * Mặc định effort theo hãng (quyết định 15, phương án c — xem
- * [defaultFor]): NONE cho OpenAI(-compatible) vì luật tool của OpenAI,
- * MEDIUM cho Claude/Gemini. App KHÔNG tự đoán model có suy luận hay
- * không: danh sách model là chuỗi do user nhập, không có metadata về
- * khả năng của model — user đổi effort khi dùng model không suy luận.
+ * Mặc định effort là MEDIUM cho mọi hãng. App KHÔNG tự đoán model có suy
+ * luận hay không: danh sách model là chuỗi do user nhập, không có metadata
+ * về khả năng của model — user đổi effort khi dùng model không suy luận.
  *
- * Luật effort × tools (đợt fix 11/11/2026, D3 — đã kiểm chứng lại với
- * tài liệu chính thức ngày 11/11/2026, xem [effectiveEffort]):
- * - OpenAI Chat Completions: model suy luận KHÔNG gọi được tool khi
- *   reasoning đang bật (kể cả không gửi reasoning_effort, vì server mặc
- *   định medium — lỗi 400 "Function tools with reasoning_effort are not
- *   supported ... use /v1/responses or set reasoning_effort to 'none'").
- *   Astra/6.1 Sol/6.1 Terra còn cần Responses API cho tool. Tov chỉ dùng
- *   Chat Completions nên với OpenAI(-compatible) effort LUÔN bị ép về
- *   NONE — tool luôn dùng được, user không phải đoán.
- * - Claude: thinking + tool dùng chung được (chỉ không ép tool khi thinking
- *   bật); Gemini: thinkingLevel + function calling dùng chung được.
- *   Hai hãng này hiện lựa chọn effort bình thường.
- * Vì vậy KHÔNG còn khái niệm "tool bị tắt vì reasoning": tool luôn được
- * gửi, với mọi hãng.
+ * Luật effort × tools — LÀM THEO TỪNG HÃNG (quyết định của Duy 12/11/2026,
+ * thay thế luật ép "none" chung của đợt fix 11/11/2026, D3):
+ * - OpenAI chính hãng: dùng Responses API — reasoning + tool dùng chung
+ *   được ở mọi effort, nên KHÔNG ép "none" nữa; effort gửi là
+ *   reasoning.effort. Ngoại lệ: GPT-6 Astra / GPT-6.1 Sol không chấp nhận
+ *   "none" (tài liệu OpenAI) — user chọn NONE với model đó thì app báo rõ
+ *   (xem [responsesEffortProblem]), không tự đổi lặng lẽ.
+ * - DeepSeek (Chat Completions): thinking + tool dùng chung được; effort
+ *   gửi là reasoning_effort, kẹp về low/high/max (DeepSeek chỉ có 3 mức
+ *   đó + none để tắt). Không ép "none".
+ * - Custom (Chat Completions): effort của user gửi nguyên vẹn dạng
+ *   reasoning_effort (none/minimal/low/medium/high/xhigh/max); hãng đích
+ *   tự quyết — nếu hãng đó từ chối thì API báo lỗi rõ, app không tự đổi.
+ * - Claude: thinking + tool dùng chung được; effort gửi là
+ *   output_config.effort. Gemini: thinkingLevel + function calling dùng
+ *   chung được.
+ * Vì vậy KHÔNG còn khái niệm "tool bị tắt vì reasoning" và KHÔNG còn ép
+ * effort chung cho mọi hãng: tool luôn được gửi, với mọi hãng.
  */
 @Serializable
 data class MetadataParams(
@@ -60,16 +62,32 @@ data class MetadataParams(
      * hưởng tới chúng. Mặc định BẬT.
      */
     val keepThoughtSignature: Boolean = true,
+    /**
+     * Bật extended thinking của Claude (Đợt provider 12/11/2026) — chỉ có
+     * ý nghĩa khi provider đang dùng là Claude; hãng khác bỏ qua. TẮT =
+     * không gửi param thinking (model 4.5/4.6/4.7/4.8 thì thinking tắt hẳn;
+     * model 5.x thì thinking vẫn bật theo mặc định của hãng — xem ghi chú
+     * ở thẻ Metadata). Mặc định TẮT (chưa có quyết định của Duy — giữ hành
+     * vi hiện tại cho tới khi Duy chốt).
+     */
+    val thinkingEnabled: Boolean = false,
+    /**
+     * Ngân sách suy luận (token) cho Claude ở chế độ manual — model 4.5 trở
+     * về trước (Đợt provider 12/11/2026). Phải ≥ 1024 và < max output
+     * tokens (luật Anthropic, nếu sai API trả 400). Model 4.6+ dùng adaptive
+     * thinking nên không dùng ngân sách này (độ sâu do effort quyết). Mặc
+     * định 4096 (chưa có quyết định của Duy — giữ trong khoảng hợp lệ với
+     * max output tokens mặc định 8192 cho tới khi Duy chốt).
+     */
+    val thinkingBudget: Int = 4096,
 ) {
     /**
-     * Effort thật sự áp cho hãng này. OpenAI(-compatible): LUÔN NONE —
-     * Chat Completions chỉ gọi được tool khi reasoning_effort "none", và
-     * tool luôn được ưu tiên hơn thinking (quyết định của Duy, D3). Giá trị
-     * user đã chọn vẫn giữ trong [effort] để khi đổi sang Claude/Gemini
-     * thì dùng lại, không mất.
+     * Effort thật sự áp cho hãng này. Từ đợt provider 12/11/2026: KHÔNG ép
+     * về NONE cho hãng nào nữa — mỗi hãng nhận đúng lựa chọn của user, map
+     * sang trường riêng của mình (xem [effortValueFor]). Giá trị user đã
+     * chọn giữ nguyên trong [effort].
      */
-    fun effectiveEffort(type: ProviderType): ReasoningEffort =
-        if (type == ProviderType.OPENAI || type == ProviderType.CUSTOM) ReasoningEffort.NONE else effort
+    fun effectiveEffort(type: ProviderType): ReasoningEffort = effort
 
     /**
      * Gemini thinkingLevel. NONE = không gửi trường này (model cũ dùng mặc
@@ -106,6 +124,9 @@ data class MetadataParams(
     fun effortOptionsFor(type: ProviderType?): List<ReasoningEffort> = when (type) {
         ProviderType.OPENAI, ProviderType.CUSTOM ->
             listOf(ReasoningEffort.NONE, ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX)
+        ProviderType.DEEPSEEK ->
+            // DeepSeek chỉ có low/high/max (+ none để tắt): medium kẹp về high.
+            listOf(ReasoningEffort.NONE, ReasoningEffort.LOW, ReasoningEffort.HIGH, ReasoningEffort.MAX)
         ProviderType.GEMINI ->
             listOf(ReasoningEffort.NONE, ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH)
         ProviderType.CLAUDE ->
@@ -115,46 +136,94 @@ data class MetadataParams(
 
     /** Tên trường effort mà hãng này nhận, để Inspector hiện đúng (null = hãng không nhận trường effort nào khi NONE). */
     fun effortFieldName(type: ProviderType): String = when (type) {
-        ProviderType.OPENAI, ProviderType.CUSTOM -> "reasoning_effort"
+        ProviderType.OPENAI -> "reasoning.effort"
+        ProviderType.CUSTOM, ProviderType.DEEPSEEK -> "reasoning_effort"
         ProviderType.GEMINI -> "thinkingLevel"
         ProviderType.CLAUDE -> "output_config.effort"
     }
 
     /**
      * Giá trị effort đã map cho hãng này (null = không gửi trường effort).
-     * OpenAI(-compatible): LUÔN "none" — ép về NONE để tool luôn dùng
-     * được (xem [effectiveEffort]); server mặc định là medium nên bỏ qua
-     * trường này cũng đồng nghĩa effort medium.
+     * OpenAI (Responses): reasoning.effort theo đúng lựa chọn của user —
+     * không ép "none" nữa (Responses cho reasoning + tool dùng chung).
+     * Custom/DeepSeek (Chat Completions): reasoning_effort theo lựa chọn
+     * của user; DeepSeek kẹp về low/high/max.
      */
     fun effortValueFor(type: ProviderType): String? = when (type) {
-        ProviderType.OPENAI, ProviderType.CUSTOM -> "none"
+        ProviderType.OPENAI -> responsesEffort()
+        ProviderType.CUSTOM -> chatEffort()
+        ProviderType.DEEPSEEK -> deepSeekEffort()
         ProviderType.GEMINI -> geminiThinkingLevel()
         ProviderType.CLAUDE -> claudeEffort()
+    }
+
+    /**
+     * OpenAI Responses: reasoning.effort. NONE gửi "none" (model chấp nhận
+     * — trừ Astra/Sol, xem [responsesEffortProblem]).
+     */
+    fun responsesEffort(): String = when (effort) {
+        ReasoningEffort.NONE -> "none"
+        ReasoningEffort.MINIMAL -> "minimal"
+        ReasoningEffort.LOW -> "low"
+        ReasoningEffort.MEDIUM -> "medium"
+        ReasoningEffort.HIGH -> "high"
+        ReasoningEffort.XHIGH -> "xhigh"
+        ReasoningEffort.MAX -> "max"
+    }
+
+    /** Chat Completions chung (Custom): tên mức của OpenAI, gửi nguyên vẹn. */
+    fun chatEffort(): String = responsesEffort()
+
+    /**
+     * DeepSeek: reasoning_effort chỉ có low/high/max (+ none để tắt suy
+     * luận). MINIMAL kẹp về low; MEDIUM/XHIGH kẹp về high (theo tài liệu
+     * DeepSeek: minimal/low → low, medium/high/xhigh → high, max → max).
+     */
+    fun deepSeekEffort(): String = when (effort) {
+        ReasoningEffort.NONE -> "none"
+        ReasoningEffort.MINIMAL -> "low"
+        ReasoningEffort.LOW -> "low"
+        ReasoningEffort.MEDIUM -> "high"
+        ReasoningEffort.HIGH -> "high"
+        ReasoningEffort.XHIGH -> "high"
+        ReasoningEffort.MAX -> "max"
+    }
+
+    /**
+     * Model OpenAI nào không chấp nhận effort "none" thì trả về câu giải
+     * thích để báo user (đợt provider 12/11/2026, theo tài liệu OpenAI):
+     * GPT-6 Astra không chấp nhận "none" (400); GPT-6.1 Sol cũng không
+     * chấp nhận "none". Trả null khi không có vấn đề (effort khác NONE,
+     * hoặc model không thuộc hai dòng đó).
+     */
+    fun responsesEffortProblem(model: String): String? {
+        if (effort != ReasoningEffort.NONE) return null
+        val m = model.lowercase()
+        val rejectsNone = "astra" in m || Regex("""\bsol\b""").containsMatchIn(m)
+        if (!rejectsNone) return null
+        return "This model ($model) does not accept reasoning effort \"none\". " +
+            "Choose a higher effort, or another model."
     }
 
     /** Dòng tóm tắt cho thẻ Metadata trên Panel: "model · effort medium · max 8192". */
     fun summary(model: String, maxOutputTokens: Int, type: ProviderType? = null): String {
         // Chưa biết hãng thì hiện effort đã lưu; đã biết hãng thì hiện
-        // effort thật sự áp cho hãng đó (OpenAI luôn "none" — xem effectiveEffort).
+        // effort thật sự áp cho hãng đó (từ đợt provider 12/11/2026: đúng
+        // lựa chọn của user cho mọi hãng, không ép "none" nữa).
         val shown = if (type == null) effort else effectiveEffort(type)
         return "${model.ifBlank { "no model" }} · effort ${shown.name.lowercase()} · max $maxOutputTokens"
     }
 
     companion object {
         /**
-         * Mặc định Metadata theo hãng đang dùng (quyết định 15, phương án
-         * c): effort NONE cho OpenAI(-compatible) vì luật tool của OpenAI
-         * (effort != NONE thì không gửi được tool — xem [effectiveEffort]),
-         * MEDIUM cho Claude/Gemini (effort nào tool cũng gửi được) và khi
-         * chưa biết hãng (giữ mặc định cũ).
+         * Mặc định Metadata theo hãng đang dùng: MEDIUM cho mọi hãng (đợt
+         * provider 12/11/2026 — luật ép NONE cho OpenAI(-compatible) đã bỏ
+         * vì Responses/DeepSeek đều cho reasoning + tool dùng chung).
          * Chỉ dùng khi user chưa từng lưu Metadata — giá trị user đã chọn
          * luôn được tôn trọng (xem SettingsRepository).
          */
         fun defaultFor(type: ProviderType?): MetadataParams = MetadataParams(
-            effort = when (type) {
-                ProviderType.OPENAI, ProviderType.CUSTOM -> ReasoningEffort.NONE
-                else -> ReasoningEffort.MEDIUM
-            },
+            effort = ReasoningEffort.MEDIUM,
         )
     }
 }

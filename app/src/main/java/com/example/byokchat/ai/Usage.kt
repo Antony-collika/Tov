@@ -19,6 +19,13 @@ data class Usage(
     val cachedTokens: Int? = null,
     /** Số token đầu vào ghi mới vào bộ nhớ đệm (Claude: cache_creation_input_tokens). */
     val cacheCreationTokens: Int? = null,
+    /**
+     * Số token suy luận trong số output (Đợt provider 12/11/2026):
+     * Responses: usage.output_tokens_details.reasoning_tokens;
+     * Chat Completions: completion_tokens_details.reasoning_tokens;
+     * Claude: output_tokens_details.thinking_tokens.
+     */
+    val reasoningTokens: Int? = null,
 ) {
     /** Một dòng tóm tắt, kiểu FPilot: "[usage] prompt 1234 · cached 1000 · completion 56". */
     fun summaryLine(): String {
@@ -27,6 +34,7 @@ data class Usage(
         cachedTokens?.let { parts += "cached $it" }
         cacheCreationTokens?.let { parts += "cache write $it" }
         outputTokens?.let { parts += "completion $it" }
+        reasoningTokens?.let { parts += "reasoning $it" }
         return if (parts.isEmpty()) "[usage] not reported" else "[usage] " + parts.joinToString(" · ")
     }
 
@@ -37,6 +45,8 @@ data class Usage(
             outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull,
             cachedTokens = usage["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull,
             cacheCreationTokens = usage["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull,
+            reasoningTokens = usage["output_tokens_details"]?.jsonObject
+                ?.get("thinking_tokens")?.jsonPrimitive?.intOrNull,
         )
 
         /** OpenAI: `usage` trong chunk cuối khi stream_options.include_usage bật. */
@@ -45,6 +55,25 @@ data class Usage(
             outputTokens = usage["completion_tokens"]?.jsonPrimitive?.intOrNull,
             cachedTokens = usage["prompt_tokens_details"]?.jsonObject
                 ?.get("cached_tokens")?.jsonPrimitive?.intOrNull,
+            reasoningTokens = usage["completion_tokens_details"]?.jsonObject
+                ?.get("reasoning_tokens")?.jsonPrimitive?.intOrNull,
+        )
+
+        /**
+         * OpenAI Responses: `usage` trong event response.completed (Đợt
+         * provider 12/11/2026). Khác Chat Completions: input_tokens /
+         * output_tokens (không phải prompt/completion_tokens), và
+         * output_tokens_details.reasoning_tokens.
+         */
+        fun fromResponses(usage: JsonObject): Usage = Usage(
+            inputTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull,
+            outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull,
+            cachedTokens = usage["input_tokens_details"]?.jsonObject
+                ?.get("cached_tokens")?.jsonPrimitive?.intOrNull,
+            cacheCreationTokens = usage["input_tokens_details"]?.jsonObject
+                ?.get("cache_write_tokens")?.jsonPrimitive?.intOrNull,
+            reasoningTokens = usage["output_tokens_details"]?.jsonObject
+                ?.get("reasoning_tokens")?.jsonPrimitive?.intOrNull,
         )
 
         /** Gemini: `usageMetadata` trong mỗi chunk SSE. */
@@ -67,6 +96,7 @@ data class Usage(
                 outputTokens = second.outputTokens ?: first.outputTokens,
                 cachedTokens = second.cachedTokens ?: first.cachedTokens,
                 cacheCreationTokens = second.cacheCreationTokens ?: first.cacheCreationTokens,
+                reasoningTokens = second.reasoningTokens ?: first.reasoningTokens,
             )
         }
     }
