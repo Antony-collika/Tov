@@ -46,9 +46,9 @@ data class HistoryMetaMessage(
     val attachments: List<String> = emptyList(),
     val createdAt: Long,
     /**
-     * Nội dung thêm của provider (vd thought_signature của Gemini). Room
-     * KHÔNG lưu trường này (không đổi cấu trúc DB đợt này) nên lúc xuất
-     * luôn là null; lúc nhập thì bỏ qua. Xem HistorySync.
+     * Nội dung thêm của provider (vd thought_signature của Gemini, suy luận
+     * của OpenAI/DeepSeek/Claude — xem HistoryExporter.buildExtraContent).
+     * Lúc nhập thì đọc lại vào Room (xem HistorySync.reasoningOf).
      */
     val extra_content: JsonElement? = null,
     val tool_rounds: List<HistoryToolRound> = emptyList(),
@@ -218,17 +218,52 @@ object HistoryExporter {
                 id = m.id,
                 attachments = if (m.role == "user") m.images() else emptyList(),
                 createdAt = m.createdAt,
-                // Đợt fix 12/11/2026 (K): chữ ký suy luận của Gemini cho phần
-                // chữ (nếu có) — đúng dạng template của FPilot
-                // {"google": {"thought_signature": "..."}}.
-                extra_content = m.thoughtSignature?.let { sig ->
-                    buildJsonObject {
-                        put("google", buildJsonObject { put("thought_signature", sig) })
-                    }
-                },
+                extra_content = buildExtraContent(m),
                 tool_rounds = rounds,
             )
         }
+    }
+
+    /**
+     * Nội dung thêm của provider cho một tin (Đợt provider 12/11/2026 — theo
+     * mẫu thoughtSignature của Gemini, key theo hãng):
+     * - google: {"thought_signature": ...} (đã có từ đợt fix 12/11/2026);
+     * - openai: {"reasoning_summary": ..., "response_items": [...]} — mảng
+     *   output items gửi lại nguyên vẹn ở lượt sau (kèm encrypted_content);
+     * - deepseek: {"reasoning_content": ...} — chuỗi suy luận dạng text;
+     * - anthropic: {"thinking": ..., "thinking_blocks": [...]} — khối
+     *   thinking / redacted_thinking gửi lại nguyên vẹn.
+     * history.md không ghi thêm gì (Duy 12/11 ~10:28: file đó chỉ là lịch sử).
+     */
+    private fun buildExtraContent(m: MessageEntity): JsonElement? {
+        val obj = buildJsonObject {
+            // Đợt fix 12/11/2026 (K): chữ ký suy luận của Gemini cho phần
+            // chữ (nếu có) — đúng dạng template của FPilot
+            // {"google": {"thought_signature": "..."}}.
+            m.thoughtSignature?.let { sig ->
+                put("google", buildJsonObject { put("thought_signature", sig) })
+            }
+            when (m.reasoningProvider) {
+                "openai" -> put("openai", buildJsonObject {
+                    m.reasoningText?.let { put("reasoning_summary", it) }
+                    m.reasoningReplay?.let { replay ->
+                        runCatching { json.parseToJsonElement(replay) }.getOrNull()
+                            ?.let { put("response_items", it) }
+                    }
+                })
+                "deepseek" -> put("deepseek", buildJsonObject {
+                    m.reasoningText?.let { put("reasoning_content", it) }
+                })
+                "anthropic" -> put("anthropic", buildJsonObject {
+                    m.reasoningText?.let { put("thinking", it) }
+                    m.reasoningReplay?.let { replay ->
+                        runCatching { json.parseToJsonElement(replay) }.getOrNull()
+                            ?.let { put("thinking_blocks", it) }
+                    }
+                })
+            }
+        }
+        return obj.takeIf { it.isNotEmpty() }
     }
 
     /**

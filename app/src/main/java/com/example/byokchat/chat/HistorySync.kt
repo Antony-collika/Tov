@@ -156,6 +156,31 @@ class HistorySync(
             ?.get("thought_signature")?.jsonPrimitive?.contentOrNull
 
     /**
+     * Suy luận của provider trong extra_content (Đợt provider 12/11/2026):
+     * openai {reasoning_summary, response_items}, deepseek {reasoning_content},
+     * anthropic {thinking, thinking_blocks}. Trả về (text, replayJson,
+     * provider) — null khi không có suy luận của hãng nào.
+     */
+    private fun reasoningOf(entry: HistoryMetaMessage): Triple<String?, String?, String?>? {
+        val extra = entry.extra_content?.jsonObject ?: return null
+        extra["openai"]?.jsonObject?.let { o ->
+            val text = o["reasoning_summary"]?.jsonPrimitive?.contentOrNull
+            val replay = o["response_items"]?.toString()
+            if (text != null || replay != null) return Triple(text, replay, "openai")
+        }
+        extra["deepseek"]?.jsonObject?.let { o ->
+            val text = o["reasoning_content"]?.jsonPrimitive?.contentOrNull
+            if (text != null) return Triple(text, null, "deepseek")
+        }
+        extra["anthropic"]?.jsonObject?.let { o ->
+            val text = o["thinking"]?.jsonPrimitive?.contentOrNull
+            val replay = o["thinking_blocks"]?.toString()
+            if (text != null || replay != null) return Triple(text, replay, "anthropic")
+        }
+        return null
+    }
+
+    /**
      * Áp nội dung file vào Room (một transaction).
      * - Tin trong file: có id thì cập nhật chữ/số lượt/trạng thái, chưa có thì thêm mới.
      * - Vòng tool: xóa dòng tool cũ của lượt rồi ghi lại từ meta (tool không có
@@ -193,10 +218,13 @@ class HistorySync(
                     val newStatus = if (pm.error != null) "error" else "done"
                     val newImages = if (pm.role == "user") encodeImages(entry.attachments) else existing.imagePaths
                     val newSig = thoughtSignatureOf(entry)
+                    val (newRText, newRReplay, newRProvider) = reasoningOf(entry) ?: Triple(null, null, null)
                     if (existing.text != pm.text || existing.turnNo != pm.turnNo ||
                         existing.status != newStatus || existing.error != pm.error ||
                         existing.toolCallsJson != callsJson || existing.imagePaths != newImages ||
-                        existing.thoughtSignature != newSig
+                        existing.thoughtSignature != newSig ||
+                        existing.reasoningText != newRText || existing.reasoningReplay != newRReplay ||
+                        existing.reasoningProvider != newRProvider
                     ) {
                         db.messages().upsert(
                             existing.copy(
@@ -207,6 +235,9 @@ class HistorySync(
                                 toolCallsJson = callsJson,
                                 imagePaths = newImages,
                                 thoughtSignature = newSig,
+                                reasoningText = newRText,
+                                reasoningReplay = newRReplay,
+                                reasoningProvider = newRProvider,
                                 edited = if (existing.text != pm.text) true else existing.edited,
                             ),
                         )
@@ -215,6 +246,7 @@ class HistorySync(
                 } else {
                     val turnId = turnIds.getOrPut(pm.turnNo) { UUID.randomUUID().toString() }
                     maxSeq++
+                    val (rText, rReplay, rProvider) = reasoningOf(entry) ?: Triple(null, null, null)
                     db.messages().upsert(
                         MessageEntity(
                             id = pm.id,
@@ -230,6 +262,9 @@ class HistorySync(
                             error = pm.error,
                             createdAt = entry.createdAt,
                             thoughtSignature = thoughtSignatureOf(entry),
+                            reasoningText = rText,
+                            reasoningReplay = rReplay,
+                            reasoningProvider = rProvider,
                         ),
                     )
                     changed++
