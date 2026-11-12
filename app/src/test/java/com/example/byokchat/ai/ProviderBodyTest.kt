@@ -342,7 +342,10 @@ class ProviderBodyTest {
 
     @Test
     fun claudeNeverSendsTemperatureTopPTopK() {
-        val body = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(request(ProviderType.CLAUDE), useCache = false)
+        val body = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(
+            request(ProviderType.CLAUDE, model = "claude-opus-5"),
+            useCache = false,
+        )
         assertEquals(8192, body["max_tokens"]?.jsonPrimitive?.content?.toInt())
         assertEquals("medium", body["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
         assertNoSamplingFields(body)
@@ -393,6 +396,77 @@ class ProviderBodyTest {
         assertEquals(ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON, claudeThinkingModeFor("claude-opus-5"))
         assertEquals(ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON, claudeThinkingModeFor("claude-sonnet-5-5"))
         assertEquals(ClaudeThinkingMode.ADAPTIVE, claudeThinkingModeFor("unknown-model"))
+    }
+
+    // ---- Claude effort theo model (Đợt provider 12/11/2026, Q6) ----
+
+    @Test
+    fun claudeEffortSupportForClassifiesModels() {
+        assertEquals(ClaudeEffortSupport.FULL, claudeEffortSupportFor("claude-opus-5"))
+        assertEquals(ClaudeEffortSupport.FULL, claudeEffortSupportFor("claude-sonnet-5-5"))
+        assertEquals(ClaudeEffortSupport.FULL, claudeEffortSupportFor("claude-haiku-5-5"))
+        assertEquals(ClaudeEffortSupport.FULL, claudeEffortSupportFor("claude-opus-4-8"))
+        assertEquals(ClaudeEffortSupport.NO_XHIGH, claudeEffortSupportFor("claude-opus-4-6"))
+        assertEquals(ClaudeEffortSupport.NO_XHIGH, claudeEffortSupportFor("claude-sonnet-4-6"))
+        assertEquals(ClaudeEffortSupport.NO_XHIGH, claudeEffortSupportFor("claude-mythos-preview"))
+        assertEquals(ClaudeEffortSupport.LOW_MED_HIGH, claudeEffortSupportFor("claude-opus-4-5"))
+        assertEquals(ClaudeEffortSupport.UNSUPPORTED, claudeEffortSupportFor("claude-sonnet-4-5"))
+        assertEquals(ClaudeEffortSupport.UNSUPPORTED, claudeEffortSupportFor("claude-haiku-4-5"))
+        assertEquals(ClaudeEffortSupport.UNSUPPORTED, claudeEffortSupportFor("claude-3-5-sonnet"))
+        assertEquals(ClaudeEffortSupport.FULL, claudeEffortSupportFor("unknown-model"))
+    }
+
+    @Test
+    fun claudeEffortNotSentForUnsupportedModels() {
+        val body = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(
+            request(ProviderType.CLAUDE, model = "claude-sonnet-4-5"),
+            useCache = false,
+        )
+        assertNull(body["output_config"])
+    }
+
+    @Test
+    fun claudeEffortClampedForOpus45AndOpus46() {
+        val max45 = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(
+            request(
+                ProviderType.CLAUDE,
+                metadata = MetadataParams(effort = ReasoningEffort.MAX),
+                model = "claude-opus-4-5",
+            ),
+            useCache = false,
+        )
+        assertEquals("high", max45["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
+        val xhigh46 = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(
+            request(
+                ProviderType.CLAUDE,
+                metadata = MetadataParams(effort = ReasoningEffort.XHIGH),
+                model = "claude-opus-4-6",
+            ),
+            useCache = false,
+        )
+        assertEquals("high", xhigh46["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
+        val max46 = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(
+            request(
+                ProviderType.CLAUDE,
+                metadata = MetadataParams(effort = ReasoningEffort.MAX),
+                model = "claude-sonnet-4-6",
+            ),
+            useCache = false,
+        )
+        assertEquals("max", max46["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun claudeEffortFullLadderForOpus5() {
+        val body = ClaudeProvider(cfg(ProviderType.CLAUDE)).buildBody(
+            request(
+                ProviderType.CLAUDE,
+                metadata = MetadataParams(effort = ReasoningEffort.XHIGH),
+                model = "claude-opus-5",
+            ),
+            useCache = false,
+        )
+        assertEquals("xhigh", body["output_config"]?.jsonObject?.get("effort")?.jsonPrimitive?.content)
     }
 
     @Test

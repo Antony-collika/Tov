@@ -221,8 +221,10 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
             // Đợt 6: hiện đúng metadata lần gửi này dùng — cùng giá trị
             // ChatEngine gửi. Tool luôn được gửi đủ, với mọi hãng.
             // Đợt provider 12/11/2026: thêm dòng thinking của Claude, ghi chú
-            // stop của Responses và định dạng request của OpenAI.
-            val effortValue = metadata.effortValueFor(type)
+            // stop của Responses và định dạng request của OpenAI. Đợt provider
+            // 12/11/2026 (Q6): truyền model để hiện đúng effort Claude thực
+            // sự gửi (model không hỗ trợ effort thì không gửi).
+            val effortValue = metadata.effortValueFor(type, model)
             val toolsLine = "Tools: ${a.toolDefs.size} tool(s) offered."
             val thinking = thinkingLine(metadata, type, model)?.let { "\n$it" } ?: ""
             val formatNote = if (type == ProviderType.OPENAI) {
@@ -372,7 +374,8 @@ private fun inspectorMarkdown(a: AssembledRequest, ready: PreviewResult.Ready): 
     appendLine("Estimated tokens: ${a.estimatedTokens} (history ${a.historyTokens})")
     appendLine()
     appendLine("## Metadata")
-    val effortValue = metadata.effortValueFor(type)
+    // Đợt provider 12/11/2026 (Q6): truyền model để hiện đúng effort Claude thực sự gửi.
+    val effortValue = metadata.effortValueFor(type, model)
     appendLine("Model: $model")
     appendLine("Reasoning effort: ${metadata.effectiveEffort(type).name.lowercase()}" + (if (effortValue != null) " (${metadata.effortFieldName(type)}: $effortValue)" else " (not sent — the provider uses its default)"))
     appendLine("Max output tokens: ${ready.maxOutputTokens}")

@@ -108,16 +108,38 @@ data class MetadataParams(
     /**
      * Claude output_config.effort — tín hiệu mềm, max_tokens vẫn là trần
      * cứng. NONE = không gửi (dùng mặc định của hãng). MINIMAL không có ở
-     * Claude nên kẹp về "low".
+     * Claude nên kẹp về "low". Đợt provider 12/11/2026 (theo tài liệu
+     * chính thức Anthropic, trang Effort, đọc 12/11/2026): chỉ gửi cho
+     * model hãng hỗ trợ effort — Sonnet 4.5, Haiku 4.5, Claude 3.x và
+     * model 4.0–4.4 thì KHÔNG gửi (gửi là lỗi 400); mức xhigh/max kẹp
+     * xuống "high" khi model không có mức đó (Opus 4.6/Sonnet 4.6/Mythos
+     * Preview không có xhigh; Opus 4.5 chỉ có low/medium/high).
      */
-    fun claudeEffort(): String? = when (effort) {
-        ReasoningEffort.NONE -> null
-        ReasoningEffort.MINIMAL -> "low"
-        ReasoningEffort.LOW -> "low"
-        ReasoningEffort.MEDIUM -> "medium"
-        ReasoningEffort.HIGH -> "high"
-        ReasoningEffort.XHIGH -> "xhigh"
-        ReasoningEffort.MAX -> "max"
+    fun claudeEffort(model: String): String? {
+        if (effort == ReasoningEffort.NONE) return null
+        return when (claudeEffortSupportFor(model)) {
+            ClaudeEffortSupport.UNSUPPORTED -> null
+            ClaudeEffortSupport.LOW_MED_HIGH -> when (effort) {
+                ReasoningEffort.MINIMAL, ReasoningEffort.LOW -> "low"
+                ReasoningEffort.MEDIUM -> "medium"
+                else -> "high"
+            }
+            ClaudeEffortSupport.NO_XHIGH -> when (effort) {
+                ReasoningEffort.MINIMAL, ReasoningEffort.LOW -> "low"
+                ReasoningEffort.MEDIUM -> "medium"
+                ReasoningEffort.HIGH -> "high"
+                ReasoningEffort.XHIGH -> "high"
+                ReasoningEffort.MAX -> "max"
+            }
+            ClaudeEffortSupport.FULL -> when (effort) {
+                ReasoningEffort.MINIMAL -> "low"
+                ReasoningEffort.LOW -> "low"
+                ReasoningEffort.MEDIUM -> "medium"
+                ReasoningEffort.HIGH -> "high"
+                ReasoningEffort.XHIGH -> "xhigh"
+                ReasoningEffort.MAX -> "max"
+            }
+        }
     }
 
     /** Các mức effort cho user chọn theo hãng đang dùng (giá trị hãng không có thì không hiện). */
@@ -147,14 +169,15 @@ data class MetadataParams(
      * OpenAI (Responses): reasoning.effort theo đúng lựa chọn của user —
      * không ép "none" nữa (Responses cho reasoning + tool dùng chung).
      * Custom/DeepSeek (Chat Completions): reasoning_effort theo lựa chọn
-     * của user; DeepSeek kẹp về low/high/max.
+     * của user; DeepSeek kẹp về low/high/max. Claude: output_config.effort
+     * theo model (model chỉ dùng cho CLAUDE — xem [claudeEffort]).
      */
-    fun effortValueFor(type: ProviderType): String? = when (type) {
+    fun effortValueFor(type: ProviderType, model: String = ""): String? = when (type) {
         ProviderType.OPENAI -> responsesEffort()
         ProviderType.CUSTOM -> chatEffort()
         ProviderType.DEEPSEEK -> deepSeekEffort()
         ProviderType.GEMINI -> geminiThinkingLevel()
-        ProviderType.CLAUDE -> claudeEffort()
+        ProviderType.CLAUDE -> claudeEffort(model)
     }
 
     /**

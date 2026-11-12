@@ -82,11 +82,31 @@ class MetadataTest {
     @Test
     fun claudeEffortOmitsNoneAndClampsMinimalToLow() {
         val m = MetadataParams()
-        assertNull(m.copy(effort = ReasoningEffort.NONE).claudeEffort())
-        assertEquals("low", m.copy(effort = ReasoningEffort.MINIMAL).claudeEffort())
-        assertEquals("medium", m.claudeEffort())
-        assertEquals("xhigh", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort())
-        assertEquals("max", m.copy(effort = ReasoningEffort.MAX).claudeEffort())
+        assertNull(m.copy(effort = ReasoningEffort.NONE).claudeEffort("claude-opus-5"))
+        assertEquals("low", m.copy(effort = ReasoningEffort.MINIMAL).claudeEffort("claude-opus-5"))
+        assertEquals("medium", m.claudeEffort("claude-opus-5"))
+        assertEquals("xhigh", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("claude-opus-5"))
+        assertEquals("max", m.copy(effort = ReasoningEffort.MAX).claudeEffort("claude-opus-5"))
+    }
+
+    @Test
+    fun claudeEffortDependsOnModelSupport() {
+        // Đợt provider 12/11/2026 (Q6): chỉ gửi effort cho model hãng hỗ trợ.
+        val m = MetadataParams()
+        // Model không hỗ trợ effort thì không gửi gì (gửi là lỗi 400).
+        assertNull(m.claudeEffort("claude-sonnet-4-5"))
+        assertNull(m.claudeEffort("claude-haiku-4-5"))
+        assertNull(m.claudeEffort("claude-3-5-sonnet"))
+        assertNull(m.claudeEffort("claude-opus-4-4"))
+        // Opus 4.5 chỉ có low/medium/high: xhigh/max kẹp về high.
+        assertEquals("high", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("claude-opus-4-5"))
+        assertEquals("high", m.copy(effort = ReasoningEffort.MAX).claudeEffort("claude-opus-4-5"))
+        assertEquals("medium", m.claudeEffort("claude-opus-4-5"))
+        // Opus 4.6 / Sonnet 4.6: có max nhưng không có xhigh.
+        assertEquals("high", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("claude-opus-4-6"))
+        assertEquals("max", m.copy(effort = ReasoningEffort.MAX).claudeEffort("claude-sonnet-4-6"))
+        // Model mới không nhận ra tên thì coi là hỗ trợ đủ.
+        assertEquals("xhigh", m.copy(effort = ReasoningEffort.XHIGH).claudeEffort("unknown-model"))
     }
 
     @Test

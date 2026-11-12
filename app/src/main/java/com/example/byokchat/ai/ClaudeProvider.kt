@@ -44,6 +44,59 @@ internal fun claudeThinkingModeFor(model: String): ClaudeThinkingMode {
     return ClaudeThinkingMode.ADAPTIVE
 }
 
+/**
+ * Hỗ trợ output_config.effort theo model (Đợt provider 12/11/2026 — sửa
+ * theo tài liệu chính thức Anthropic, trang Effort, đọc 12/11/2026; Opus
+ * 4.5 đã lỗi thời nên không lấy nó làm chuẩn, căn cứ theo các model hiện
+ * hành cuối năm 2026):
+ * - Hãng hỗ trợ effort: Fable 5.x, Mythos 5.x (+ Mythos Preview), Opus
+ *   5.5/5/4.8/4.7/4.6/4.5, Sonnet 5.5/5/4.6, Haiku 5.5.
+ * - KHÔNG hỗ trợ: Sonnet 4.5, Haiku 4.5, Claude 3.x, model 4.0–4.4 —
+ *   gửi effort cho chúng là lỗi 400 nên app không gửi.
+ * - xhigh chỉ có ở Fable 5.x, Mythos 5.x, Opus 5.5/5/4.8/4.7, Sonnet
+ *   5.5/5, Haiku 5.5 — Opus 4.6, Sonnet 4.6 và Mythos Preview có max
+ *   nhưng không có xhigh; Opus 4.5 chỉ có low/medium/high.
+ * - max có ở mọi model hỗ trợ effort trừ Opus 4.5.
+ * Tên model do user gõ tay nên chỉ đoán theo tên (như
+ * claudeThinkingModeFor): tên không nhận ra thì coi là model mới (hỗ trợ
+ * đủ — mọi model mới đều hỗ trợ effort); nếu đoán sai thì API báo 400 rõ
+ * ràng chứ app không tự đổi lặng lẽ.
+ */
+internal enum class ClaudeEffortSupport { FULL, NO_XHIGH, LOW_MED_HIGH, UNSUPPORTED }
+
+internal fun claudeEffortSupportFor(model: String): ClaudeEffortSupport {
+    val m = model.lowercase()
+    // Model 5.x (kể cả 5.5, Fable/Mythos 5.1/5.2): hỗ trợ đủ mọi mức.
+    if (Regex("""claude[-_ ]?(opus|sonnet|haiku|fable|mythos)[-_ ]?5([.-]|$)""").containsMatchIn(m)) {
+        return ClaudeEffortSupport.FULL
+    }
+    if (Regex("""claude[-_ ]?5([.-]|$)""").containsMatchIn(m)) return ClaudeEffortSupport.FULL
+    // Mythos Preview: có max nhưng không có xhigh.
+    if ("mythos-preview" in m) return ClaudeEffortSupport.NO_XHIGH
+    // Opus/Sonnet 4.6: có max nhưng không có xhigh.
+    if (Regex("""claude[-_ ]?(opus|sonnet)[-_ ]?4[-_. ]?6([.-]|$)""").containsMatchIn(m)) {
+        return ClaudeEffortSupport.NO_XHIGH
+    }
+    // Opus 4.7/4.8: hỗ trợ đủ.
+    if (Regex("""claude[-_ ]?opus[-_ ]?4[-_. ]?[78]([.-]|$)""").containsMatchIn(m)) {
+        return ClaudeEffortSupport.FULL
+    }
+    // Opus 4.5: model extended-thinking-only duy nhất hỗ trợ effort — chỉ low/medium/high.
+    if (Regex("""claude[-_ ]?opus[-_ ]?4[-_. ]?5([.-]|$)""").containsMatchIn(m)) {
+        return ClaudeEffortSupport.LOW_MED_HIGH
+    }
+    // Sonnet/Haiku 4.5, Claude 3.x, model 4.0–4.4: không hỗ trợ effort.
+    if (Regex("""claude[-_ ]?(sonnet|haiku)[-_ ]?4[-_. ]?5([.-]|$)""").containsMatchIn(m)) {
+        return ClaudeEffortSupport.UNSUPPORTED
+    }
+    if (Regex("""claude[-_ ]?3([.-]|$)""").containsMatchIn(m)) return ClaudeEffortSupport.UNSUPPORTED
+    if (Regex("""claude[-_ ]?(opus|sonnet|haiku)[-_ ]?4[-_. ]?[0-4]([.-]|$)""").containsMatchIn(m)) {
+        return ClaudeEffortSupport.UNSUPPORTED
+    }
+    // Tên không nhận ra: coi là model mới (hỗ trợ đủ).
+    return ClaudeEffortSupport.FULL
+}
+
 class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLog? = null) : AiProvider {
     private val base: String get() = cfg.effectiveBaseUrl().trimEnd('/')
 
@@ -172,7 +225,11 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
      * Body gửi đi, tách riêng khỏi stream() để test được (Đợt 6). Thẻ Metadata:
      * - max_tokens (bắt buộc với Claude) như cũ.
      * - output_config.effort khi effort != NONE — tín hiệu mềm, max_tokens
-     *   vẫn là trần cứng. NONE = không gửi (dùng mặc định của hãng).
+     *   vẫn là trần cứng. NONE = không gửi (dùng mặc định của hãng). Đợt
+     *   provider 12/11/2026: chỉ gửi cho model hãng hỗ trợ effort (xem
+     *   [claudeEffortSupportFor] — Sonnet 4.5, Haiku 4.5, Claude 3.x và
+     *   model 4.0–4.4 thì không gửi, gửi là lỗi 400); mức xhigh/max kẹp
+     *   xuống "high" khi model không có mức đó.
      * - Extended thinking (Đợt provider 12/11/2026), chỉ khi công tắc bật:
      *   model 4.5 trở về trước gửi thinking {type: "enabled", budget_tokens}
      *   (budget phải ≥ 1024 và < max_tokens — sai thì báo rõ, không tự sửa);
@@ -192,7 +249,7 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
         put("model", request.model)
         put("max_tokens", request.maxOutputTokens)
         put("stream", true)
-        request.metadata.claudeEffort()?.let { effort ->
+        request.metadata.claudeEffort(request.model)?.let { effort ->
             put("output_config", buildJsonObject { put("effort", effort) })
         }
         if (request.metadata.thinkingEnabled) {
