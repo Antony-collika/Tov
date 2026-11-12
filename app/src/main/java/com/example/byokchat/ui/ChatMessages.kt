@@ -246,6 +246,8 @@ internal fun AssistantMessage(
     liveText: String? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    // Đợt provider 12/11/2026: khối gập "Suy luận" mở hay đóng (theo từng tin).
+    var reasoningOpen by remember(m.id) { mutableStateOf(false) }
     // Snapshot of the text taken when "Select text" is chosen, so it does not change under your finger while the AI is still typing.
     var selectText by remember { mutableStateOf<String?>(null) }
     val haptic = LocalHapticFeedback.current
@@ -313,6 +315,32 @@ internal fun AssistantMessage(
                 )
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            }
+            // Đợt provider 12/11/2026: khối gập "Suy luận" — chữ suy luận của
+            // hãng (OpenAI/DeepSeek/Claude) lưu cùng tin, hiện dạng text
+            // thường (không markdown — suy luận không phải câu trả lời).
+            // Chỉ hiện khi tin đã lưu xong: lúc đang stream suy luận chưa
+            // lưu, tránh hiện nội dung nửa chừng.
+            if (!m.reasoningText.isNullOrBlank() && m.status != "streaming") {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        Modifier.clickable { reasoningOpen = !reasoningOpen },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            if (reasoningOpen) "▾ Suy luận" else "▸ Suy luận",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (reasoningOpen) {
+                        Text(
+                            m.reasoningText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
             if (m.toolCallsJson != null) ToolCards(m, toolResults, generating)
             if (m.status == "error") {
