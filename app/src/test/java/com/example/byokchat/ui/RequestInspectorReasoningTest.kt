@@ -23,7 +23,7 @@ class RequestInspectorReasoningTest {
 
     private fun msg(
         reasoningText: String? = "some reasoning",
-        reasoningReplay: String? = reasoningReplay,
+        reasoningReplay: String? = this.reasoningReplay,
         reasoningProvider: String? = "openai",
         toolCalls: List<AiToolCall> = emptyList(),
     ) = AiMessage(
