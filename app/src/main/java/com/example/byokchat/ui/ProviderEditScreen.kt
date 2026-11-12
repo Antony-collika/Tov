@@ -238,6 +238,18 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     modifier = Modifier.padding(bottom = 24.dp),
                 ) { Text("Delete this provider", color = MaterialTheme.colorScheme.error) }
             }
+            // Đợt bỏ provider 12/11/2026: chỉ ghi chú ở đây (khi chọn
+            // OpenAI), không báo mỗi lần sửa — sửa lịch sử trước đó có thể
+            // khiến model OpenAI mới bỏ các mục suy luận đã gửi kèm, tốn
+            // thêm token/thời gian và có thể làm câu trả lời kém hơn.
+            if (type == ProviderType.OPENAI) {
+                Text(
+                    "Note: if you edit or delete earlier messages, newer OpenAI models may drop the reasoning they sent before, so the next reply can cost extra tokens and time, and may be less good. Adding new messages is always safe.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 24.dp),
+                )
+            }
         }
     }
 
