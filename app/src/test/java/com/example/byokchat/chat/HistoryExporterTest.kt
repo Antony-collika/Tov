@@ -39,7 +39,10 @@ class HistoryExporterTest {
         assertTrue(out.contains("session: conv-abc"))
         assertTrue(out.contains("title: \"Test chat\""))
         assertTrue(out.contains("created: 2023-11-14T22:13:20Z"))
-        assertTrue(out.contains("next_turn: 3"))
+        // Không còn dòng next_turn trong frontmatter (quyết định 12/11/2026):
+        // số lượt tiếp theo suy ra từ các section khi parse.
+        assertTrue(!out.contains("next_turn"))
+        assertEquals(3, HistoryMdParser.parseMd(out).nextTurn)
         assertTrue(out.contains("## T1 user\n{\"id\":\"m1\"}\nWhat time is it?"))
         // Đợt E: vòng tool KHÔNG còn section riêng trong .md — tin assistant
         // có lệnh gọi vẫn có section của nó (kể cả khi text trống), vòng tool
@@ -105,8 +108,11 @@ class HistoryExporterTest {
         val out = HistoryExporter.renderHistory(conv, rows)
         assertTrue(out.contains("## T1 user"))
         assertTrue(!out.contains("## T2 user"))
-        // next_turn vẫn tính từ Room (lượt chưa xong vẫn chiếm số).
-        assertTrue(out.contains("next_turn: 3"))
+        // Không còn dòng next_turn; lượt chưa xong (T2) không có trong file
+        // nên parser suy ra lượt tiếp theo là 2 từ section T1. Số lượt mới
+        // vẫn tính từ Room khi gửi (TurnNumbers.nextTurnNo), không dùng file.
+        assertTrue(!out.contains("next_turn"))
+        assertEquals(2, HistoryMdParser.parseMd(out).nextTurn)
         val meta = HistoryExporter.renderMeta(conv, rows)
         val parsed = Json { ignoreUnknownKeys = true }.decodeFromString(HistoryMeta.serializer(), meta)
         assertEquals(listOf("m1", "m2"), parsed.messages.keys.toList())
@@ -114,7 +120,8 @@ class HistoryExporterTest {
 
     @Test
     fun stableTurnNumbersSurviveADeletedTurn() {
-        // Đợt 4: T1 đã xóa, chỉ còn T2 và T5 — số không dồn lại, next_turn = 6.
+        // Đợt 4: T1 đã xóa, chỉ còn T2 và T5 — số không dồn lại, lượt tiếp
+        // theo suy ra từ các section là 6.
         val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
         val rows = listOf(
             msg("m1", "t1", 1, "user", "Second turn", { copy(turnNo = 2) }),
@@ -124,7 +131,8 @@ class HistoryExporterTest {
         )
         val out = HistoryExporter.renderHistory(conv, rows)
 
-        assertTrue(out.contains("next_turn: 6"))
+        assertTrue(!out.contains("next_turn"))
+        assertEquals(6, HistoryMdParser.parseMd(out).nextTurn)
         assertTrue(out.contains("## T2 user\n{\"id\":\"m1\"}\nSecond turn"))
         assertTrue(out.contains("## T5 user\n{\"id\":\"m3\"}\nFifth turn"))
         assertTrue(!out.contains("## T1 "))

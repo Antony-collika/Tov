@@ -64,10 +64,12 @@ data class HistoryMeta(
  * Xuất lịch sử chat ra history.md + history.meta.json trong Session storage (Đợt E).
  * Room vẫn là nguồn duy nhất; file là "bản chiếu" để đọc/grep/đồng bộ.
  * Định dạng sidecar mượn FPilot: frontmatter (session 8 ký tự, title có ngoặc
- * kép, created ISO 8601, next_turn), rồi mỗi lượt "## Tn user" / "## Tn assistant"
- * kèm dòng {"id":...} ngay sau heading. Vòng tool KHÔNG nằm trong .md nữa mà
- * nằm trong history.meta.json. Lượt chưa xong (user gửi mà chưa có assistant
- * trả lời) không ghi vào file.
+ * kép, created ISO 8601), rồi mỗi lượt "## Tn user" / "## Tn assistant"
+ * kèm dòng {"id":...} ngay sau heading. Số lượt tiếp theo KHÔNG ghi trong
+ * file — parser suy ra từ các section (lượt lớn nhất + 1); file cũ có dòng
+ * next_turn thì parser vẫn đọc và kẹp lên, không lỗi. Vòng tool KHÔNG nằm
+ * trong .md nữa mà nằm trong history.meta.json. Lượt chưa xong (user gửi mà
+ * chưa có assistant trả lời) không ghi vào file.
  */
 object HistoryExporter {
     private val json = Json { ignoreUnknownKeys = true }
@@ -127,7 +129,6 @@ object HistoryExporter {
             appendLine("session: ${conversation.id.take(8)}")
             appendLine("title: ${json.encodeToString(conversation.title.ifBlank { "Untitled" })}")
             appendLine("created: $created")
-            appendLine("next_turn: ${TurnNumbers.nextTurnNo(rows)}")
             appendLine("---")
             turns.forEach { (n, rs) ->
                 appendLine()
