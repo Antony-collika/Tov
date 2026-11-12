@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -43,6 +44,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -94,6 +97,23 @@ fun ChatScreen(
     val vm: ChatViewModel = viewModel(key = conversationId, factory = viewModelFactory {
         initializer { ChatViewModel(container, conversationId) }
     })
+    // Đợt fix 11/11/2026 (I2): đồng bộ lại history.md mỗi lần màn chat quay
+    // lại foreground — sửa file ngoài khi chat đang mở rồi quay lại cũng
+    // được parse (hoặc báo "sửa ngoài không có hiệu lực" khi AI đang trả
+    // lời), thay vì chỉ đồng bộ một lần lúc mở chat (init của ViewModel).
+    // Chạy lại khi không có gì đổi thì hash làm no-op; init + resume trùng
+    // nhau thì mutex trong syncHistoryOnOpen bỏ qua lần sau. Lấy lifecycle
+    // từ Activity (không thêm dependency lifecycle-runtime-compose).
+    val activity = context as? ComponentActivity
+    DisposableEffect(activity) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                scope.launch { vm.syncHistoryOnOpen() }
+            }
+        }
+        activity?.lifecycle?.addObserver(observer)
+        onDispose { activity?.lifecycle?.removeObserver(observer) }
+    }
     val conv by vm.conversation.collectAsState()
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()

@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -195,6 +196,9 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val events: SharedFlow<ChatEvent> = _events
 
+    /** Chống chạy chồng sync history.md (init + resume cùng lúc — xem I2). */
+    private val syncMutex = Mutex()
+
     init {
         // Đợt E: đồng bộ history.md khi mở đúng chat (không parse ngay khi mở
         // app, không đợi đến lúc gửi). Chạy nền; lỗi sync chỉ báo bằng toast,
@@ -202,15 +206,27 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         viewModelScope.launch { syncHistoryOnOpen() }
     }
 
-    /** Đồng bộ hai chiều history.md khi mở chat (Đợt E, xem HistorySync). */
-    private suspend fun syncHistoryOnOpen() {
-        val sync = app.historySync ?: return
-        when (val r = sync.syncOnOpen(conversationId) { app.engine.activeConversations.value.contains(conversationId) }) {
-            is HistorySync.SyncResult.Failed ->
-                _events.emit(ChatEvent.Error("Could not sync history.md: ${r.error}"))
-            HistorySync.SyncResult.ExternalEditDiscarded ->
-                _events.emit(ChatEvent.Error("Your edit to history.md while the AI was answering had no effect — the file was overwritten when the answer finished."))
-            else -> Unit
+    /**
+     * Đồng bộ hai chiều history.md khi mở chat (Đợt E, xem HistorySync).
+     * Đợt fix 11/11/2026 (I2): gọi lại được khi màn chat quay lại
+     * foreground (ON_RESUME, xem ChatScreen) — lần chạy trùng (init +
+     * resume) thì lần sau bỏ qua nhờ mutex; hash đã làm lần chạy thừa
+     * thành no-op khi file không đổi. Lỗi / sửa ngoài bị bỏ vẫn báo qua
+     * _events như đường init.
+     */
+    suspend fun syncHistoryOnOpen() {
+        if (!syncMutex.tryLock()) return
+        try {
+            val sync = app.historySync ?: return
+            when (val r = sync.syncOnOpen(conversationId) { app.engine.activeConversations.value.contains(conversationId) }) {
+                is HistorySync.SyncResult.Failed ->
+                    _events.emit(ChatEvent.Error("Could not sync history.md: ${r.error}"))
+                HistorySync.SyncResult.ExternalEditDiscarded ->
+                    _events.emit(ChatEvent.Error("Your edit to history.md while the AI was answering had no effect — the file was overwritten when the answer finished."))
+                else -> Unit
+            }
+        } finally {
+            syncMutex.unlock()
         }
     }
 
