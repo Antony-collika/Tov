@@ -114,6 +114,12 @@ class ChatEngine(
             // Chữ ký suy luận của Gemini kèm phần chữ của lượt này (Đợt fix
             // 12/11/2026): giữ lại để gửi ở request sau. Đặt lại mỗi vòng.
             var textSignature: String? = null
+            // Suy luận của lượt này (Đợt provider 12/11/2026): tích lũy
+            // riêng khỏi câu trả lời (AiEvent.Reasoning), replay JSON gửi
+            // lại nguyên vẹn ở request sau (AiEvent.Replay). Đặt lại mỗi vòng.
+            val reasoning = StringBuilder()
+            var replayJson: String? = null
+            var reasoningProvider: String? = null
             var error: String? = null
             var cancelled: CancellationException? = null
             // Danh sách tool đã parse từ file tools.md của lượt này (null =
@@ -180,8 +186,8 @@ class ChatEngine(
                 )
                 // Đợt 6: Metadata (một nguồn duy nhất với previewAssembled):
                 // cùng đọc settings.metadata. Tool luôn được gửi đủ, với mọi
-                // hãng (xung đột effort × tools của OpenAI đã giải quyết bằng
-                // cách ép effort về NONE — xem MetadataParams.effectiveEffort).
+                // hãng (effort theo từng hãng, không ép "none" chung nữa —
+                // xem MetadataParams, đợt provider 12/11/2026).
                 val metadata = settings.metadata.value
                 val request = AiRequest(
                     model,
@@ -198,6 +204,14 @@ class ChatEngine(
 
                 var lastFlush = System.currentTimeMillis()
                 var lastLive = 0L
+                // Hãng đã sinh ra suy luận của lượt này (để lượt sau biết
+                // replay JSON có dùng được không — hãng nào chỉ hãng đó đọc).
+                reasoningProvider = when (cfg.type) {
+                    ProviderType.OPENAI -> "openai"
+                    ProviderType.DEEPSEEK -> "deepseek"
+                    ProviderType.CLAUDE -> "anthropic"
+                    else -> null
+                }
                 ProviderFactory.create(cfg, requestLog).stream(request).collect { ev ->
                     when (ev) {
                         is AiEvent.Text -> {
@@ -213,6 +227,8 @@ class ChatEngine(
                                 lastFlush = now
                             }
                         }
+                        is AiEvent.Reasoning -> reasoning.append(ev.delta)
+                        is AiEvent.Replay -> replayJson = ev.json
                         is AiEvent.ToolCalls -> calls = ev.calls
                     }
                 }
@@ -237,6 +253,12 @@ class ChatEngine(
                             text = text.toString(),
                             toolCallsJson = if (calls.isEmpty()) null else json.encodeToString(callsSer, calls),
                             thoughtSignature = textSignature,
+                            // Đợt provider 12/11/2026: chỉ gắn hãng khi thật
+                            // sự có suy luận/replay (tin không có suy luận thì
+                            // để null như tin cũ).
+                            reasoningText = reasoning.toString().takeIf { it.isNotBlank() },
+                            reasoningReplay = replayJson,
+                            reasoningProvider = if (reasoning.isNotBlank() || replayJson != null) reasoningProvider else null,
                             status = "done",
                         )
                     )
