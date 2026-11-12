@@ -25,6 +25,12 @@ data class AiMessage(
     val toolCallId: String? = null,
     val toolName: String? = null,
     val isError: Boolean = false,
+    /**
+     * Chữ ký suy luận của Gemini cho phần chữ của tin assistant này (Đợt fix
+     * 12/11/2026) — gửi lại nguyên vẹn ở request sau khi công tắc
+     * [MetadataParams.keepThoughtSignature] bật. Chỉ Gemini dùng.
+     */
+    val thoughtSignature: String? = null,
 )
 
 data class ToolDef(
@@ -56,7 +62,11 @@ data class AiRequest(
 )
 
 sealed interface AiEvent {
-    data class Text(val delta: String) : AiEvent
+    /**
+     * Một đoạn chữ của câu trả lời. [signature] là chữ ký suy luận của Gemini
+     * kèm theo phần chữ này (nếu có) — Đợt fix 12/11/2026, chỉ Gemini gửi.
+     */
+    data class Text(val delta: String, val signature: String? = null) : AiEvent
     data class ToolCalls(val calls: List<AiToolCall>) : AiEvent
 }
 

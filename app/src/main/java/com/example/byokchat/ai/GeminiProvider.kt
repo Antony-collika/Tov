@@ -46,7 +46,15 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
                 cand["content"]?.jsonObject?.get("parts")?.jsonArray?.forEach { p ->
                     val po = p.jsonObject
                     if (po["thought"]?.jsonPrimitive?.booleanOrNull == true) return@forEach
-                    po["text"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
+                    // Chữ ký suy luận kèm phần chữ (Đợt fix 12/11/2026):
+                    // Gemini trả về để gửi lại ở request sau; trước đây app
+                    // chỉ đọc chữ ký của lệnh gọi tool nên chữ ký của phần
+                    // chữ bị mất. Phần chỉ có chữ ký mà không có chữ (hiếm)
+                    // thì vẫn giữ chữ ký (delta rỗng).
+                    val textSig = po["thoughtSignature"]?.jsonPrimitive?.contentOrNull
+                    val text = po["text"]?.jsonPrimitive?.contentOrNull
+                    if (!text.isNullOrEmpty()) emit(AiEvent.Text(text, textSig))
+                    else if (textSig != null) emit(AiEvent.Text("", textSig))
                     po["functionCall"]?.jsonObject?.let { fc ->
                         calls += AiToolCall(
                             id = "call_" + UUID.randomUUID().toString().take(12),
@@ -88,7 +96,7 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
                 put("parts", buildJsonArray { add(buildJsonObject { put("text", request.system) }) })
             })
         }
-        put("contents", buildContents(request.messages))
+        put("contents", buildContents(request.messages, request.metadata.keepThoughtSignature))
         if (request.tools.isNotEmpty()) {
             put("tools", buildJsonArray {
                 add(buildJsonObject {
@@ -127,7 +135,7 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
     private fun parseObject(s: String): JsonElement =
         runCatching { Json.parseToJsonElement(s) }.getOrNull()?.takeIf { it is JsonObject } ?: JsonObject(emptyMap())
 
-    private fun buildContents(msgs: List<AiMessage>): JsonArray {
+    private fun buildContents(msgs: List<AiMessage>, keepThoughtSignature: Boolean = true): JsonArray {
         class Content(val role: String, val parts: MutableList<JsonElement>)
 
         val out = mutableListOf<Content>()
@@ -148,7 +156,17 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
                     if (m.text.isNotBlank()) add("user", buildJsonObject { put("text", m.text) })
                 }
                 Role.ASSISTANT -> {
-                    if (m.text.isNotBlank()) add("model", buildJsonObject { put("text", m.text) })
+                    if (m.text.isNotBlank()) add("model", buildJsonObject {
+                        put("text", m.text)
+                        // Đợt fix 12/11/2026 (K): gửi lại chữ ký suy luận của
+                        // phần chữ khi công tắc "Keep thought signature" bật.
+                        // Chữ ký của lệnh gọi tool thì LUÔN gửi lại (Gemini
+                        // bắt buộc, thiếu là lỗi 400) — không phụ thuộc công
+                        // tắc này.
+                        if (keepThoughtSignature) {
+                            m.thoughtSignature?.let { put("thoughtSignature", it) }
+                        }
+                    })
                     m.toolCalls.forEach { tc ->
                         add("model", buildJsonObject {
                             put("functionCall", buildJsonObject {

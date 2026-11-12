@@ -116,7 +116,7 @@ object ContextBuilder {
                     ?.let { runCatching { json.decodeFromString(callsSer, it) }.getOrNull() }
                     .orEmpty()
                     .map { c -> c.uid?.takeIf { it.isNotEmpty() }?.let(nameForUid)?.let { n -> c.copy(name = n) } ?: c }
-                AiMessage(Role.ASSISTANT, text = m.text, toolCalls = calls)
+                AiMessage(Role.ASSISTANT, text = m.text, toolCalls = calls, thoughtSignature = m.thoughtSignature)
             }
         }
         "tool" -> AiMessage(

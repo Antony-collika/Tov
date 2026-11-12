@@ -111,6 +111,9 @@ class ChatEngine(
 
             val text = StringBuilder()
             var calls: List<AiToolCall> = emptyList()
+            // Chữ ký suy luận của Gemini kèm phần chữ của lượt này (Đợt fix
+            // 12/11/2026): giữ lại để gửi ở request sau. Đặt lại mỗi vòng.
+            var textSignature: String? = null
             var error: String? = null
             var cancelled: CancellationException? = null
             // Danh sách tool đã parse từ file tools.md của lượt này (null =
@@ -199,6 +202,7 @@ class ChatEngine(
                     when (ev) {
                         is AiEvent.Text -> {
                             text.append(ev.delta)
+                            ev.signature?.let { textSignature = it }
                             val now = System.currentTimeMillis()
                             if (now - lastLive >= LIVE_INTERVAL_MS) {
                                 _live.update { it + (assistantId to text.toString()) }
@@ -232,6 +236,7 @@ class ChatEngine(
                         base.copy(
                             text = text.toString(),
                             toolCallsJson = if (calls.isEmpty()) null else json.encodeToString(callsSer, calls),
+                            thoughtSignature = textSignature,
                             status = "done",
                         )
                     )
