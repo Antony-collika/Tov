@@ -63,10 +63,11 @@ class HistorySync(
         data object ExternalEditDiscarded : SyncResult
         /**
          * Sửa ngoài chạm vào lịch sử đã niêm phong (thinking của Claude) —
-         * không áp vào cuộc gốc; người gọi rẽ nhánh rồi áp vào nhánh, kèm
-         * thông báo (Đợt provider 12/11/2026, Q2).
+         * KHÔNG áp vào Room, KHÔNG tách nhánh; file đã được ghi lại từ Room
+         * để khôi phục, người gọi báo cho user (phương án A, quyết định của
+         * Duy 12/11/2026, thay cho rẽ nhánh Q2 trước đó).
          */
-        data class SealedExternalEdit(val parsed: ParsedHistory, val meta: HistoryMeta, val mdHash: String) : SyncResult
+        data object SealedExternalEditRejected : SyncResult
     }
 
     private fun hashKey(conversationId: String) = "hash:$conversationId"
@@ -148,16 +149,19 @@ class HistorySync(
                 "history.meta.json has no entry for message \"${missing.id}\". The file was left unchanged.",
             )
         }
-        // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của Duy: không
-        // chặn hẳn cũng không lặng lẽ ghi đè): sửa ngoài mà chạm vào lịch
-        // sử đã niêm phong (đổi chữ tin cũ, xóa tin, hoặc chèn tin vào
-        // giữa) thì KHÔNG áp vào cuộc gốc — người gọi rẽ nhánh rồi áp vào
-        // nhánh, kèm thông báo. Chỉ thêm tin mới vào cuối thì áp thẳng như
-        // cũ (nội dung cũ không đổi nên mạch suy luận còn nguyên).
+        // Phương án A (quyết định của Duy 12/11/2026, thay cho rẽ nhánh Q2
+        // trước đó): sửa ngoài mà chạm vào lịch sử đã niêm phong (đổi chữ
+        // tin cũ, xóa tin, hoặc chèn tin vào giữa) thì KHÔNG áp vào Room,
+        // KHÔNG tách nhánh — ghi lại file từ Room để khôi phục rồi báo cho
+        // user (người gọi). Chỉ thêm tin mới vào cuối thì áp thẳng như cũ
+        // (nội dung cũ không đổi nên mạch suy luận còn nguyên).
         val sealed = db.messages().getAll(conversationId)
             .any { it.reasoningProvider == "anthropic" && it.reasoningReplay != null }
         if (sealed && touchesSealedHistory(conversationId, parsed)) {
-            return SyncResult.SealedExternalEdit(parsed, meta, currentHash)
+            if (!export(conversationId)) {
+                return SyncResult.Failed("Could not restore history.md from the app.")
+            }
+            return SyncResult.SealedExternalEditRejected
         }
         val applied = applyParsed(conversationId, parsed, meta)
         storeHash(conversationId, currentHash)
@@ -191,20 +195,6 @@ class HistorySync(
                     row.status != "streaming" && row.id !in parsedById
             }) return true
         return false
-    }
-
-    /**
-     * Áp nội dung file đã parse vào một cuộc khác (dùng cho rẽ nhánh khi
-     * sửa ngoài chạm lịch sử niêm phong), rồi ghi nhận hash cho cuộc đó.
-     */
-    suspend fun importInto(conversationId: String, parsed: ParsedHistory, meta: HistoryMeta, mdHash: String) {
-        applyParsed(conversationId, parsed, meta)
-        storeHash(conversationId, mdHash)
-    }
-
-    /** Ghi nhận file đã xem cho một cuộc (để lần mở sau không áp lại cùng một bản sửa). */
-    suspend fun markFileSeen(conversationId: String, mdHash: String) {
-        storeHash(conversationId, mdHash)
     }
 
     private data class AppliedCounts(val changed: Int, val deleted: Int)

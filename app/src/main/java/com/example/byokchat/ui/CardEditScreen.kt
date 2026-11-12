@@ -1,7 +1,6 @@
 package com.example.byokchat.ui
 
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -56,7 +55,7 @@ import com.example.byokchat.ai.ClaudeThinkingMode
 import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.claudeThinkingModeFor
 import com.example.byokchat.ai.ReasoningEffort
-import com.example.byokchat.chat.THINKING_SEAL_CARD_BRANCH_MESSAGE
+import com.example.byokchat.chat.THINKING_SEAL_CARD_BLOCK_MESSAGE
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
@@ -102,8 +101,8 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Đợt D: file mà thẻ trỏ tới (trống = không trỏ file).
     var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
     var fileError by remember(cardId) { mutableStateOf<String?>(null) }
-    // Đợt provider 12/11/2026 (Q2): thông báo khi tạo nhánh vì thinking
-    // của Claude (hiện khi tạo nhánh thất bại) hoặc lỗi khác lúc Save.
+    // Đợt provider 12/11/2026 (KHÓA CỨNG): thông báo chặn khi sửa thẻ trong
+    // cuộc có thinking của Claude (hiện dưới nút Save), hoặc lỗi khác lúc Save.
     var lockError by remember(cardId) { mutableStateOf<String?>(null) }
     // Đợt 8: nguồn nội dung của thẻ System/Free — khởi đầu theo file đã trỏ
     // (có file = External file, không file = Text input).
@@ -249,30 +248,18 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             onBack()
             return
         }
-        // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của Duy: không
-        // chặn hẳn nữa): cuộc có thinking của Claude thì sửa thẻ System/
-        // Tools/Free vẫn lưu (thẻ lưu chung cho mọi cuộc), rồi tạo cuộc mới
-        // kiểu branch (bỏ khối thinking cũ), mở nhánh và thông báo rõ lý
-        // do. Cuộc gốc giữ nguyên.
-        // Đợt provider 12/11/2026 (Q4): thẻ Free cũng vào danh sách — NHƯNG
-        // chỉ khi provider của cuộc này yêu cầu niêm phong (Claude đang bật
-        // thinking). Provider nào cho phép sửa thì thẻ Free sửa bình thường.
+        // Đợt provider 12/11/2026 (quyết định của Duy — KHÓA CỨNG thay vì
+        // branch): cuộc có thinking của Claude thì không sửa được thẻ
+        // System/Tools/Free nữa (thẻ lưu chung cho mọi cuộc nên sửa sẽ phá
+        // mạch suy luận của cuộc này); muốn đổi thì mở cuộc mới rồi sửa thẻ
+        // ở đó. Chỉ chặn khi đủ 3 điều kiện (niêm phong + provider Claude +
+        // thinking đang bật) — như cổng của thẻ Free ở Q4.
         if ((c.kind == CardKind.SYSTEM || c.kind == CardKind.TOOLS || c.kind == CardKind.FREE) && conversationId != null) {
             scope.launch {
-                val needsBranch = when (c.kind) {
-                    CardKind.FREE -> container.ops.hasThinkingSeal(conversationId) &&
-                        providerType == ProviderType.CLAUDE && savedMetadata.thinkingEnabled
-                    else -> container.ops.hasThinkingSeal(conversationId)
-                }
-                if (needsBranch) {
-                    saveCard(c, goBack = false)
-                    try {
-                        val branchId = container.ops.branchForModelSwitch(conversationId).conversationId
-                        Toast.makeText(context, THINKING_SEAL_CARD_BRANCH_MESSAGE, Toast.LENGTH_LONG).show()
-                        onOpenConversation?.invoke(branchId)
-                    } catch (e: Exception) {
-                        lockError = e.message ?: "Couldn't create the branch."
-                    }
+                val sealedBlocked = container.ops.hasThinkingSeal(conversationId) &&
+                    providerType == ProviderType.CLAUDE && savedMetadata.thinkingEnabled
+                if (sealedBlocked) {
+                    lockError = THINKING_SEAL_CARD_BLOCK_MESSAGE
                 } else {
                     saveCard(c)
                 }

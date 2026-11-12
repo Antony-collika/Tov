@@ -8,19 +8,26 @@ import java.util.UUID
 data class BranchResult(val conversationId: String, val turnMap: Map<String, String>)
 
 /**
- * Đợt provider 12/11/2026 (sửa theo quyết định của Duy — KHÔNG chặn hẳn
- * nữa): khi user sửa thứ sẽ phá vỡ mạch suy luận của Claude thì app tạo
- * cuộc mới kiểu branch và THÔNG BÁO rõ lý do bằng lời dễ hiểu (không dùng
- * thuật ngữ nội bộ như "niêm phong" hay "chữ ký"). Cuộc gốc giữ nguyên.
+ * Đợt provider 12/11/2026 (quyết định của Duy — KHÓA CỨNG thay vì branch,
+ * vì cho sửa từ mọi nơi, mọi lượt khiến code phải sửa đủ thứ): khi user sửa
+ * thứ sẽ phá vỡ mạch suy luận của Claude thì app CHẶN HẲN và giải thích rõ
+ * lý do bằng lời dễ hiểu (không dùng thuật ngữ nội bộ như "niêm phong" hay
+ * "chữ ký"). Muốn đổi thì mở cuộc mới. Chỉ chặn khi đủ 3 điều kiện: cuộc có
+ * niêm phong, provider hiện tại là Claude, thinking đang bật.
  */
-const val THINKING_SEAL_BRANCH_MESSAGE =
-    "This chat already has Claude's thinking saved with it, so changing an earlier message would break it. " +
-        "Your change was made in a new chat instead — the original chat is unchanged."
+const val THINKING_SEAL_BLOCK_MESSAGE =
+    "This chat already has Claude's thinking saved with it, so earlier messages can't be changed — it would break the thinking. " +
+        "To change something, start a new chat."
 
 /** Như trên, cho trường hợp sửa thẻ (System/Tools/Free) — thẻ lưu chung cho mọi cuộc. */
-const val THINKING_SEAL_CARD_BRANCH_MESSAGE =
-    "This chat already has Claude's thinking saved with it, so changing this card would break it. " +
-        "The change was saved, and the chat continues in a new copy — the original chat is unchanged."
+const val THINKING_SEAL_CARD_BLOCK_MESSAGE =
+    "This chat already has Claude's thinking saved with it, so this card can't be changed — it would break the thinking. " +
+        "To change it, start a new chat and edit the card there."
+
+/** Sửa ngoài chạm vào lịch sử đã niêm phong (phương án A): không áp, file đã ghi lại từ Room để khôi phục. */
+const val THINKING_SEAL_EXTERNAL_REJECTED_MESSAGE =
+    "Your edit to history.md had no effect — this chat already has Claude's thinking saved with it, so earlier messages can't be changed. " +
+        "The file was restored to match the app."
 
 /** Các thao tác sửa / xóa / tạo lại / rẽ nhánh tin nhắn. */
 class ChatOps(private val db: AppDatabase) {
@@ -147,12 +154,14 @@ class ChatOps(private val db: AppDatabase) {
 
     /**
      * Rẽ nhánh để sửa một tin trong cuộc có thinking của Claude (Đợt
-     * provider 12/11/2026 — sửa theo quyết định của Duy: không chặn hẳn
-     * nữa, mà tạo cuộc mới kiểu branch + thông báo). Sao chép cuộc đến hết
-     * tin cần sửa (kèm các dòng tool cùng lượt nếu tin là của AI), sửa chữ
-     * của tin đó trên bản sao, và bỏ khối thinking đã niêm phong ở mọi tin
-     * đã sao chép. Các lượt sau tin đó không mang sang cuộc mới — chúng dựa
-     * trên nội dung cũ nên không dùng được nữa. Cuộc gốc giữ nguyên.
+     * provider 12/11/2026). LƯU Ý: từ quyết định KHÓA CỨNG của Duy
+     * (12/11/2026) thì đường sửa trong app không gọi hàm này nữa mà chặn
+     * hẳn; hàm được giữ lại phòng khi cần dùng sau.
+     * Sao chép cuộc đến hết tin cần sửa (kèm các dòng tool cùng lượt nếu
+     * tin là của AI), sửa chữ của tin đó trên bản sao, và bỏ khối thinking
+     * đã niêm phong ở mọi tin đã sao chép. Các lượt sau tin đó không mang
+     * sang cuộc mới — chúng dựa trên nội dung cũ nên không dùng được nữa.
+     * Cuộc gốc giữ nguyên.
      */
     suspend fun branchForEdit(conversationId: String, messageId: String, newText: String): BranchResult {
         val all = db.messages().getAll(conversationId)
@@ -172,10 +181,11 @@ class ChatOps(private val db: AppDatabase) {
 
     /**
      * Rẽ nhánh để xóa một lượt trong cuộc có thinking của Claude (Đợt
-     * provider 12/11/2026 — như [branchForEdit]: không chặn hẳn nữa, mà
-     * tạo cuộc mới + thông báo). Sao chép cuộc đến hết lượt TRƯỚC lượt cần
-     * xóa (lượt cần xóa và các lượt sau không mang sang — chúng dựa trên
-     * nội dung sẽ xóa). Cuộc gốc giữ nguyên.
+     * provider 12/11/2026). LƯU Ý: như [branchForEdit] — từ quyết định
+     * KHÓA CỨNG thì đường sửa trong app không gọi hàm này nữa mà chặn hẳn;
+     * hàm được giữ lại phòng khi cần dùng sau. Sao chép cuộc đến hết lượt
+     * TRƯỚC lượt cần xóa (lượt cần xóa và các lượt sau không mang sang —
+     * chúng dựa trên nội dung sẽ xóa). Cuộc gốc giữ nguyên.
      */
     suspend fun branchBeforeTurn(conversationId: String, turnId: String): BranchResult {
         val rows = db.messages().getAll(conversationId)
