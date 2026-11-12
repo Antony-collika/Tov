@@ -220,20 +220,43 @@ class ProviderBodyTest {
         assertEquals("function_call_output", input[3].jsonObject["type"]?.jsonPrimitive?.content)
     }
 
-    // ---- DeepSeek ----
+    // ---- Custom (kể cả DeepSeek qua Custom) ----
 
     @Test
-    fun deepSeekEffortClampedInBody() {
-        val body = OpenAiProvider(cfg(ProviderType.DEEPSEEK)).buildBody(request(ProviderType.DEEPSEEK, model = "deepseek-chat"))
-        assertEquals("high", body["reasoning_effort"]?.jsonPrimitive?.content)
-        val maxBody = OpenAiProvider(cfg(ProviderType.DEEPSEEK)).buildBody(
-            request(ProviderType.DEEPSEEK, metadata = MetadataParams(effort = ReasoningEffort.MAX), model = "deepseek-chat")
+    fun customSendsReasoningContentWhenToolsAreSent() {
+        val req = AiRequest(
+            model = "deepseek-chat", system = "Be helpful",
+            messages = listOf(
+                AiMessage(Role.USER, text = "Hi"),
+                AiMessage(Role.ASSISTANT, text = "Hello", reasoningText = "thinking step by step", reasoningProvider = "custom"),
+            ),
+            tools = toolDefs(), maxOutputTokens = 8192, metadata = MetadataParams(),
         )
-        assertEquals("max", maxBody["reasoning_effort"]?.jsonPrimitive?.content)
+        val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
+        val assistant = body["messages"]!!.jsonArray[1].jsonObject
+        assertEquals("thinking step by step", assistant["reasoning_content"]?.jsonPrimitive?.content)
     }
 
     @Test
-    fun deepSeekReasoningContentSentBack() {
+    fun customDoesNotSendReasoningContentWithoutTools() {
+        // Không có tools thì máy chủ bỏ qua reasoning_content nên không gửi.
+        val req = AiRequest(
+            model = "deepseek-chat", system = "Be helpful",
+            messages = listOf(
+                AiMessage(Role.USER, text = "Hi"),
+                AiMessage(Role.ASSISTANT, text = "Hello", reasoningText = "thinking step by step", reasoningProvider = "custom"),
+            ),
+            tools = emptyList(), maxOutputTokens = 8192, metadata = MetadataParams(),
+        )
+        val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
+        val assistant = body["messages"]!!.jsonArray[1].jsonObject
+        assertNull(assistant["reasoning_content"])
+    }
+
+    @Test
+    fun customReplaysLegacyDeepSeekReasoning() {
+        // Tin cũ của loại DeepSeek (reasoningProvider "deepseek") vẫn gửi
+        // lại reasoning_content sau khi chuyển sang Custom.
         val req = AiRequest(
             model = "deepseek-chat", system = "Be helpful",
             messages = listOf(
@@ -242,24 +265,42 @@ class ProviderBodyTest {
             ),
             tools = toolDefs(), maxOutputTokens = 8192, metadata = MetadataParams(),
         )
-        val body = OpenAiProvider(cfg(ProviderType.DEEPSEEK)).buildBody(req)
+        val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
         val assistant = body["messages"]!!.jsonArray[1].jsonObject
         assertEquals("thinking step by step", assistant["reasoning_content"]?.jsonPrimitive?.content)
     }
 
     @Test
-    fun customDoesNotSendReasoningContent() {
+    fun customDoesNotReplayOtherProvidersReasoning() {
+        // Suy luận của hãng khác (vd OpenAI) không phải reasoning_content.
         val req = AiRequest(
             model = "test-model", system = "Be helpful",
             messages = listOf(
                 AiMessage(Role.USER, text = "Hi"),
-                AiMessage(Role.ASSISTANT, text = "Hello", reasoningText = "thinking step by step", reasoningProvider = "deepseek"),
+                AiMessage(Role.ASSISTANT, text = "Hello", reasoningText = "thinking step by step", reasoningProvider = "openai"),
             ),
             tools = toolDefs(), maxOutputTokens = 8192, metadata = MetadataParams(),
         )
         val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
         val assistant = body["messages"]!!.jsonArray[1].jsonObject
         assertNull(assistant["reasoning_content"])
+    }
+
+    @Test
+    fun customEffortVerbatimExceptDeepSeekServer() {
+        // Máy chủ tương thích khác gửi nguyên vẹn tên mức; riêng DeepSeek
+        // (api.deepseek.com) thì kẹp về low/high/max như loại cũ.
+        val medium = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(request(ProviderType.CUSTOM, model = "some-model"))
+        assertEquals("medium", medium["reasoning_effort"]?.jsonPrimitive?.content)
+        val deepSeekCfg = cfg(ProviderType.CUSTOM).copy(baseUrl = "https://api.deepseek.com")
+        val clamped = OpenAiProvider(deepSeekCfg).buildBody(request(ProviderType.CUSTOM, model = "deepseek-chat"))
+        assertEquals("high", clamped["reasoning_effort"]?.jsonPrimitive?.content)
+        val maxClamped = OpenAiProvider(deepSeekCfg).buildBody(
+            request(ProviderType.CUSTOM, metadata = MetadataParams(effort = ReasoningEffort.MAX), model = "deepseek-chat")
+        )
+        assertEquals("max", maxClamped["reasoning_effort"]?.jsonPrimitive?.content)
+        assertTrue(OpenAiProvider(deepSeekCfg).isDeepSeekServer())
+        assertFalse(OpenAiProvider(cfg(ProviderType.CUSTOM)).isDeepSeekServer())
     }
 
     // ---- Gemini ----

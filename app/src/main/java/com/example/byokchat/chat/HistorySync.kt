@@ -157,7 +157,8 @@ class HistorySync(
 
     /**
      * Suy luận của provider trong extra_content (Đợt provider 12/11/2026):
-     * openai {reasoning_summary, response_items}, deepseek {reasoning_content}.
+     * openai {reasoning_summary, response_items}, deepseek {reasoning_content}
+     * (dữ liệu cũ), custom {reasoning_content} (máy chủ tương thích).
      * Khối thinking của hãng đã bỏ (anthropic {thinking, thinking_blocks})
      * thì bỏ qua — không đọc lại, không gửi lại. Trả về (text, replayJson,
      * provider) — null khi không có suy luận của hãng nào.
@@ -172,6 +173,10 @@ class HistorySync(
         extra["deepseek"]?.jsonObject?.let { o ->
             val text = o["reasoning_content"]?.jsonPrimitive?.contentOrNull
             if (text != null) return Triple(text, null, "deepseek")
+        }
+        extra["custom"]?.jsonObject?.let { o ->
+            val text = o["reasoning_content"]?.jsonPrimitive?.contentOrNull
+            if (text != null) return Triple(text, null, "custom")
         }
         return null
     }

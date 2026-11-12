@@ -15,8 +15,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
  * traffic OpenAI, không chỉ lúc cần reasoning + tool. OpenAI khuyên dùng
  * Responses cho project mới, và bắt buộc nó cho tools + reasoning ở model
  * mới (từ GPT-5.4; GPT-6 Astra còn không chấp nhận "none" trên Chat
- * Completions). Provider tương thích (DeepSeek, máy chủ tự dựng) KHÔNG
- * dùng provider này — họ chỉ có Chat Completions (xem OpenAiProvider).
+ * Completions). Provider tương thích (máy chủ tự dựng, kể cả DeepSeek qua
+ * loại Custom) KHÔNG dùng provider này — họ chỉ có Chat Completions
+ * (xem OpenAiProvider).
  *
  * Khác Chat Completions:
  * - Input là danh sách item có type (message / reasoning / function_call /

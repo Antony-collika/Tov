@@ -34,12 +34,12 @@ enum class ReasoningEffort { NONE, MINIMAL, LOW, MEDIUM, HIGH, XHIGH, MAX }
  *   reasoning.effort. Ngoại lệ: GPT-6 Astra / GPT-6.1 Sol không chấp nhận
  *   "none" (tài liệu OpenAI) — user chọn NONE với model đó thì app báo rõ
  *   (xem [responsesEffortProblem]), không tự đổi lặng lẽ.
- * - DeepSeek (Chat Completions): thinking + tool dùng chung được; effort
- *   gửi là reasoning_effort, kẹp về low/high/max (DeepSeek chỉ có 3 mức
- *   đó + none để tắt). Không ép "none".
  * - Custom (Chat Completions): effort của user gửi nguyên vẹn dạng
  *   reasoning_effort (none/minimal/low/medium/high/xhigh/max); hãng đích
  *   tự quyết — nếu hãng đó từ chối thì API báo lỗi rõ, app không tự đổi.
+ *   Riêng máy chủ DeepSeek (địa chỉ api.deepseek.com) thì kẹp về
+ *   low/high/max, vì DeepSeek chỉ có 3 mức đó + none để tắt
+ *   (xem [deepSeekEffort], OpenAiProvider chọn nó khi địa chỉ là DeepSeek).
  * - Gemini: thinkingLevel + function calling dùng chung được.
  * Vì vậy KHÔNG còn khái niệm "tool bị tắt vì reasoning" và KHÔNG còn ép
  * effort chung cho mọi hãng: tool luôn được gửi, với mọi hãng.
@@ -86,9 +86,6 @@ data class MetadataParams(
     fun effortOptionsFor(type: ProviderType?): List<ReasoningEffort> = when (type) {
         ProviderType.OPENAI, ProviderType.CUSTOM ->
             listOf(ReasoningEffort.NONE, ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX)
-        ProviderType.DEEPSEEK ->
-            // DeepSeek chỉ có low/high/max (+ none để tắt): medium kẹp về high.
-            listOf(ReasoningEffort.NONE, ReasoningEffort.LOW, ReasoningEffort.HIGH, ReasoningEffort.MAX)
         ProviderType.GEMINI ->
             listOf(ReasoningEffort.NONE, ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH)
         null -> ReasoningEffort.entries.toList()
@@ -97,7 +94,7 @@ data class MetadataParams(
     /** Tên trường effort mà hãng này nhận, để Inspector hiện đúng (null = hãng không nhận trường effort nào khi NONE). */
     fun effortFieldName(type: ProviderType): String = when (type) {
         ProviderType.OPENAI -> "reasoning.effort"
-        ProviderType.CUSTOM, ProviderType.DEEPSEEK -> "reasoning_effort"
+        ProviderType.CUSTOM -> "reasoning_effort"
         ProviderType.GEMINI -> "thinkingLevel"
     }
 
@@ -105,13 +102,11 @@ data class MetadataParams(
      * Giá trị effort đã map cho hãng này (null = không gửi trường effort).
      * OpenAI (Responses): reasoning.effort theo đúng lựa chọn của user —
      * không ép "none" nữa (Responses cho reasoning + tool dùng chung).
-     * Custom/DeepSeek (Chat Completions): reasoning_effort theo lựa chọn
-     * của user; DeepSeek kẹp về low/high/max.
+     * Custom (Chat Completions): reasoning_effort theo lựa chọn của user.
      */
     fun effortValueFor(type: ProviderType, model: String = ""): String? = when (type) {
         ProviderType.OPENAI -> responsesEffort()
         ProviderType.CUSTOM -> chatEffort()
-        ProviderType.DEEPSEEK -> deepSeekEffort()
         ProviderType.GEMINI -> geminiThinkingLevel()
     }
 
@@ -133,9 +128,12 @@ data class MetadataParams(
     fun chatEffort(): String = responsesEffort()
 
     /**
-     * DeepSeek: reasoning_effort chỉ có low/high/max (+ none để tắt suy
-     * luận). MINIMAL kẹp về low; MEDIUM/XHIGH kẹp về high (theo tài liệu
-     * DeepSeek: minimal/low → low, medium/high/xhigh → high, max → max).
+     * DeepSeek (qua Custom, địa chỉ api.deepseek.com): reasoning_effort chỉ
+     * có low/high/max (+ none để tắt suy luận). MINIMAL kẹp về low;
+     * MEDIUM/XHIGH kẹp về high (theo tài liệu DeepSeek: minimal/low → low,
+     * medium/high/xhigh → high, max → max). OpenAiProvider chọn hàm này
+     * khi địa chỉ máy chủ là DeepSeek; máy chủ tương thích khác gửi nguyên
+     * vẹn qua [chatEffort].
      */
     fun deepSeekEffort(): String = when (effort) {
         ReasoningEffort.NONE -> "none"
@@ -176,7 +174,7 @@ data class MetadataParams(
         /**
          * Mặc định Metadata theo hãng đang dùng: MEDIUM cho mọi hãng (đợt
          * provider 12/11/2026 — luật ép NONE cho OpenAI(-compatible) đã bỏ
-         * vì Responses/DeepSeek đều cho reasoning + tool dùng chung).
+         * vì Responses/Custom đều cho reasoning + tool dùng chung).
          * Chỉ dùng khi user chưa từng lưu Metadata — giá trị user đã chọn
          * luôn được tôn trọng (xem SettingsRepository).
          */

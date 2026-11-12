@@ -23,16 +23,16 @@ class MetadataTest {
     fun effortIsKeptForEveryProvider() {
         // Đợt provider 12/11/2026: KHÔNG ép effort "none" cho hãng nào nữa —
         // làm theo từng hãng (OpenAI dùng Responses API, suy luận + tool
-        // dùng chung được; DeepSeek có mapping riêng; Custom gửi nguyên vẹn).
+        // dùng chung được; Custom gửi nguyên vẹn).
         val medium = MetadataParams()
         val high = MetadataParams(effort = ReasoningEffort.HIGH)
         assertEquals("medium", medium.effortValueFor(ProviderType.OPENAI))
         assertEquals("high", high.effortValueFor(ProviderType.OPENAI))
         assertEquals("high", high.effortValueFor(ProviderType.CUSTOM))
-        assertEquals("high", high.effortValueFor(ProviderType.DEEPSEEK))
+        assertEquals("high", high.effortValueFor(ProviderType.CUSTOM))
         assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.OPENAI))
         assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.CUSTOM))
-        assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.DEEPSEEK))
+        assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.CUSTOM))
         assertEquals(ReasoningEffort.HIGH, high.effectiveEffort(ProviderType.GEMINI))
         // Tóm tắt trên panel hiện effort thật sự áp cho hãng đó.
         assertEquals("gpt-5 · effort high · max 8192", high.summary("gpt-5", 8192, ProviderType.OPENAI))
@@ -74,7 +74,7 @@ class MetadataTest {
     fun effortOptionsArePerProvider() {
         val m = MetadataParams()
         assertEquals(7, m.effortOptionsFor(ProviderType.OPENAI).size)
-        assertEquals(listOf(ReasoningEffort.NONE, ReasoningEffort.LOW, ReasoningEffort.HIGH, ReasoningEffort.MAX), m.effortOptionsFor(ProviderType.DEEPSEEK))
+        assertEquals(listOf(ReasoningEffort.NONE, ReasoningEffort.MINIMAL, ReasoningEffort.LOW, ReasoningEffort.MEDIUM, ReasoningEffort.HIGH, ReasoningEffort.XHIGH, ReasoningEffort.MAX), m.effortOptionsFor(ProviderType.CUSTOM))
         assertFalse(m.effortOptionsFor(ProviderType.GEMINI).contains(ReasoningEffort.XHIGH))
         assertFalse(m.effortOptionsFor(ProviderType.GEMINI).contains(ReasoningEffort.MAX))
     }
@@ -84,10 +84,10 @@ class MetadataTest {
         val m = MetadataParams()
         assertEquals("reasoning.effort", m.effortFieldName(ProviderType.OPENAI))
         assertEquals("reasoning_effort", m.effortFieldName(ProviderType.CUSTOM))
-        assertEquals("reasoning_effort", m.effortFieldName(ProviderType.DEEPSEEK))
+        assertEquals("reasoning_effort", m.effortFieldName(ProviderType.CUSTOM))
         assertEquals("thinkingLevel", m.effortFieldName(ProviderType.GEMINI))
         assertEquals("medium", m.effortValueFor(ProviderType.OPENAI))
-        assertEquals("high", m.copy(effort = ReasoningEffort.MEDIUM).effortValueFor(ProviderType.DEEPSEEK))
+        assertEquals("medium", m.copy(effort = ReasoningEffort.MEDIUM).effortValueFor(ProviderType.CUSTOM))
         assertEquals("MEDIUM", m.effortValueFor(ProviderType.GEMINI))
         assertNull(m.copy(effort = ReasoningEffort.NONE).effortValueFor(ProviderType.GEMINI))
     }

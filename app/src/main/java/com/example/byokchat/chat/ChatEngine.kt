@@ -208,7 +208,7 @@ class ChatEngine(
                 // replay JSON có dùng được không — hãng nào chỉ hãng đó đọc).
                 reasoningProvider = when (cfg.type) {
                     ProviderType.OPENAI -> "openai"
-                    ProviderType.DEEPSEEK -> "deepseek"
+                    ProviderType.CUSTOM -> "custom"
                     else -> null
                 }
                 ProviderFactory.create(cfg, requestLog).stream(request).collect { ev ->

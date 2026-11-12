@@ -232,6 +232,8 @@ object HistoryExporter {
      *   output items gửi lại nguyên vẹn ở lượt sau (kèm encrypted_content);
      * - deepseek: {"reasoning_content": ...} — chuỗi suy luận dạng text
      *   (dữ liệu cũ; nay DeepSeek dùng qua Custom, key "custom").
+     * - custom: {"reasoning_content": ...} — chuỗi suy luận của máy chủ
+     *   tương thích (vd DeepSeek qua Custom).
      * Khối thinking của hãng đã bỏ ("anthropic") thì không ghi nữa.
      * history.md không ghi thêm gì (Duy 12/11 ~10:28: file đó chỉ là lịch sử).
      */
@@ -252,6 +254,9 @@ object HistoryExporter {
                     }
                 })
                 "deepseek" -> put("deepseek", buildJsonObject {
+                    m.reasoningText?.let { put("reasoning_content", it) }
+                })
+                "custom" -> put("custom", buildJsonObject {
                     m.reasoningText?.let { put("reasoning_content", it) }
                 })
             }
