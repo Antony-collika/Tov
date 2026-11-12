@@ -57,6 +57,16 @@ data class MetadataParams(
      * hưởng tới chúng. Mặc định BẬT.
      */
     val keepThoughtSignature: Boolean = true,
+    /**
+     * Gửi lại suy luận đã lưu của OpenAI ở request sau (12/11/2026, theo ý Duy):
+     * BẬT = gửi lại reasoning items đã lưu ở mọi lượt; TẮT = không gửi reasoning
+     * ở lượt thường (lịch sử không có tool call), nhưng lượt có tool call thì
+     * VẪN gửi — OpenAI bắt buộc reasoning đi kèm kết quả tool call. Chỉ OpenAI
+     * dùng (Responses API); Custom không cần công tắc này (chỉ gửi lại
+     * reasoning_content khi request có tools), Gemini đã có Keep thought
+     * signature cho phần chữ. Mặc định BẬT.
+     */
+    val replayReasoning: Boolean = true,
 ) {
     /**
      * Effort thật sự áp cho hãng này. Từ đợt provider 12/11/2026: KHÔNG ép

@@ -57,6 +57,7 @@ import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
+import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.ToolsSource
 import com.example.byokchat.tools.ToolsMdParseException
 import com.example.byokchat.tools.ToolsMdParser
@@ -128,6 +129,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var effort by remember(cardId) { mutableStateOf(savedMetadata.effort) }
     var stopText by remember(cardId) { mutableStateOf(savedMetadata.stopSequences.joinToString("\n")) }
     var keepSignature by remember(cardId) { mutableStateOf(savedMetadata.keepThoughtSignature) }
+    var replayReasoning by remember(cardId) { mutableStateOf(savedMetadata.replayReasoning) }
     var maxTokens by remember(cardId) { mutableStateOf((currentProvider?.maxOutputTokens ?: 8192).toString()) }
     val stopLines = stopText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     val stopsValid = stopLines.size <= 4
@@ -147,6 +149,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             keepSignature != savedMetadata.keepThoughtSignature ||
+            replayReasoning != savedMetadata.replayReasoning ||
             (currentProvider != null && maxTokens != currentProvider.maxOutputTokens.toString())
         )
     val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && stopsValid && maxTokensValid
@@ -213,6 +216,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     effort = effort,
                     stopSequences = stopLines.take(4),
                     keepThoughtSignature = keepSignature,
+                    replayReasoning = replayReasoning,
                 )
             )
             val cfg = currentProvider
@@ -421,6 +425,18 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         checked = keepSignature,
                         onChange = { keepSignature = it },
                     )
+                    // 12/11/2026: công tắc gửi lại suy luận — chỉ OpenAI
+                    // (Responses API). Tắt thì lượt thường không gửi reasoning
+                    // đã lưu; lượt có tool call vẫn gửi (OpenAI bắt buộc
+                    // reasoning đi kèm kết quả tool call).
+                    if (providerType == ProviderType.OPENAI) {
+                        SwitchRow(
+                            title = "Resend saved reasoning",
+                            desc = "Sends the saved reasoning back with the next request. Off: plain turns leave it out, but turns with tool calls still send it — OpenAI requires reasoning with tool results.",
+                            checked = replayReasoning,
+                            onChange = { replayReasoning = it },
+                        )
+                    }
                 }
                 CardKind.SYSTEM -> {
                     // Đợt 8: ô Name (lưu vào label đã có; tên hiện trên Panel).

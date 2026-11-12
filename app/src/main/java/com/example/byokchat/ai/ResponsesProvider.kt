@@ -149,7 +149,7 @@ class ResponsesProvider(
             put("effort", effort)
             if (effort != "none") put("summary", "auto")
         })
-        put("input", buildInput(request.messages))
+        put("input", buildInput(request.messages, request.metadata.replayReasoning))
         val tools = request.tools
         if (tools.isNotEmpty()) {
             put("tools", buildJsonArray {
@@ -173,13 +173,15 @@ class ResponsesProvider(
      * - Tin assistant có response items đã lưu (hãng openai): gửi lại
      *   nguyên vẹn — reasoning + message + function_call. Function_call
      *   chỉ giữ khi có function_call_output tương ứng sau đó (tránh gửi
-     *   lệnh gọi lẻ — API từ chối).
+     *   lệnh gọi lẻ — API từ chối). Reasoning item chỉ giữ khi công tắc
+     *   [MetadataParams.replayReasoning] bật, hoặc lượt đó có tool call
+     *   (OpenAI bắt buộc reasoning đi kèm kết quả tool call).
      * - Tin assistant không có response items (tin cũ / nhập từ file):
      *   dựng lại từ chữ + tool calls (message item + function_call item).
      * - Tin tool: {type: "function_call_output", call_id, output} — chỉ
      *   khi call_id đó thật sự đã được gọi trước đó.
      */
-    internal fun buildInput(msgs: List<AiMessage>): JsonArray {
+    internal fun buildInput(msgs: List<AiMessage>, replayReasoning: Boolean = true): JsonArray {
         val outputIds = msgs.filter { it.role == Role.TOOL }.mapNotNull { it.toolCallId }.toSet()
         val calledIds = msgs.filter { it.role == Role.ASSISTANT }.flatMap { m ->
             m.toolCalls.map { it.id } +
@@ -222,9 +224,19 @@ class ResponsesProvider(
                         if (replayed != null) {
                             // Gửi lại nguyên vẹn, trừ function_call lẻ (không
                             // có kết quả tool đi kèm trong lịch sử này).
+                            // Công tắc replayReasoning (12/11/2026, chỉ
+                            // OpenAI): tắt thì lượt thường bỏ reasoning item
+                            // (giữ lại message + function_call); lượt có tool
+                            // call thì reasoning bắt buộc đi kèm kết quả tool
+                            // nên luôn gửi.
+                            val hasToolCall = m.toolCalls.isNotEmpty() ||
+                                replayed.any { (it as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull == "function_call" }
+                            val sendReasoning = replayReasoning || hasToolCall
                             replayed.forEach { el ->
                                 val o = el as? JsonObject ?: return@forEach
-                                if (o["type"]?.jsonPrimitive?.contentOrNull == "function_call") {
+                                val type = o["type"]?.jsonPrimitive?.contentOrNull
+                                if (type == "reasoning" && !sendReasoning) return@forEach
+                                if (type == "function_call") {
                                     val callId = o["call_id"]?.jsonPrimitive?.contentOrNull
                                     if (callId !in outputIds) return@forEach
                                 }

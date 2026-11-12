@@ -220,6 +220,66 @@ class ProviderBodyTest {
         assertEquals("function_call_output", input[3].jsonObject["type"]?.jsonPrimitive?.content)
     }
 
+    @Test
+    fun responsesReplayReasoningOffSkipsReasoningOnPlainTurns() {
+        // Công tắc "Resend saved reasoning" tắt + lượt thường (không tool
+        // call trong lịch sử — tools vẫn được offer): reasoning item bị bỏ,
+        // tin message vẫn gửi.
+        val replay = """[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"abc"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"It is 09:00."}]}]"""
+        val req = request(
+            ProviderType.OPENAI,
+            metadata = MetadataParams(replayReasoning = false),
+            model = "gpt-5",
+        ).copy(
+            messages = listOf(
+                AiMessage(Role.USER, text = "What time is it?"),
+                AiMessage(Role.ASSISTANT, text = "It is 09:00.", reasoningReplay = replay, reasoningProvider = "openai"),
+            ),
+        )
+        val input = ResponsesProvider(cfg(ProviderType.OPENAI)).buildBody(req)["input"]!!.jsonArray
+        assertEquals(2, input.size)
+        assertEquals("user", input[0].jsonObject["role"]?.jsonPrimitive?.content)
+        assertEquals("message", input[1].jsonObject["type"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun responsesReplayReasoningOffStillSendsReasoningForToolCallTurns() {
+        // Cùng công tắc tắt, nhưng lượt có tool call: reasoning vẫn gửi
+        // (OpenAI bắt buộc reasoning đi kèm kết quả tool call).
+        val replay = """[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"abc"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"It is 09:00."}]},{"id":"fc_1","type":"function_call","call_id":"call-1","name":"time_now","arguments":"{}"}]"""
+        val req = request(
+            ProviderType.OPENAI,
+            metadata = MetadataParams(replayReasoning = false),
+            model = "gpt-5",
+        ).copy(
+            messages = listOf(
+                AiMessage(Role.USER, text = "What time is it?"),
+                AiMessage(Role.ASSISTANT, text = "It is 09:00.", reasoningReplay = replay, reasoningProvider = "openai"),
+                AiMessage(Role.TOOL, text = "09:00", toolCallId = "call-1", toolName = "time_now"),
+            ),
+        )
+        val input = ResponsesProvider(cfg(ProviderType.OPENAI)).buildBody(req)["input"]!!.jsonArray
+        assertEquals(5, input.size)
+        assertEquals("reasoning", input[1].jsonObject["type"]?.jsonPrimitive?.content)
+        assertEquals("rs_1", input[1].jsonObject["id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun responsesReplayReasoningOnByDefaultSendsReasoningOnPlainTurns() {
+        // Mặc định BẬT: lượt thường vẫn gửi reasoning như trước.
+        val replay = """[{"id":"rs_1","type":"reasoning","summary":[],"encrypted_content":"abc"},{"type":"message","role":"assistant","content":[{"type":"output_text","text":"It is 09:00."}]}]"""
+        val req = request(ProviderType.OPENAI, model = "gpt-5").copy(
+            messages = listOf(
+                AiMessage(Role.USER, text = "What time is it?"),
+                AiMessage(Role.ASSISTANT, text = "It is 09:00.", reasoningReplay = replay, reasoningProvider = "openai"),
+            ),
+        )
+        val input = ResponsesProvider(cfg(ProviderType.OPENAI)).buildBody(req)["input"]!!.jsonArray
+        assertEquals(3, input.size)
+        assertEquals("reasoning", input[1].jsonObject["type"]?.jsonPrimitive?.content)
+        assertEquals("message", input[2].jsonObject["type"]?.jsonPrimitive?.content)
+    }
+
     // ---- Custom (kể cả DeepSeek qua Custom) ----
 
     @Test
