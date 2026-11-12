@@ -15,6 +15,7 @@ import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RequestAssembler
+import com.example.byokchat.chat.THINKING_SEAL_MESSAGE
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
@@ -257,14 +258,32 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         pendingImages.clear()
         viewModelScope.launch {
             val turnId = UUID.randomUUID().toString()
+            // Đợt provider 12/11/2026: đổi model giữa session khi cuộc có
+            // thinking của Claude — gửi tiếp sang hãng khác sẽ mang theo khối
+            // thinking niêm phong (hãng khác không đọc được, chữ ký lại gắn
+            // với lịch sử cũ). Rẽ nhánh sang cuộc mới, bỏ khối đó, rồi gửi
+            // tin mới ở cuộc mới; màn chat mở cuộc mới (như regenerateInBranch).
+            var targetId = conversationId
+            val currentType = app.settings.currentModelProvider()?.type
+            if (currentType != null && currentType != ProviderType.CLAUDE &&
+                app.ops.hasThinkingSeal(conversationId)
+            ) {
+                try {
+                    targetId = app.ops.branchForModelSwitch(conversationId).conversationId
+                    _events.emit(ChatEvent.OpenBranch(targetId))
+                } catch (e: Exception) {
+                    _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
+                    return@launch
+                }
+            }
             // Đợt 4: số lượt ổn định — lượt mới lấy (số lớn nhất hiện có + 1),
             // chỉ tăng không giảm nên số của lượt đã xóa không dùng lại.
-            val turnNo = (db.messages().maxTurnNo(conversationId) ?: 0) + 1
-            val seq = (db.messages().maxSeq(conversationId) ?: 0) + 1
+            val turnNo = (db.messages().maxTurnNo(targetId) ?: 0) + 1
+            val seq = (db.messages().maxSeq(targetId) ?: 0) + 1
             db.messages().upsert(
                 MessageEntity(
                     id = UUID.randomUUID().toString(),
-                    conversationId = conversationId,
+                    conversationId = targetId,
                     turnId = turnId,
                     turnNo = turnNo,
                     seq = seq,
@@ -274,12 +293,12 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                     createdAt = System.currentTimeMillis(),
                 )
             )
-            val conv = db.conversations().get(conversationId)
+            val conv = db.conversations().get(targetId)
             if (conv != null && isDefaultTitle(conv.title)) {
                 val title = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(40) ?: "Image"
-                db.conversations().rename(conversationId, title)
+                db.conversations().rename(targetId, title)
             }
-            app.engine.start(conversationId, turnId)
+            app.engine.start(targetId, turnId)
         }
     }
 
@@ -352,6 +371,12 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun saveEdit(messageId: String, text: String) {
         if (generating.value) return
         viewModelScope.launch {
+            // Đợt provider 12/11/2026: cuộc có thinking của Claude thì tin cũ
+            // bị khóa — chặn hẳn, giải thích, gợi ý mở cuộc mới.
+            if (app.ops.hasThinkingSeal(conversationId)) {
+                _events.emit(ChatEvent.Error(THINKING_SEAL_MESSAGE))
+                return@launch
+            }
             app.ops.editMessage(messageId, text)
             app.engine.exportHistory(conversationId)
         }
@@ -361,6 +386,12 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun deleteTurn(turnId: String) {
         if (generating.value) return
         viewModelScope.launch {
+            // Đợt provider 12/11/2026: như saveEdit — xóa lượt cũng đổi lịch
+            // sử mà chữ ký thinking gắn vào.
+            if (app.ops.hasThinkingSeal(conversationId)) {
+                _events.emit(ChatEvent.Error(THINKING_SEAL_MESSAGE))
+                return@launch
+            }
             val backup = app.ops.deleteTurn(conversationId, turnId)
             app.engine.exportHistory(conversationId)
             _events.emit(ChatEvent.Deleted(backup))
@@ -380,6 +411,13 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun regenerateHere(turnId: String, newUserText: String?) {
         if (generating.value) return
         viewModelScope.launch {
+            // Đợt provider 12/11/2026: cuộc có thinking của Claude thì không
+            // tạo lại trong cuộc này (xóa câu trả lời kèm khối thinking của
+            // lượt đó) — dùng "Tạo lại ở cuộc mới" (regenerateInBranch) thay.
+            if (app.ops.hasThinkingSeal(conversationId)) {
+                _events.emit(ChatEvent.Error(THINKING_SEAL_MESSAGE))
+                return@launch
+            }
             // Đợt E: xung đột khi regenerate — file đổi ngoài app thì giữ bản
             // sửa ngoài, hủy việc tạo lại, báo lỗi.
             if (app.historySync?.hasExternalChange(conversationId) == true) {

@@ -7,6 +7,10 @@ import java.util.UUID
 
 data class BranchResult(val conversationId: String, val turnMap: Map<String, String>)
 
+/** Đợt provider 12/11/2026: thông báo khi user sửa phần bị khóa vì thinking của Claude. */
+const val THINKING_SEAL_MESSAGE =
+    "This chat has used Claude thinking, so the system prompt, tools and earlier messages are locked — changing them would break the reasoning chain. Start a new chat to change them."
+
 /** Các thao tác sửa / xóa / tạo lại / rẽ nhánh tin nhắn. */
 class ChatOps(private val db: AppDatabase) {
 
@@ -88,5 +92,34 @@ class ChatOps(private val db: AppDatabase) {
         val user = db.messages().getAll(conversationId).firstOrNull { it.turnId == turnId && it.role == "user" }
             ?: throw IllegalStateException("Your message for this turn was not found.")
         return branchUpTo(conversationId, user.seq, newUserText?.let { user.id to it })
+    }
+
+    /**
+     * Đợt provider 12/11/2026 — "dấu niêm phong" thinking của Claude: cuộc này
+     * có tin AI nào mang khối thinking cần gửi lại nguyên vẹn không (tin có
+     * reasoningReplay của hãng anthropic). Khi có, system prompt, tools và
+     * tin cũ không được đổi nữa (Anthropic kiểm tra chữ ký gắn với toàn bộ
+     * nội dung trước đó — đổi là request sau lỗi 400).
+     */
+    suspend fun hasThinkingSeal(conversationId: String): Boolean =
+        db.messages().getAll(conversationId).any {
+            it.reasoningProvider == "anthropic" && it.reasoningReplay != null
+        }
+
+    /**
+     * Rẽ nhánh khi đổi model giữa session (Đợt provider 12/11/2026): sao chép
+     * toàn bộ cuộc, nhưng ở các tin AI của Claude thì BỎ khối thinking đã
+     * niêm phong (reasoningReplay + reasoningProvider) — cuộc mới sẽ không
+     * gửi lại khối đó cho hãng khác, và cũng không kích hoạt rẽ nhánh lần
+     * nữa. Chữ suy luận để đọc (reasoningText) thì giữ nguyên.
+     */
+    suspend fun branchForModelSwitch(conversationId: String): BranchResult {
+        val lastSeq = db.messages().maxSeq(conversationId) ?: 0
+        val r = branchUpTo(conversationId, lastSeq)
+        val stripped = db.messages().getAll(r.conversationId)
+            .filter { it.reasoningProvider == "anthropic" && it.reasoningReplay != null }
+            .map { it.copy(reasoningReplay = null, reasoningProvider = null) }
+        if (stripped.isNotEmpty()) db.messages().upsertAll(stripped)
+        return r
     }
 }

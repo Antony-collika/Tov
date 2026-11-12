@@ -55,7 +55,9 @@ import com.example.byokchat.ai.ClaudeThinkingMode
 import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.claudeThinkingModeFor
 import com.example.byokchat.ai.ReasoningEffort
+import com.example.byokchat.chat.THINKING_SEAL_MESSAGE
 import com.example.byokchat.data.CardKind
+import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.ProviderType
@@ -81,7 +83,7 @@ private enum class CardSource { TEXT, FILE }
 /** Sửa một thẻ trong Request panel (Đợt C). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Unit)? = null) {
+fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Unit)? = null, conversationId: String? = null) {
     val context = LocalContext.current
     val container = context.container
     val store = container.layoutStore
@@ -99,6 +101,9 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Đợt D: file mà thẻ trỏ tới (trống = không trỏ file).
     var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
     var fileError by remember(cardId) { mutableStateOf<String?>(null) }
+    // Đợt provider 12/11/2026: thông báo khóa thẻ vì thinking của Claude
+    // (hiện khi user bấm Save mà cuộc đang bị niêm phong).
+    var lockError by remember(cardId) { mutableStateOf<String?>(null) }
     // Đợt 8: nguồn nội dung của thẻ System/Free — khởi đầu theo file đã trỏ
     // (có file = External file, không file = Text input).
     var source by remember(cardId) {
@@ -243,6 +248,25 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             onBack()
             return
         }
+        // Đợt provider 12/11/2026: cuộc có thinking của Claude thì thẻ
+        // System/Tools bị khóa (đổi system prompt hoặc tools là chữ ký
+        // thinking mất hiệu lực, request sau lỗi 400). Chặn hẳn, hiện lý do
+        // ở màn này, gợi ý mở cuộc mới — không lưu gì cả.
+        if ((c.kind == CardKind.SYSTEM || c.kind == CardKind.TOOLS) && conversationId != null) {
+            scope.launch {
+                if (container.ops.hasThinkingSeal(conversationId)) {
+                    lockError = THINKING_SEAL_MESSAGE
+                } else {
+                    saveCard(c)
+                }
+            }
+            return
+        }
+        saveCard(c)
+    }
+
+    /** Lưu nội dung thẻ đã sửa (trừ Metadata — xem save()). */
+    fun saveCard(c: RequestCard) {
         store.updateCard(c.id) {
             it.copy(
                 text = text,
@@ -347,6 +371,11 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Đợt provider 12/11/2026: thông báo khóa thẻ vì thinking của
+            // Claude (hiện khi user bấm Save mà cuộc đang bị niêm phong).
+            if (lockError != null) {
+                Text(lockError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
             when (card.kind) {
                 CardKind.METADATA -> {
                     // Đợt 6: model chỉ đọc (chọn ở thanh nhập chat như cũ).
