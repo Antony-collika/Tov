@@ -293,7 +293,7 @@ class ProviderBodyTest {
             tools = toolDefs(), maxOutputTokens = 8192, metadata = MetadataParams(),
         )
         val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
-        val assistant = body["messages"]!!.jsonArray[1].jsonObject
+        val assistant = body["messages"]!!.jsonArray[2].jsonObject
         assertEquals("thinking step by step", assistant["reasoning_content"]?.jsonPrimitive?.content)
     }
 
@@ -309,7 +309,7 @@ class ProviderBodyTest {
             tools = emptyList(), maxOutputTokens = 8192, metadata = MetadataParams(),
         )
         val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
-        val assistant = body["messages"]!!.jsonArray[1].jsonObject
+        val assistant = body["messages"]!!.jsonArray[2].jsonObject
         assertNull(assistant["reasoning_content"])
     }
 
@@ -326,7 +326,7 @@ class ProviderBodyTest {
             tools = toolDefs(), maxOutputTokens = 8192, metadata = MetadataParams(),
         )
         val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
-        val assistant = body["messages"]!!.jsonArray[1].jsonObject
+        val assistant = body["messages"]!!.jsonArray[2].jsonObject
         assertEquals("thinking step by step", assistant["reasoning_content"]?.jsonPrimitive?.content)
     }
 
@@ -342,7 +342,7 @@ class ProviderBodyTest {
             tools = toolDefs(), maxOutputTokens = 8192, metadata = MetadataParams(),
         )
         val body = OpenAiProvider(cfg(ProviderType.CUSTOM)).buildBody(req)
-        val assistant = body["messages"]!!.jsonArray[1].jsonObject
+        val assistant = body["messages"]!!.jsonArray[2].jsonObject
         assertNull(assistant["reasoning_content"])
     }
 
