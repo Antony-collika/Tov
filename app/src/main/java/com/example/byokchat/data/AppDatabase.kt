@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -62,9 +62,25 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v6 -> v7 (Đợt provider 12/11/2026): suy luận của provider cho tin
+         * assistant — `reasoningText` (chuỗi đọc được, hiện ở khối "Suy luận"
+         * + Preview), `reasoningReplay` (JSON gửi lại nguyên vẹn: output
+         * items của Responses / khối thinking của Claude), `reasoningProvider`
+         * (hãng đã sinh ra suy luận: "openai" / "deepseek" / "anthropic").
+         * Hàng cũ để null — request sau chỉ gửi lại khi có, không lỗi.
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN reasoningText TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN reasoningReplay TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN reasoningProvider TEXT")
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "byokchat.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 // Không còn fallbackToDestructiveMigration(): từ v5 trở đi mọi
                 // thay đổi cấu trúc đều phải có migration thật (quy tắc kế hoạch
                 // Glassbox, mục 6 Đợt E). v2 -> v3 (bỏ systemPrompt) và v3 -> v4

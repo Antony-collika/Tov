@@ -78,6 +78,21 @@ data class MessageEntity(
      * Chỉ Gemini dùng; chữ ký của lệnh gọi tool nằm trong AiToolCall.signature.
      */
     val thoughtSignature: String? = null,
+    /**
+     * Suy luận đọc được của tin assistant này (Đợt provider 12/11/2026):
+     * Responses thì là tóm tắt suy luận, DeepSeek thì là reasoning_content,
+     * Claude thì là nội dung khối thinking. Hiện ở khối "Suy luận" + Preview.
+     */
+    val reasoningText: String? = null,
+    /**
+     * Dữ liệu gửi lại nguyên vẹn ở request sau (Đợt provider 12/11/2026),
+     * dạng JSON: Responses thì là mảng output items (kèm encrypted_content),
+     * Claude thì là mảng khối thinking / redacted_thinking. DeepSeek: null
+     * (gửi lại dùng reasoningText làm reasoning_content).
+     */
+    val reasoningReplay: String? = null,
+    /** Hãng đã sinh ra suy luận của tin này ("openai" / "deepseek" / "anthropic"). */
+    val reasoningProvider: String? = null,
 )
 
 @Entity(tableName = "notes")
