@@ -50,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,7 +69,9 @@ import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.ToolsSource
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Màn "Request Control Panel" (Đợt C): danh sách thẻ từ trên xuống — thứ tự
@@ -114,6 +117,19 @@ fun RequestPanelScreen(
     // xóa riêng nữa.
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    // Đợt fix 11/11/2026 (I1): tên hiển thị của file ngoài (URI) phải tra
+    // qua nhà cung cấp nên đọc nền; chưa tra xong thì tóm tắt dùng đoạn
+    // cuối của giá trị đã lưu (fileName).
+    var cardFileNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(layout) {
+        val sources = layout.cards.mapNotNull { it.file } + layout.cards.flatMap { it.toolFiles() }
+        val missing = sources.filter { it !in cardFileNames }
+        if (missing.isEmpty()) return@LaunchedEffect
+        val resolved = withContext(Dispatchers.IO) {
+            missing.associateWith { container.fs.cardFileDisplayName(it) }
+        }
+        cardFileNames = cardFileNames + resolved
+    }
     fun deleteWithUndo(card: RequestCard) {
         val index = layout.cards.indexOfFirst { it.id == card.id }
         if (index < 0) return
@@ -186,7 +202,7 @@ fun RequestPanelScreen(
                         card = card,
                         isFirst = index == 0,
                         isLast = index == layout.cards.lastIndex,
-                        summary = cardSummary(card, metadata, model, currentProvider),
+                        summary = cardSummary(card, metadata, model, currentProvider) { cardFileNames[it] ?: fileName(it) },
                         onToggle = { store.updateCard(card.id) { it.copy(enabled = !it.enabled) } },
                         onMoveUp = { store.moveCard(card.id, up = true) },
                         onMoveDown = { store.moveCard(card.id, up = false) },
@@ -340,12 +356,14 @@ private fun cardSummary(
     metadata: com.example.byokchat.ai.MetadataParams,
     model: String?,
     provider: com.example.byokchat.data.ProviderConfig?,
+    /** Tên hiển thị của file thẻ trỏ tới — mặc định lấy đoạn cuối của giá trị đã lưu; màn hình truyền bản đã tra tên thật của file ngoài (I1). */
+    fileDisplayName: (String) -> String = ::fileName,
 ): String = when (card.kind) {
     CardKind.METADATA -> {
         // vd "gpt-4o · effort medium · max 8192".
         metadata.summary(model.orEmpty(), provider?.maxOutputTokens ?: 8192, provider?.type)
     }
-    CardKind.SYSTEM -> card.file?.let { "File: ${fileName(it)}" }
+    CardKind.SYSTEM -> card.file?.let { "File: ${fileDisplayName(it)}" }
         ?: card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(no system prompt)" }
         ?: "(no system prompt)"
     CardKind.TIME -> {
@@ -353,7 +371,7 @@ private fun cardSummary(
             "When off, no time is added — the model can still call the time.now tool."
     }
     CardKind.FREE -> (if (card.role.name == "USER") "User" else "System") + " · " +
-        (card.file?.let { "File: ${fileName(it)}" }
+        (card.file?.let { "File: ${fileDisplayName(it)}" }
             ?: card.text.lineSequence().firstOrNull()?.take(80)?.ifBlank { "(empty)" } ?: "(empty)")
     CardKind.HISTORY -> {
         val base = when (card.policy) {
@@ -378,12 +396,12 @@ private fun cardSummary(
         ToolsSource.FILE -> {
             val files = card.toolFiles()
             if (files.isEmpty()) "No file selected — the send will be blocked. Tap Edit to choose tools.md files."
-            else "Tools from: " + files.joinToString(", ") { fileName(it) }
+            else "Tools from: " + files.joinToString(", ") { fileDisplayName(it) }
         }
     }
 }
 
-/** Chỉ lấy tên file từ đường dẫn trong workspace ("Tov/prompts/system.md" -> "system.md"). */
+/** Lấy tên hiển thị đồng bộ từ giá trị đã lưu: đoạn cuối sau '/' — dùng khi chưa tra được tên thật của file ngoài (xem WorkspaceFs.cardFileDisplayName). */
 private fun fileName(path: String): String = path.substringAfterLast('/').ifEmpty { path }
 
 /**

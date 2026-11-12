@@ -134,12 +134,12 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         val vars = RequestLayout.requestVars(modelName, cfg.name)
         // Đợt D: thẻ System/Free trỏ file được đọc lại mỗi lần xem trước.
         val (layout, fileErrors) = withContext(Dispatchers.IO) {
-            baseLayout.resolveFiles { path -> runCatching { app.fs.readText(path) } }
+            baseLayout.resolveFiles { path -> runCatching { app.fs.readCardFile(path) } }
         }
         // Đợt E phần A: file tools.md của thẻ Tools cũng đọc + parse lại mỗi lần xem trước.
         val toolsResolution = withContext(Dispatchers.IO) {
             layout.resolveToolFiles(
-                { path -> runCatching { app.fs.readText(path) } },
+                { path -> runCatching { app.fs.readCardFile(path) } },
                 app.registry.originDescriptions(),
             )
         }

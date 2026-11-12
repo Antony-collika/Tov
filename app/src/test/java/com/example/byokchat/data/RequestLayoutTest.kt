@@ -199,13 +199,15 @@ class RequestLayoutTest {
     }
 
     @Test
-    fun fileMustEndWithMd() {
+    fun fileMayHaveAnyExtension() {
+        // Đợt fix 11/11/2026 (I1): file thẻ trỏ tới có thể ở bất cứ đâu, đuôi
+        // bất kỳ — nội dung mới là thứ được parse, không còn kiểm tra .md.
         val layout = RequestLayout.defaultLayout("x").copy(
             cards = RequestLayout.defaultLayout("x").cards.map {
                 if (it.kind == CardKind.SYSTEM) it.copy(file = "Tov/prompts/system.txt") else it
             }
         )
-        assertTrue(layout.validate().any { it.contains(".md") })
+        assertTrue(layout.validate().none { it.contains(".md") })
     }
 
     @Test
@@ -351,9 +353,11 @@ class RequestLayoutTest {
     }
 
     @Test
-    fun toolsFileMustEndWithMd() {
+    fun toolsFileMayHaveAnyExtension() {
+        // Đợt fix 11/11/2026 (I1): như fileMayHaveAnyExtension — file tools
+        // cũng có thể ở bất cứ đâu, đuôi bất kỳ.
         val layout = toolsLayout("tools.txt")
-        assertTrue(layout.validate().any { it.contains("Tools") && it.contains(".md") })
+        assertTrue(layout.validate().none { it.contains("Tools") && it.contains(".md") })
     }
 
     @Test

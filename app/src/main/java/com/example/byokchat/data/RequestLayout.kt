@@ -13,7 +13,7 @@ import java.time.format.DateTimeFormatter
 /** Loại thẻ trong Request panel (Đợt C). Thứ tự thẻ trong danh sách là thứ tự gửi. */
 enum class CardKind { METADATA, SYSTEM, TIME, FREE, HISTORY, LAST_TURN, TOOLS }
 
-/** Nguồn nội dung của thẻ Tools: gõ trực tiếp vào thẻ (TEXT) hay file .md (FILE). */
+/** Nguồn nội dung của thẻ Tools: gõ trực tiếp vào thẻ (TEXT) hay file (FILE) — file ở bất cứ đâu, đuôi bất kỳ, nội dung theo định dạng tools.md. */
 enum class ToolsSource { TEXT, FILE }
 
 /** Vai của thẻ Free khi gửi. */
@@ -48,25 +48,29 @@ data class RequestCard(
     /** Thẻ History: có gửi lượt lỗi hay không. */
     val includeErrorTurns: Boolean = false,
     /**
-     * Thẻ System/Free: đường dẫn file .md trong workspace (vd
-     * "Tov/prompts/system.md"). Khi có file, nội dung file được đọc lại MỖI
-     * LẦN GỬI và thay văn bản trong thẻ; đọc lỗi thì giữ văn bản cũ và báo
-     * lỗi (xem RequestLayout.resolveFiles). Null = chỉ dùng văn bản trong thẻ.
+     * Thẻ System/Free: file trỏ tới — URI "content://..." của file ngoài
+     * (chọn ở bất cứ đâu trên máy, đợt fix 11/11/2026, I1) hoặc đường dẫn
+     * tương đối trong workspace (vd "Tov/prompts/system.md", thẻ cũ). Khi
+     * có file, nội dung file được đọc lại MỖI LẦN GỬI và thay văn bản trong
+     * thẻ; đọc lỗi thì giữ văn bản cũ và báo lỗi (xem
+     * RequestLayout.resolveFiles). Null = chỉ dùng văn bản trong thẻ.
      */
     val file: String? = null,
     /**
-     * Thẻ Tools (Đợt E): danh sách file tools.md đã chọn, theo thứ tự.
-     * App gộp (hợp) tất cả tool trong các file rồi đưa cho model: theo thứ
-     * tự file đã chọn, trong mỗi file theo thứ tự khối. Giữ tương thích
-     * ngược với [file]: thẻ Tools cũ chỉ có [file] thì coi như danh sách
-     * 1 file (xem [toolFiles]).
+     * Thẻ Tools (Đợt E): danh sách file đã chọn, theo thứ tự — mỗi file là
+     * URI "content://..." của file ngoài hoặc đường dẫn tương đối trong
+     * workspace (đợt fix 11/11/2026, I1). App gộp (hợp) tất cả tool trong
+     * các file rồi đưa cho model: theo thứ tự file đã chọn, trong mỗi file
+     * theo thứ tự khối. Giữ tương thích ngược với [file]: thẻ Tools cũ chỉ
+     * có [file] thì coi như danh sách 1 file (xem [toolFiles]).
      */
     val files: List<String> = emptyList(),
     /**
      * Thẻ Tools: nguồn nội dung — TEXT (gõ trực tiếp vào thẻ, parse như
-     * tools.md) hay FILE (các file .md đã chọn). Mặc định FILE (thẻ cũ
-     * chỉ có file). Nguồn FILE mà chưa chọn file nào thì lần gửi bị chặn
-     * (xem resolveToolFiles); nguồn TEXT để trống thì 0 tool, không lỗi.
+     * tools.md) hay FILE (các file đã chọn, định dạng tools.md). Mặc định
+     * FILE (thẻ cũ chỉ có file). Nguồn FILE mà chưa chọn file nào thì lần
+     * gửi bị chặn (xem resolveToolFiles); nguồn TEXT để trống thì 0 tool,
+     * không lỗi.
      */
     val toolsSource: ToolsSource = ToolsSource.FILE,
 ) {
@@ -195,12 +199,9 @@ data class RequestLayout(val cards: List<RequestCard>) {
         cards.filter { it.kind == CardKind.FREE && it.text.isBlank() && it.file.isNullOrBlank() }.forEach {
             errors += "The Free card \"${it.displayName()}\" is empty — write something, link a file, or delete it."
         }
-        cards.filter { (it.kind == CardKind.SYSTEM || it.kind == CardKind.FREE) && it.file != null && !it.file.endsWith(".md") }.forEach {
-            errors += "The ${it.displayName()} card links to '${it.file}' — the file must end with .md."
-        }
-        cards.filter { it.kind == CardKind.TOOLS }.flatMap { it.toolFiles() }.filter { !it.endsWith(".md") }.forEach {
-            errors += "The Tools card links to '$it' — the file must end with .md."
-        }
+        // Đợt fix 11/11/2026 (I1): file thẻ trỏ tới có thể ở bất cứ đâu, đuôi
+        // bất kỳ — không còn kiểm tra đuôi .md nữa (đọc lỗi thì đường gửi /
+        // xem trước chặn lại và báo rõ, không tự fallback).
         return errors
     }
 

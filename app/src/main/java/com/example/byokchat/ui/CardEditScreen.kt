@@ -68,7 +68,7 @@ private const val VARS_HELP = "You can use {date}, {time}, {model} and {provider
     "Note: {time} changes every minute, so the AI's cache is not reused while it is in the prompt."
 
 /**
- * Đợt 8: nguồn nội dung của thẻ System/Free — gõ trực tiếp hay đọc file .md
+ * Đợt 8: nguồn nội dung của thẻ System/Free — gõ trực tiếp hay đọc file
  * ngoài (như SourceRadio của FPilot). Chỉ là trạng thái nháp của màn sửa:
  * lúc Save, TEXT ghi file = null (bỏ liên kết file), FILE ghi đường dẫn
  * vào trường file của thẻ (có file = External file, không file = Text input)
@@ -94,7 +94,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var compact by remember(cardId) { mutableStateOf(card?.compactToolResults ?: false) }
     var turnTags by remember(cardId) { mutableStateOf(card?.turnTags ?: false) }
     var includeErrors by remember(cardId) { mutableStateOf(card?.includeErrorTurns ?: false) }
-    // Đợt D: file .md mà thẻ trỏ tới (trống = không trỏ file).
+    // Đợt D: file mà thẻ trỏ tới (trống = không trỏ file).
     var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
     var fileError by remember(cardId) { mutableStateOf<String?>(null) }
     // Đợt 8: nguồn nội dung của thẻ System/Free — khởi đầu theo file đã trỏ
@@ -111,7 +111,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var toolsPreviewError by remember(cardId) { mutableStateOf<String?>(null) }
     // Đợt fix 11/11/2026 (A2): picker chọn file tools.md — như picker của
     // thẻ System, không gõ đường dẫn tay nữa.
-    val pickToolFile = rememberWorkspaceMdPicker(
+    val pickToolFile = rememberCardFilePicker(
         onPicked = { path ->
             if (path !in toolFiles) toolFiles = toolFiles + path
             fileError = null
@@ -135,8 +135,8 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     val scope = rememberCoroutineScope()
 
     val lastTurnsValid = lastTurns.toIntOrNull()?.let { it in 1..100 } == true
-    // Đợt 8: chỉ kiểm tra đuôi .md khi nguồn là External file.
-    val fileValid = source != CardSource.FILE || file.isBlank() || file.trim().endsWith(".md")
+    // Đợt fix 11/11/2026 (I1): file thẻ trỏ tới có thể ở bất cứ đâu, đuôi
+    // bất kỳ — không còn kiểm tra đuôi .md nữa.
     val dirty = card != null && (
         text != card.text || label != card.label || role != card.role || policy != card.policy ||
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
@@ -147,7 +147,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             (currentProvider != null && maxTokens != currentProvider.maxOutputTokens.toString())
         )
-    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && fileValid && stopsValid && maxTokensValid
+    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && stopsValid && maxTokensValid
     // Thẻ Time/Last turn không có gì để Save (sửa trực tiếp hoặc chỉ đọc).
     // Thẻ Tools CÓ Save (danh sách file) từ Đợt E.
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.LAST_TURN
@@ -178,7 +178,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         // chặn với cùng lỗi này — xem RequestLayout.resolveToolFiles).
         if (toolFiles.isEmpty()) {
             toolsPreviewError = "No file selected for the Tools card. " +
-                "Choose one or more tools.md files, or switch the card to Text input."
+                "Choose one or more files (in tools.md format), or switch the card to Text input."
             return@LaunchedEffect
         }
         val layout = store.storedLayout.value
@@ -187,7 +187,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         val previewCard = layout.toolsCard()?.copy(files = toolFiles, toolsSource = ToolsSource.FILE) ?: return@LaunchedEffect
         val previewLayout = layout.copy(cards = layout.cards.map { if (it.id == previewCard.id) previewCard else it })
         val res = withContext(Dispatchers.IO) {
-            previewLayout.resolveToolFiles({ path -> runCatching { container.fs.readText(path) } }, origins)
+            previewLayout.resolveToolFiles({ path -> runCatching { container.fs.readCardFile(path) } }, origins)
         }
         if (res.errors.isNotEmpty()) {
             toolsPreviewError = res.errors.joinToString("\n")
@@ -233,7 +233,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 // Thẻ Tools dùng danh sách files (file đơn cũ gộp vào đó);
                 // thẻ khác giữ nguyên file/files của chúng. Đợt 8: nguồn
                 // Text input ghi file = null (bỏ liên kết file cũ), nguồn
-                // External file ghi đường dẫn đã chọn/gõ. Quyết định 16:
+                // External file ghi URI/đường dẫn đã chọn. Quyết định 16:
                 // chọn Text nghĩa là thẻ là Text — bỏ luôn danh sách file
                 // cũ, không giữ cả hai.
                 file = if (c.kind == CardKind.TOOLS) null
@@ -434,7 +434,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     PolicyOption(
                         selected = source == CardSource.FILE,
                         title = "External file",
-                        desc = "Read from a .md file in the workspace, again on every send.",
+                        desc = "Read from a file anywhere on this device, again on every send.",
                         onClick = { source = CardSource.FILE },
                     )
                     if (source == CardSource.TEXT) {
@@ -494,7 +494,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     PolicyOption(
                         selected = source == CardSource.FILE,
                         title = "External file",
-                        desc = "Read from a .md file in the workspace, again on every send.",
+                        desc = "Read from a file anywhere on this device, again on every send.",
                         onClick = { source = CardSource.FILE },
                     )
                     if (source == CardSource.TEXT) {
@@ -602,7 +602,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     PolicyOption(
                         selected = toolsSource == ToolsSource.FILE,
                         title = "External file",
-                        desc = "Read from one or more tools.md files in the workspace, again on every send.",
+                        desc = "Read from one or more files anywhere on this device, again on every send. Each file must list tools in tools.md format.",
                         onClick = { toolsSource = ToolsSource.FILE },
                     )
                     if (toolsSource == ToolsSource.TEXT) {
@@ -631,28 +631,17 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                             )
                         }
                         toolFiles.forEach { path ->
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    path,
-                                    modifier = Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                )
-                                IconButton(onClick = { openFileAt(context, container.fs, path, onError = { fileError = it }) }) {
-                                    Icon(Icons.Default.OpenInNew, contentDescription = "Open file")
-                                }
-                                IconButton(onClick = { toolFiles = toolFiles - path }) {
-                                    Icon(Icons.Default.Close, contentDescription = "Remove file")
-                                }
-                            }
+                            ToolFileRow(
+                                path = path,
+                                onOpen = { openFileAt(context, container.fs, path, onError = { fileError = it }) },
+                                onRemove = { toolFiles = toolFiles - path },
+                            )
                         }
                         // Đợt fix 11/11/2026 (A2): không gõ đường dẫn tay nữa —
                         // chọn bằng hộp chọn của hệ thống (như thẻ System); các
                         // nút xếp dọc dạng TextButton như mẫu FPilot.
                         Column {
-                            TextButton(onClick = { pickToolFile.launch(arrayOf("text/markdown", "text/plain")) }) {
+                            TextButton(onClick = { pickToolFile.launch(arrayOf("*/*")) }) {
                                 Text("Choose file")
                             }
                             TextButton(onClick = ::createTemplate) { Text("Create template") }
@@ -749,28 +738,38 @@ private fun templateText(kind: CardKind): String = when (kind) {
 }
 
 /**
- * Hộp chọn file .md trong workspace (SAF OpenDocument), dùng chung cho mục
- * "File" của thẻ System/Free và trình sửa thẻ Tools (đợt fix 11/11/2026,
- * A1+A2 — theo mẫu FPilot: chọn bằng hộp chọn, không gõ đường dẫn tay).
- * Chỉ nhận file .md NẰM TRONG workspace: đường dẫn tương đối suy ra từ
- * document ID (xem WorkspaceFs.relativePathForDocument); file ngoài
- * workspace thì báo lỗi và giữ nguyên giá trị cũ.
+ * Hộp chọn file cho thẻ (SAF OpenDocument), dùng chung cho mục "File" của
+ * thẻ System/Free và trình sửa thẻ Tools (đợt fix 11/11/2026, A1+A2 — theo
+ * mẫu FPilot: chọn bằng hộp chọn, không gõ đường dẫn tay).
+ * Đợt fix 11/11/2026 (I1): file có thể ở BẤT CỨ ĐÂU trên máy, đuôi bất kỳ
+ * — nội dung mới là thứ được parse, workspace chỉ là thư mục của AI chứ
+ * không phải nơi bắt buộc chứa file của thẻ. Chọn xong thì giữ quyền đọc
+ * lâu dài (persistable) rồi trả về URI dạng chuỗi; giữ không được quyền
+ * thì báo lỗi (không lưu URI sẽ mất quyền khi khởi động lại app). File
+ * trong workspace vẫn lưu bằng đường dẫn tương đối như thẻ cũ.
  */
 @Composable
-private fun rememberWorkspaceMdPicker(
+private fun rememberCardFilePicker(
     onPicked: (String) -> Unit,
-    /** File đã chọn không dùng được (nằm ngoài workspace, không phải .md, ...). */
+    /** File đã chọn không dùng được (không giữ được quyền, ...). */
     onPickError: (String) -> Unit,
 ): ManagedActivityResultLauncher<Array<String>, Uri?> {
     val fs = LocalContext.current.container.fs
     return rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
+        // File trong workspace thì lưu đường dẫn tương đối như thẻ cũ (dễ
+        // đọc, quyền đọc đã có sẵn từ quyền của cả cây); file ngoài thì
+        // giữ quyền đọc lâu dài rồi lưu URI dạng chuỗi.
         val relative = fs.relativePathForDocument(uri)
-        when {
-            relative == null -> onPickError("Choose a file inside the workspace folder.")
-            !relative.endsWith(".md") -> onPickError("The file must end with .md.")
-            else -> onPicked(relative)
+        if (relative != null) {
+            onPicked(relative)
+            return@rememberLauncherForActivityResult
         }
+        if (!fs.takeCardFilePermission(uri)) {
+            onPickError("Could not keep access to this file. Pick it again, or copy it into the workspace.")
+            return@rememberLauncherForActivityResult
+        }
+        onPicked(uri.toString())
     }
 }
 
@@ -787,13 +786,21 @@ private fun FileSection(
     fileError: String?,
     onCreateTemplate: () -> Unit,
     onOpenFile: () -> Unit,
-    /** File vừa chọn bằng hộp chọn của hệ thống (đường dẫn tương đối trong workspace). */
+    /** File vừa chọn bằng hộp chọn của hệ thống (URI file ngoài, hoặc đường dẫn tương đối trong workspace — thẻ cũ). */
     onFilePicked: (String) -> Unit,
-    /** File đã chọn không dùng được (nằm ngoài workspace, không phải .md, ...). */
+    /** File đã chọn không dùng được (không giữ được quyền, ...). */
     onPickError: (String) -> Unit,
 ) {
-    val pickFile = rememberWorkspaceMdPicker(onPicked = onFilePicked, onPickError = onPickError)
-    Text("File (.md in the workspace)", style = MaterialTheme.typography.labelLarge)
+    val fs = LocalContext.current.container.fs
+    val pickFile = rememberCardFilePicker(onPicked = onFilePicked, onPickError = onPickError)
+    // Đợt fix 11/11/2026 (I1): tên hiển thị của file ngoài (URI) phải tra
+    // qua nhà cung cấp nên đọc nền; chưa tra xong thì hiện đoạn cuối của
+    // giá trị đã lưu.
+    var displayName by remember(file) { mutableStateOf(file.substringAfterLast('/').ifEmpty { file }) }
+    LaunchedEffect(file) {
+        if (file.isNotBlank()) displayName = withContext(Dispatchers.IO) { fs.cardFileDisplayName(file) }
+    }
+    Text("File", style = MaterialTheme.typography.labelLarge)
     if (file.isBlank()) {
         Text(
             "(no file chosen)",
@@ -801,17 +808,18 @@ private fun FileSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     } else {
-        Text(file, style = MaterialTheme.typography.bodyMedium)
+        Text(displayName, style = MaterialTheme.typography.bodyMedium)
     }
     Text(
-        "Its content is read again on every send. Edit the file in any editor and the next send " +
+        "It can be any file on this device — it does not have to be in the workspace. " +
+            "Its content is read again on every send. Edit the file in any editor and the next send " +
             "uses the new text. If the file cannot be read, the card's saved text is used instead " +
             "and an error is shown.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Column {
-        TextButton(onClick = { pickFile.launch(arrayOf("text/markdown", "text/plain")) }) {
+        TextButton(onClick = { pickFile.launch(arrayOf("*/*")) }) {
             Text(if (file.isBlank()) "Choose file" else "Change file")
         }
         if (file.isNotBlank()) {
@@ -821,5 +829,40 @@ private fun FileSection(
     }
     if (fileError != null) {
         Text(fileError, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+    }
+}
+
+/**
+ * Một dòng file trong trình sửa thẻ Tools (đợt fix 11/11/2026, I1): hiện
+ * tên file thật thay vì URI/đường dẫn đã lưu. Tên của file ngoài (URI)
+ * phải tra qua nhà cung cấp nên đọc nền; chưa tra xong thì hiện đoạn cuối
+ * của giá trị đã lưu.
+ */
+@Composable
+private fun ToolFileRow(
+    path: String,
+    onOpen: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val fs = LocalContext.current.container.fs
+    var displayName by remember(path) { mutableStateOf(path.substringAfterLast('/').ifEmpty { path }) }
+    LaunchedEffect(path) {
+        displayName = withContext(Dispatchers.IO) { fs.cardFileDisplayName(path) }
+    }
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            displayName,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        IconButton(onClick = onOpen) {
+            Icon(Icons.Default.OpenInNew, contentDescription = "Open file")
+        }
+        IconButton(onClick = onRemove) {
+            Icon(Icons.Default.Close, contentDescription = "Remove file")
+        }
     }
 }

@@ -83,10 +83,11 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
      * Đợt 8: đường dẫn tương đối trong workspace của một document user vừa
      * chọn bằng hộp chọn file của hệ thống (SAF OpenDocument). So bằng
      * document ID: document nằm trong cây workspace thì ID của nó bắt đầu
-     * bằng ID của cây + "/". Null = file nằm ngoài workspace (app chỉ trỏ
-     * file .md trong workspace, như FileSection đã ghi), hoặc chưa chọn
-     * workspace. Không cần xin thêm quyền: file trong cây workspace đã nằm
-     * trong quyền persistable của cây đó.
+     * bằng ID của cây + "/". Null = file nằm ngoài workspace, hoặc chưa
+     * chọn workspace. Đợt fix 11/11/2026 (I1): chỉ còn dùng để ƯU TIÊN lưu
+     * đường dẫn tương đối cho file trong workspace (dễ đọc trong bố cục đã
+     * lưu, quyền đọc đã có sẵn từ quyền của cả cây) — KHÔNG còn là điều
+     * kiện bắt buộc: file ngoài workspace thì lưu URI (xem readCardFile).
      */
     fun relativePathForDocument(uri: Uri): String? {
         val treeUri = settings.workspaceUri.value?.let { Uri.parse(it) } ?: return null
@@ -95,6 +96,68 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         val prefix = "$treeId/"
         if (!docId.startsWith(prefix)) return null
         return docId.removePrefix(prefix).takeIf { it.isNotEmpty() }
+    }
+
+    /**
+     * File thẻ trỏ tới có phải URI tài liệu ngoài workspace không (đợt fix
+     * 11/11/2026, I1): thẻ lưu URI dạng "content://..." khi user chọn file ở
+     * BẤT CỨ ĐÂU trên máy (không chỉ trong workspace); đường dẫn tương đối
+     * (không có scheme content) là file trong workspace — thẻ cũ vẫn dùng
+     * dạng này, không migrate, không đổi.
+     */
+    fun isExternalCardFile(source: String): Boolean {
+        val uri = runCatching { Uri.parse(source) }.getOrNull() ?: return false
+        return uri.scheme == "content"
+    }
+
+    /**
+     * Giữ quyền đọc lâu dài cho file user vừa chọn bằng hộp chọn hệ thống
+     * (I1). Trả về false khi nhà cung cấp không cho giữ quyền — lúc đó
+     * không nên lưu URI (quyền sẽ mất khi khởi động lại app).
+     */
+    fun takeCardFilePermission(uri: Uri): Boolean = runCatching {
+        resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        true
+    }.getOrDefault(false)
+
+    /** Tên hiển thị đã tra được của file ngoài, để không hỏi lại nhà cung cấp. */
+    private val cardFileNames = ConcurrentHashMap<String, String>()
+
+    /**
+     * Đọc nội dung file thẻ trỏ tới (I1): URI ngoài đọc qua ContentResolver
+     * (xem readDocText — file nhị phân / quá lớn thì ném ToolException rõ
+     * ràng, đường gửi chặn lại và báo user, không tự fallback); đường dẫn
+     * tương đối đọc trong workspace như cũ (thẻ cũ). Chạy chặn, gọi từ
+     * luồng nền.
+     */
+    fun readCardFile(source: String, maxBytes: Long = 5_000_000): String {
+        if (isExternalCardFile(source)) {
+            val uri = Uri.parse(source)
+            val doc = DocumentFile.fromSingleUri(ctx, uri)
+                ?: throw ToolException("Could not read the file.")
+            return readDocText(doc, doc.name ?: source, maxBytes)
+        }
+        return readText(source, maxBytes)
+    }
+
+    /**
+     * Tên hiển thị của file thẻ trỏ tới (I1): URI ngoài thì lấy tên file
+     * thật từ nhà cung cấp (đã tra được thì dùng lại); không lấy được thì
+     * lấy đoạn cuối của URI đã giải mã; đường dẫn tương đối thì lấy tên
+     * file. Chạy chặn (hỏi nhà cung cấp), gọi từ luồng nền.
+     */
+    fun cardFileDisplayName(source: String): String {
+        cardFileNames[source]?.let { return it }
+        if (isExternalCardFile(source)) {
+            val uri = Uri.parse(source)
+            val name = runCatching { DocumentFile.fromSingleUri(ctx, uri)?.name }.getOrNull()?.takeIf { it.isNotBlank() }
+            if (name != null) {
+                cardFileNames[source] = name
+                return name
+            }
+            return (Uri.decode(uri.lastPathSegment ?: source) ?: source).substringAfterLast('/').ifEmpty { source }
+        }
+        return source.substringAfterLast('/').ifEmpty { source }
     }
 
     /** Gọi sau khi người dùng chọn thư mục bằng hộp chọn của hệ thống. */

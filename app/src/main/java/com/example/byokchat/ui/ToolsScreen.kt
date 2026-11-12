@@ -324,7 +324,7 @@ private fun rememberToolsFileExposure(): Map<String, com.example.byokchat.tools.
     LaunchedEffect(layout) {
         exposure = withContext(Dispatchers.IO) {
             val res = layout.resolveToolFiles(
-                { path -> runCatching { container.fs.readText(path) } },
+                { path -> runCatching { container.fs.readCardFile(path) } },
                 container.registry.originDescriptions(),
             )
             res.exposed?.associateBy { it.uid }.orEmpty()

@@ -145,7 +145,7 @@ class ChatEngine(
                 // file), nguồn File đọc lỗi thì đường lỗi đã có của RCP
                 // chặn gửi. Không còn đường "legacy" offer tất cả tool.
                 val readFile: (String) -> Result<String> = { path ->
-                    runCatching { fs?.readText(path) ?: error("No workspace folder has been chosen.") }
+                    runCatching { fs?.readCardFile(path) ?: error("No workspace folder has been chosen.") }
                 }
                 val (layout, fileErrors) = withContext(Dispatchers.IO) { baseLayout.resolveFiles(readFile) }
                 // Đợt E phần A: file tools.md của thẻ Tools cũng đọc + parse
