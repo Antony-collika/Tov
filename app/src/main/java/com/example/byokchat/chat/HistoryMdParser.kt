@@ -155,20 +155,52 @@ object HistoryMdParser {
         return ParsedHistory(sessionId, title.orEmpty(), created, effectiveNext, messages)
     }
 
-    /** Parse history.meta.json (dùng lại model @Serializable của HistoryExporter). */
+    /**
+     * Parse history.meta.json — cả hai format:
+     * - v1 (cũ): một object JSON {version: 1, session, messages}.
+     * - v2 JSONL (mới, từ 12/11/2026): dòng đầu là header {version: 2,
+     *   session}, mỗi dòng sau là một [HistoryMetaEntry]; cùng id thì dòng
+     *   sau thắng (để append cập nhật được một tin cũ).
+     * File cũ v1 vẫn đọc được, không cần migrate.
+     */
     fun parseMeta(text: String): HistoryMeta {
-        val meta = try {
-            json.decodeFromString(HistoryMeta.serializer(), text)
-        } catch (e: Exception) {
-            throw HistoryParseException("history.meta.json could not be read: ${e.message}")
+        // Thử format cũ trước: một object JSON duy nhất.
+        runCatching { json.decodeFromString(HistoryMeta.serializer(), text) }.onSuccess { meta ->
+            if (meta.version == 1) {
+                if (meta.session.isBlank()) {
+                    throw HistoryParseException("history.meta.json has no \"session\".")
+                }
+                return meta
+            }
+            throw HistoryParseException(
+                "history.meta.json has unsupported version ${meta.version} (expected 1 or 2).",
+            )
         }
-        if (meta.version != 1) {
-            throw HistoryParseException("history.meta.json has unsupported version ${meta.version} (expected 1).")
+        // Không phải một object JSON → thử JSONL.
+        val lines = text.lines().filter { it.isNotBlank() }
+        if (lines.isEmpty()) throw HistoryParseException("history.meta.json is empty.")
+        val header = runCatching { json.decodeFromString(HistoryMetaHeader.serializer(), lines[0]) }.getOrNull()
+            ?: throw HistoryParseException("history.meta.json could not be read: the first line is not a valid header.")
+        if (header.version != 2) {
+            throw HistoryParseException(
+                "history.meta.json has unsupported version ${header.version} (expected 1 or 2).",
+            )
         }
-        if (meta.session.isBlank()) {
+        if (header.session.isBlank()) {
             throw HistoryParseException("history.meta.json has no \"session\".")
         }
-        return meta
+        val messages = LinkedHashMap<String, HistoryMetaMessage>()
+        for ((index, line) in lines.drop(1).withIndex()) {
+            val entry = runCatching { json.decodeFromString(HistoryMetaEntry.serializer(), line) }.getOrNull()
+                ?: throw HistoryParseException("history.meta.json line ${index + 2} is not a valid message entry.")
+            messages[entry.id] = HistoryMetaMessage(
+                attachments = entry.attachments,
+                createdAt = entry.createdAt,
+                extra_content = entry.extra_content,
+                tool_rounds = entry.tool_rounds,
+            )
+        }
+        return HistoryMeta(version = 2, session = header.session, messages = messages)
     }
 
     /** Title trong frontmatter ghi dạng chuỗi JSON có ngoặc kép; file cũ không có ngoặc thì lấy thô. */

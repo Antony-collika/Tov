@@ -58,8 +58,8 @@ class HistoryExporterTest {
         assertTrue(out.indexOf("## T1") < out.indexOf("## T2"))
 
         val meta = HistoryExporter.renderMeta(conv, rows)
-        val parsed = Json { ignoreUnknownKeys = true }.decodeFromString(HistoryMeta.serializer(), meta)
-        assertEquals(1, parsed.version)
+        val parsed = HistoryMdParser.parseMeta(meta)
+        assertEquals(2, parsed.version)
         assertEquals("conv-abc", parsed.session)
         assertEquals(listOf("m1", "m2", "m4", "m5", "m6"), parsed.messages.keys.toList())
         val rounds = parsed.messages.getValue("m2").tool_rounds
@@ -71,6 +71,37 @@ class HistoryExporterTest {
         assertEquals(emptyList<HistoryToolRound>(), parsed.messages.getValue("m4").tool_rounds)
         // extra_content luôn null: Room không lưu trường này (Đợt E, không đổi DB).
         assertTrue(parsed.messages.values.all { it.extra_content == null })
+    }
+
+    @Test
+    fun turnSectionAndMetaLinesMatchFullRender() {
+        // Phần append của một lượt phải đúng y như render đủ viết cho lượt đó.
+        val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
+        val callsJson = json.encodeToString(callsSer, listOf(AiToolCall("call-1", "current_time", "{}")))
+        val rows = listOf(
+            msg("m1", "t1", 1, "user", "What time is it?"),
+            msg("m2", "t1", 2, "assistant", "", { copy(toolCallsJson = callsJson) }),
+            msg("m3", "t1", 3, "tool", "2026-11-10 09:00", { copy(toolCallId = "call-1", toolUid = "time.now", toolName = "current_time") }),
+            msg("m4", "t1", 4, "assistant", "It is 09:00."),
+            msg("m5", "t2", 5, "user", "Thanks"),
+            msg("m6", "t2", 6, "assistant", "You are welcome."),
+        )
+        val fullMd = HistoryExporter.renderHistory(conv, rows)
+        val section = HistoryExporter.renderTurnSection(2, rows)
+        assertTrue(section != null)
+        assertTrue(fullMd.endsWith(section!!))
+        val fullMeta = HistoryExporter.renderMeta(conv, rows)
+        val lines = HistoryExporter.renderMetaLines(2, rows)
+        assertTrue(lines != null)
+        assertEquals(2, lines!!.size)
+        assertTrue(fullMeta.endsWith(lines.joinToString("\n") + "\n"))
+        // Lượt chưa xong thì không có gì để append.
+        val unfinished = listOf(
+            msg("m1", "t1", 1, "user", "Hi"),
+            msg("m2", "t2", 2, "user", "And then?"),
+        )
+        assertEquals(null, HistoryExporter.renderTurnSection(2, unfinished))
+        assertEquals(null, HistoryExporter.renderMetaLines(2, unfinished))
     }
 
     @Test
@@ -114,7 +145,7 @@ class HistoryExporterTest {
         assertTrue(!out.contains("next_turn"))
         assertEquals(2, HistoryMdParser.parseMd(out).nextTurn)
         val meta = HistoryExporter.renderMeta(conv, rows)
-        val parsed = Json { ignoreUnknownKeys = true }.decodeFromString(HistoryMeta.serializer(), meta)
+        val parsed = HistoryMdParser.parseMeta(meta)
         assertEquals(listOf("m1", "m2"), parsed.messages.keys.toList())
     }
 

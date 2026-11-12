@@ -61,6 +61,27 @@ data class HistoryMeta(
 )
 
 /**
+ * Một dòng trong history.meta.json dạng JSONL (Đợt fix 12/11/2026): một tin
+ * nhắn, kèm id. Cùng id thì dòng sau thắng khi đọc — để append có thể cập
+ * nhật một tin cũ mà không cần ghi lại toàn bộ file.
+ */
+@Serializable
+data class HistoryMetaEntry(
+    val id: String,
+    val attachments: List<String> = emptyList(),
+    val createdAt: Long,
+    val extra_content: JsonElement? = null,
+    val tool_rounds: List<HistoryToolRound> = emptyList(),
+)
+
+/** Dòng đầu của history.meta.json dạng JSONL. */
+@Serializable
+data class HistoryMetaHeader(
+    val version: Int = 2,
+    val session: String,
+)
+
+/**
  * Xuất lịch sử chat ra history.md + history.meta.json trong Session storage (Đợt E).
  * Room vẫn là nguồn duy nhất; file là "bản chiếu" để đọc/grep/đồng bộ.
  * Định dạng sidecar mượn FPilot: frontmatter (session 8 ký tự, title có ngoặc
@@ -73,7 +94,8 @@ data class HistoryMeta(
  */
 object HistoryExporter {
     private val json = Json { ignoreUnknownKeys = true }
-    private val metaJson = Json { ignoreUnknownKeys = true; encodeDefaults = true; prettyPrint = true }
+    /** JSON gọn (một dòng) cho các dòng JSONL của history.meta.json. */
+    private val metaLineJson = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
     private val dateFmt = DateTimeFormatter.ofPattern("yyyy-MM-dd")
 
@@ -162,29 +184,67 @@ object HistoryExporter {
         }
     }
 
-    /** Dựng history.meta.json từ DB (hàm thuần, để test được). */
+    /**
+     * Dựng history.meta.json dạng JSONL từ DB (hàm thuần, để test được):
+     * dòng đầu là header {version: 2, session}, mỗi dòng sau là một tin
+     * (xem [HistoryMetaEntry]). Nhờ dạng này, có lượt mới xong thì chỉ cần
+     * append thêm dòng — không phải ghi lại toàn bộ file (xem
+     * [HistorySync.appendTurn]).
+     */
     fun renderMeta(conversation: ConversationEntity, rows: List<MessageEntity>): String {
+        return buildString {
+            appendLine(metaLineJson.encodeToString(HistoryMetaHeader(session = conversation.id.take(8))))
+            metaEntries(rows).forEach { appendLine(metaLineJson.encodeToString(it)) }
+        }
+    }
+
+    /** Các dòng meta của các tin đã xuất trong [rows] (dùng chung cho ghi đủ và append). */
+    private fun metaEntries(rows: List<MessageEntity>): List<HistoryMetaEntry> {
         val exported = exportedMessages(rows)
         val turns = completedTurns(rows)
         val resultsByTurn = turns.flatMap { (_, rs) -> rs.filter { it.role == "tool" } }
             .groupBy { it.turnId }
-        val messages = LinkedHashMap<String, HistoryMetaMessage>()
         // Mỗi kết quả tool chỉ gắn cho một tin assistant trong lượt (tin đã gọi
         // tool đó); tin assistant sau trong cùng lượt không nhận lại.
         val claimedByTurn = mutableMapOf<String, MutableSet<String?>>()
-        for (m in exported) {
+        return exported.map { m ->
             val rounds = if (m.role != "assistant") emptyList() else {
                 val claimed = claimedByTurn.getOrPut(m.turnId) { mutableSetOf() }
                 toolRoundsOf(m, resultsByTurn[m.turnId].orEmpty(), claimed)
             }
-            messages[m.id] = HistoryMetaMessage(
+            HistoryMetaEntry(
+                id = m.id,
                 attachments = if (m.role == "user") m.images() else emptyList(),
                 createdAt = m.createdAt,
+                // Đợt fix 12/11/2026 (K): thoughtSignature của Gemini sẽ ghi
+                // vào đây thay cho null — xem HistorySync.applyParsed.
                 extra_content = null,
                 tool_rounds = rounds,
             )
         }
-        return metaJson.encodeToString(HistoryMeta(session = conversation.id.take(8), messages = messages))
+    }
+
+    /**
+     * Dựng riêng phần history.md của một lượt đã xong (không có frontmatter),
+     * đúng y như [renderHistory] viết cho lượt đó: một dòng trống rồi các
+     * section của lượt. Dùng cho append (xem [HistorySync.appendTurn]).
+     * Trả null nếu lượt chưa xong hoặc không có gì để ghi.
+     */
+    fun renderTurnSection(turnNo: Int, rows: List<MessageEntity>): String? {
+        val turn = completedTurns(rows).firstOrNull { (n, _) -> n == turnNo } ?: return null
+        return buildString {
+            appendLine()
+            renderTurn(turn.first, turn.second)
+        }
+    }
+
+    /**
+     * Các dòng meta JSONL của một lượt đã xong (dùng cho append).
+     * Trả null nếu lượt chưa xong.
+     */
+    fun renderMetaLines(turnNo: Int, rows: List<MessageEntity>): List<String>? {
+        val turn = completedTurns(rows).firstOrNull { (n, _) -> n == turnNo } ?: return null
+        return metaEntries(turn.second).map { metaLineJson.encodeToString(it) }
     }
 
     /** Vòng tool của một tin assistant: lệnh gọi + kết quả đã ghép theo toolCallId. */

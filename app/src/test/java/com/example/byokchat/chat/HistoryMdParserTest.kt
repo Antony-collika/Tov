@@ -134,12 +134,32 @@ class HistoryMdParserTest {
     }
 
     @Test
-    fun metaVersionMustBeOne() {
+    fun metaSingleJsonVersionMustBeOne() {
+        // Object JSON đơn với version 2 vẫn bị từ chối — version 2 chỉ
+        // hợp lệ ở dạng JSONL (dòng đầu là header).
         assertThrows(HistoryParseException::class.java) {
             HistoryMdParser.parseMeta("{\"version\": 2, \"session\": \"abc\", \"messages\": {}}")
         }
         assertThrows(HistoryParseException::class.java) {
             HistoryMdParser.parseMeta("not json")
         }
+    }
+
+    @Test
+    fun parsesJsonlMetaAndLastLineWins() {
+        val jsonl = """
+            {"version":2,"session":"abc"}
+            {"id":"m1","attachments":[],"createdAt":100,"extra_content":null,"tool_rounds":[]}
+            {"id":"m2","attachments":[],"createdAt":200,"extra_content":{"google":{"thought_signature":"sig"}},"tool_rounds":[]}
+            {"id":"m1","attachments":["a.png"],"createdAt":101,"extra_content":null,"tool_rounds":[]}
+        """.trimIndent()
+        val meta = HistoryMdParser.parseMeta(jsonl)
+        assertEquals(2, meta.version)
+        assertEquals("abc", meta.session)
+        assertEquals(listOf("m1", "m2"), meta.messages.keys.toList())
+        // Dòng sau thắng: m1 lấy attachments/createdAt của dòng sau.
+        assertEquals(listOf("a.png"), meta.messages.getValue("m1").attachments)
+        assertEquals(101L, meta.messages.getValue("m1").createdAt)
+        assertEquals(200L, meta.messages.getValue("m2").createdAt)
     }
 }
