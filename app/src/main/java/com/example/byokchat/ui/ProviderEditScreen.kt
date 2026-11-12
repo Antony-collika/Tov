@@ -59,6 +59,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     val existing = remember { providerId?.let { settings.provider(it) } }
     val type = existing?.type ?: runCatching { ProviderType.valueOf(newType ?: "") }.getOrDefault(ProviderType.OPENAI)
     val scope = rememberCoroutineScope()
+    val activeId by settings.activeProviderId.collectAsState()
 
     var name by remember { mutableStateOf(existing?.name ?: type.label.substringBefore(" (")) }
     var apiKey by remember { mutableStateOf(existing?.apiKey ?: "") }

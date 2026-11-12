@@ -262,8 +262,8 @@ class ResponsesProvider(
                         }
                     }
                     Role.TOOL -> {
-                        val callId = m.toolCallId ?: return@forEach
-                        if (callId !in calledIds) return@forEach
+                        val callId = m.toolCallId ?: continue
+                        if (callId !in calledIds) continue
                         add(buildJsonObject {
                             put("type", "function_call_output")
                             put("call_id", callId)

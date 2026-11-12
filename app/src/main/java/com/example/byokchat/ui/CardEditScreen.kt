@@ -205,30 +205,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
 
     BackHandler(enabled = dirty) { confirmDiscard = true }
     val goBack: () -> Unit = { if (dirty) confirmDiscard = true else onBack() }
-    fun save() {
-        val c = card ?: return
-        // Đợt 6: thẻ Metadata không lưu vào thẻ (thẻ chỉ là vị trí cố định):
-        // giá trị lưu toàn cục ở SettingsRepository, max tokens lưu theo
-        // provider đang dùng (như màn sửa provider).
-        if (c.kind == CardKind.METADATA) {
-            container.settings.setMetadata(
-                MetadataParams(
-                    effort = effort,
-                    stopSequences = stopLines.take(4),
-                    keepThoughtSignature = keepSignature,
-                    replayReasoning = replayReasoning,
-                )
-            )
-            val cfg = currentProvider
-            val max = maxTokens.toIntOrNull()
-            if (cfg != null && max != null && max >= 256 && max != cfg.maxOutputTokens) {
-                container.settings.saveProvider(cfg.copy(maxOutputTokens = max))
-            }
-            onBack()
-            return
-        }
-        saveCard(c)
-    }
 
     /** Lưu nội dung thẻ đã sửa (trừ Metadata — xem save()). */
     fun saveCard(c: RequestCard, goBack: Boolean = true) {
@@ -260,6 +236,31 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             )
         }
         if (goBack) onBack()
+    }
+
+    fun save() {
+        val c = card ?: return
+        // Đợt 6: thẻ Metadata không lưu vào thẻ (thẻ chỉ là vị trí cố định):
+        // giá trị lưu toàn cục ở SettingsRepository, max tokens lưu theo
+        // provider đang dùng (như màn sửa provider).
+        if (c.kind == CardKind.METADATA) {
+            container.settings.setMetadata(
+                MetadataParams(
+                    effort = effort,
+                    stopSequences = stopLines.take(4),
+                    keepThoughtSignature = keepSignature,
+                    replayReasoning = replayReasoning,
+                )
+            )
+            val cfg = currentProvider
+            val max = maxTokens.toIntOrNull()
+            if (cfg != null && max != null && max >= 256 && max != cfg.maxOutputTokens) {
+                container.settings.saveProvider(cfg.copy(maxOutputTokens = max))
+            }
+            onBack()
+            return
+        }
+        saveCard(c)
     }
 
     /** Tạo file mẫu (nếu chưa có) rồi trỏ thẻ tới file đó. */
