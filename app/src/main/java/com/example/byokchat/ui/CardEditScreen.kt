@@ -1,6 +1,7 @@
 package com.example.byokchat.ui
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -55,7 +56,7 @@ import com.example.byokchat.ai.ClaudeThinkingMode
 import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.claudeThinkingModeFor
 import com.example.byokchat.ai.ReasoningEffort
-import com.example.byokchat.chat.THINKING_SEAL_MESSAGE
+import com.example.byokchat.chat.THINKING_SEAL_CARD_BRANCH_MESSAGE
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
@@ -83,7 +84,7 @@ private enum class CardSource { TEXT, FILE }
 /** Sửa một thẻ trong Request panel (Đợt C). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Unit)? = null, conversationId: String? = null) {
+fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Unit)? = null, conversationId: String? = null, onOpenConversation: ((String) -> Unit)? = null) {
     val context = LocalContext.current
     val container = context.container
     val store = container.layoutStore
@@ -101,8 +102,8 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Đợt D: file mà thẻ trỏ tới (trống = không trỏ file).
     var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
     var fileError by remember(cardId) { mutableStateOf<String?>(null) }
-    // Đợt provider 12/11/2026: thông báo khóa thẻ vì thinking của Claude
-    // (hiện khi user bấm Save mà cuộc đang bị niêm phong).
+    // Đợt provider 12/11/2026 (Q2): thông báo khi tạo nhánh vì thinking
+    // của Claude (hiện khi tạo nhánh thất bại) hoặc lỗi khác lúc Save.
     var lockError by remember(cardId) { mutableStateOf<String?>(null) }
     // Đợt 8: nguồn nội dung của thẻ System/Free — khởi đầu theo file đã trỏ
     // (có file = External file, không file = Text input).
@@ -248,14 +249,22 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             onBack()
             return
         }
-        // Đợt provider 12/11/2026: cuộc có thinking của Claude thì thẻ
-        // System/Tools bị khóa (đổi system prompt hoặc tools là chữ ký
-        // thinking mất hiệu lực, request sau lỗi 400). Chặn hẳn, hiện lý do
-        // ở màn này, gợi ý mở cuộc mới — không lưu gì cả.
+        // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của Duy: không
+        // chặn hẳn nữa): cuộc có thinking của Claude thì sửa thẻ System/
+        // Tools vẫn lưu (thẻ lưu chung cho mọi cuộc), rồi tạo cuộc mới kiểu
+        // branch (bỏ khối thinking cũ), mở nhánh và thông báo rõ lý do.
+        // Cuộc gốc giữ nguyên.
         if ((c.kind == CardKind.SYSTEM || c.kind == CardKind.TOOLS) && conversationId != null) {
             scope.launch {
                 if (container.ops.hasThinkingSeal(conversationId)) {
-                    lockError = THINKING_SEAL_MESSAGE
+                    saveCard(c, goBack = false)
+                    try {
+                        val branchId = container.ops.branchForModelSwitch(conversationId).conversationId
+                        Toast.makeText(context, THINKING_SEAL_CARD_BRANCH_MESSAGE, Toast.LENGTH_LONG).show()
+                        onOpenConversation?.invoke(branchId)
+                    } catch (e: Exception) {
+                        lockError = e.message ?: "Couldn't create the branch."
+                    }
                 } else {
                     saveCard(c)
                 }
@@ -266,7 +275,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     }
 
     /** Lưu nội dung thẻ đã sửa (trừ Metadata — xem save()). */
-    fun saveCard(c: RequestCard) {
+    fun saveCard(c: RequestCard, goBack: Boolean = true) {
         store.updateCard(c.id) {
             it.copy(
                 text = text,
@@ -294,7 +303,9 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 toolsSource = if (c.kind == CardKind.TOOLS) toolsSource else it.toolsSource,
             )
         }
-        onBack()
+        // Đợt provider 12/11/2026 (Q2): khi sửa thẻ trong cuộc có thinking
+        // của Claude thì không quay về panel (màn sẽ mở cuộc nhánh mới).
+        if (goBack) onBack()
     }
 
     /** Tạo file mẫu (nếu chưa có) rồi trỏ thẻ tới file đó. */

@@ -15,7 +15,7 @@ import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RequestAssembler
-import com.example.byokchat.chat.THINKING_SEAL_MESSAGE
+import com.example.byokchat.chat.THINKING_SEAL_BRANCH_MESSAGE
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
@@ -224,6 +224,24 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                     _events.emit(ChatEvent.Error("Could not sync history.md: ${r.error}"))
                 HistorySync.SyncResult.ExternalEditDiscarded ->
                     _events.emit(ChatEvent.Error("Your edit to history.md while the AI was answering had no effect — the file was overwritten when the answer finished."))
+                // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của
+                // Duy: không chặn hẳn cũng không lặng lẽ ghi đè): sửa ngoài
+                // chạm vào lịch sử đã niêm phong thì tạo cuộc mới kiểu
+                // branch, áp bản sửa vào nhánh, mở nhánh và thông báo rõ
+                // lý do. Cuộc gốc giữ nguyên (ghi nhận file đã xem để lần
+                // mở sau không tạo nhánh nữa).
+                is HistorySync.SyncResult.SealedExternalEdit -> {
+                    try {
+                        val branchId = app.ops.branchUpTo(conversationId, 0).conversationId
+                        sync.importInto(branchId, r.parsed, r.meta, r.mdHash)
+                        sync.markFileSeen(conversationId, r.mdHash)
+                        app.engine.exportHistory(branchId)
+                        _events.emit(ChatEvent.Error(THINKING_SEAL_BRANCH_MESSAGE))
+                        _events.emit(ChatEvent.OpenBranch(branchId))
+                    } catch (e: Exception) {
+                        _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
+                    }
+                }
                 else -> Unit
             }
         } finally {
@@ -371,10 +389,19 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun saveEdit(messageId: String, text: String) {
         if (generating.value) return
         viewModelScope.launch {
-            // Đợt provider 12/11/2026: cuộc có thinking của Claude thì tin cũ
-            // bị khóa — chặn hẳn, giải thích, gợi ý mở cuộc mới.
+            // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của Duy:
+            // không chặn hẳn nữa): cuộc có thinking của Claude thì sửa tin
+            // sẽ tạo cuộc mới kiểu branch (sửa trên bản sao, bỏ khối
+            // thinking cũ), mở nhánh và thông báo rõ lý do. Cuộc gốc giữ nguyên.
             if (app.ops.hasThinkingSeal(conversationId)) {
-                _events.emit(ChatEvent.Error(THINKING_SEAL_MESSAGE))
+                try {
+                    val r = app.ops.branchForEdit(conversationId, messageId, text)
+                    app.engine.exportHistory(r.conversationId)
+                    _events.emit(ChatEvent.Error(THINKING_SEAL_BRANCH_MESSAGE))
+                    _events.emit(ChatEvent.OpenBranch(r.conversationId))
+                } catch (e: Exception) {
+                    _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
+                }
                 return@launch
             }
             app.ops.editMessage(messageId, text)
@@ -386,10 +413,19 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun deleteTurn(turnId: String) {
         if (generating.value) return
         viewModelScope.launch {
-            // Đợt provider 12/11/2026: như saveEdit — xóa lượt cũng đổi lịch
-            // sử mà chữ ký thinking gắn vào.
+            // Đợt provider 12/11/2026 (Q2 — như saveEdit): xóa lượt trong
+            // cuộc có thinking của Claude thì tạo cuộc mới đến hết lượt
+            // trước lượt cần xóa, mở nhánh và thông báo. Cuộc gốc giữ nguyên
+            // (không xóa gì nên không có Hoàn tác).
             if (app.ops.hasThinkingSeal(conversationId)) {
-                _events.emit(ChatEvent.Error(THINKING_SEAL_MESSAGE))
+                try {
+                    val r = app.ops.branchBeforeTurn(conversationId, turnId)
+                    app.engine.exportHistory(r.conversationId)
+                    _events.emit(ChatEvent.Error(THINKING_SEAL_BRANCH_MESSAGE))
+                    _events.emit(ChatEvent.OpenBranch(r.conversationId))
+                } catch (e: Exception) {
+                    _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
+                }
                 return@launch
             }
             val backup = app.ops.deleteTurn(conversationId, turnId)
@@ -411,11 +447,13 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun regenerateHere(turnId: String, newUserText: String?) {
         if (generating.value) return
         viewModelScope.launch {
-            // Đợt provider 12/11/2026: cuộc có thinking của Claude thì không
-            // tạo lại trong cuộc này (xóa câu trả lời kèm khối thinking của
-            // lượt đó) — dùng "Tạo lại ở cuộc mới" (regenerateInBranch) thay.
+            // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của Duy:
+            // không chặn hẳn nữa): cuộc có thinking của Claude thì tạo lại
+            // ở cuộc mới (như "Tạo lại ở cuộc mới"), bỏ khối thinking cũ,
+            // mở nhánh và thông báo. Cuộc gốc giữ nguyên.
             if (app.ops.hasThinkingSeal(conversationId)) {
-                _events.emit(ChatEvent.Error(THINKING_SEAL_MESSAGE))
+                _events.emit(ChatEvent.Error(THINKING_SEAL_BRANCH_MESSAGE))
+                regenerateInBranch(turnId, newUserText, stripThinking = true)
                 return@launch
             }
             // Đợt E: xung đột khi regenerate — file đổi ngoài app thì giữ bản
@@ -430,7 +468,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     }
 
     /** Tạo lại ở cuộc mới; cuộc gốc giữ nguyên. */
-    fun regenerateInBranch(turnId: String, newUserText: String?) {
+    fun regenerateInBranch(turnId: String, newUserText: String?, stripThinking: Boolean = false) {
         if (generating.value) return
         viewModelScope.launch {
             // Đợt E: xung đột khi regenerate — như regenerateHere.
@@ -440,6 +478,11 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             }
             try {
                 val r = app.ops.branchForRegenerate(conversationId, turnId, newUserText)
+                // Đợt provider 12/11/2026 (Q2): rẽ nhánh từ cuộc có thinking
+                // của Claude thì bỏ khối thinking cũ ở nhánh (lịch sử đã
+                // đổi — chữ sửa mới hoặc câu trả lời mới — nên khối cũ gắn
+                // với lịch sử cũ sẽ lỗi 400 nếu gửi lại).
+                if (stripThinking) app.ops.stripThinkingSeal(r.conversationId)
                 app.engine.start(r.conversationId, r.turnMap.getValue(turnId))
                 _events.emit(ChatEvent.OpenBranch(r.conversationId))
             } catch (e: Exception) {

@@ -7,9 +7,20 @@ import java.util.UUID
 
 data class BranchResult(val conversationId: String, val turnMap: Map<String, String>)
 
-/** Đợt provider 12/11/2026: thông báo khi user sửa phần bị khóa vì thinking của Claude. */
-const val THINKING_SEAL_MESSAGE =
-    "This chat has used Claude thinking, so the system prompt, tools and earlier messages are locked — changing them would break the reasoning chain. Start a new chat to change them."
+/**
+ * Đợt provider 12/11/2026 (sửa theo quyết định của Duy — KHÔNG chặn hẳn
+ * nữa): khi user sửa thứ sẽ phá vỡ mạch suy luận của Claude thì app tạo
+ * cuộc mới kiểu branch và THÔNG BÁO rõ lý do bằng lời dễ hiểu (không dùng
+ * thuật ngữ nội bộ như "niêm phong" hay "chữ ký"). Cuộc gốc giữ nguyên.
+ */
+const val THINKING_SEAL_BRANCH_MESSAGE =
+    "This chat already has Claude's thinking saved with it, so changing an earlier message would break it. " +
+        "Your change was made in a new chat instead — the original chat is unchanged."
+
+/** Như trên, cho trường hợp sửa thẻ (System/Tools/Free) — thẻ lưu chung cho mọi cuộc. */
+const val THINKING_SEAL_CARD_BRANCH_MESSAGE =
+    "This chat already has Claude's thinking saved with it, so changing this card would break it. " +
+        "The change was saved, and the chat continues in a new copy — the original chat is unchanged."
 
 /** Các thao tác sửa / xóa / tạo lại / rẽ nhánh tin nhắn. */
 class ChatOps(private val db: AppDatabase) {
@@ -116,10 +127,62 @@ class ChatOps(private val db: AppDatabase) {
     suspend fun branchForModelSwitch(conversationId: String): BranchResult {
         val lastSeq = db.messages().maxSeq(conversationId) ?: 0
         val r = branchUpTo(conversationId, lastSeq)
-        val stripped = db.messages().getAll(r.conversationId)
+        stripThinkingSeal(r.conversationId)
+        return r
+    }
+
+    /**
+     * Bỏ khối thinking đã niêm phong ở mọi tin AI của Claude trong một cuộc
+     * (reasoningReplay + reasoningProvider) — dùng khi rẽ nhánh sang cuộc
+     * mới mà lịch sử đã đổi (sửa/xóa/tạo lại), vì khối cũ gắn với lịch sử
+     * cũ nên gửi lại sẽ lỗi 400. Chữ suy luận để đọc (reasoningText) thì
+     * giữ nguyên.
+     */
+    suspend fun stripThinkingSeal(conversationId: String) {
+        val stripped = db.messages().getAll(conversationId)
             .filter { it.reasoningProvider == "anthropic" && it.reasoningReplay != null }
             .map { it.copy(reasoningReplay = null, reasoningProvider = null) }
         if (stripped.isNotEmpty()) db.messages().upsertAll(stripped)
-        return r
+    }
+
+    /**
+     * Rẽ nhánh để sửa một tin trong cuộc có thinking của Claude (Đợt
+     * provider 12/11/2026 — sửa theo quyết định của Duy: không chặn hẳn
+     * nữa, mà tạo cuộc mới kiểu branch + thông báo). Sao chép cuộc đến hết
+     * tin cần sửa (kèm các dòng tool cùng lượt nếu tin là của AI), sửa chữ
+     * của tin đó trên bản sao, và bỏ khối thinking đã niêm phong ở mọi tin
+     * đã sao chép. Các lượt sau tin đó không mang sang cuộc mới — chúng dựa
+     * trên nội dung cũ nên không dùng được nữa. Cuộc gốc giữ nguyên.
+     */
+    suspend fun branchForEdit(conversationId: String, messageId: String, newText: String): BranchResult {
+        val all = db.messages().getAll(conversationId)
+        val row = all.firstOrNull { it.id == messageId } ?: throw IllegalStateException("Message not found.")
+        var last = row.seq
+        for (r in all.filter { it.seq > row.seq }) {
+            if (r.turnId == row.turnId && r.role == "tool") last = r.seq else break
+        }
+        val result = branchUpTo(conversationId, last)
+        // Bản sao giữ nguyên seq của tin gốc nên tìm được theo seq.
+        val copy = db.messages().getAll(result.conversationId).firstOrNull { it.seq == row.seq }
+            ?: throw IllegalStateException("Message not found.")
+        if (copy.text != newText) db.messages().upsert(copy.copy(text = newText, edited = true))
+        stripThinkingSeal(result.conversationId)
+        return result
+    }
+
+    /**
+     * Rẽ nhánh để xóa một lượt trong cuộc có thinking của Claude (Đợt
+     * provider 12/11/2026 — như [branchForEdit]: không chặn hẳn nữa, mà
+     * tạo cuộc mới + thông báo). Sao chép cuộc đến hết lượt TRƯỚC lượt cần
+     * xóa (lượt cần xóa và các lượt sau không mang sang — chúng dựa trên
+     * nội dung sẽ xóa). Cuộc gốc giữ nguyên.
+     */
+    suspend fun branchBeforeTurn(conversationId: String, turnId: String): BranchResult {
+        val rows = db.messages().getAll(conversationId)
+        val firstSeq = rows.filter { it.turnId == turnId }.minOfOrNull { it.seq }
+            ?: throw IllegalStateException("Turn not found.")
+        val result = branchUpTo(conversationId, firstSeq - 1)
+        stripThinkingSeal(result.conversationId)
+        return result
     }
 }

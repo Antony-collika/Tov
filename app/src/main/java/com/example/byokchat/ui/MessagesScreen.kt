@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -66,12 +67,26 @@ import kotlinx.coroutines.withContext
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MessagesScreen(conversationId: String, onBack: () -> Unit) {
+fun MessagesScreen(conversationId: String, onBack: () -> Unit, onOpenBranch: ((String) -> Unit)? = null) {
     val context = LocalContext.current
     val container = context.container
     val vm: ChatViewModel = viewModel(key = conversationId, factory = viewModelFactory {
         initializer { ChatViewModel(container, conversationId) }
     })
+    // Đợt provider 12/11/2026 (Q2): sửa/xóa trong cuộc có thinking của
+    // Claude thì ChatViewModel tạo nhánh mới thay vì chặn — phải nghe
+    // events ở đây như màn chat (mở nhánh + thông báo), nếu không lệnh mở
+    // nhánh sẽ không tới được user.
+    LaunchedEffect(Unit) {
+        vm.events.collect { ev ->
+            when (ev) {
+                // Xóa lượt ở màn này vốn không có Hoàn tác (như trước đây).
+                is ChatEvent.Deleted -> Unit
+                is ChatEvent.OpenBranch -> onOpenBranch?.invoke(ev.id)
+                is ChatEvent.Error -> Toast.makeText(context, ev.message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()

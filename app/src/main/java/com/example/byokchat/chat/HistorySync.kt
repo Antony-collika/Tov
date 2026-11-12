@@ -61,6 +61,12 @@ class HistorySync(
         data class Failed(val error: String) : SyncResult
         /** Sửa ngoài lúc model đang trả lời đã bị ghi đè khi lượt trả lời xong. */
         data object ExternalEditDiscarded : SyncResult
+        /**
+         * Sửa ngoài chạm vào lịch sử đã niêm phong (thinking của Claude) —
+         * không áp vào cuộc gốc; người gọi rẽ nhánh rồi áp vào nhánh, kèm
+         * thông báo (Đợt provider 12/11/2026, Q2).
+         */
+        data class SealedExternalEdit(val parsed: ParsedHistory, val meta: HistoryMeta, val mdHash: String) : SyncResult
     }
 
     private fun hashKey(conversationId: String) = "hash:$conversationId"
@@ -142,10 +148,63 @@ class HistorySync(
                 "history.meta.json has no entry for message \"${missing.id}\". The file was left unchanged.",
             )
         }
+        // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của Duy: không
+        // chặn hẳn cũng không lặng lẽ ghi đè): sửa ngoài mà chạm vào lịch
+        // sử đã niêm phong (đổi chữ tin cũ, xóa tin, hoặc chèn tin vào
+        // giữa) thì KHÔNG áp vào cuộc gốc — người gọi rẽ nhánh rồi áp vào
+        // nhánh, kèm thông báo. Chỉ thêm tin mới vào cuối thì áp thẳng như
+        // cũ (nội dung cũ không đổi nên mạch suy luận còn nguyên).
+        val sealed = db.messages().getAll(conversationId)
+            .any { it.reasoningProvider == "anthropic" && it.reasoningReplay != null }
+        if (sealed && touchesSealedHistory(conversationId, parsed)) {
+            return SyncResult.SealedExternalEdit(parsed, meta, currentHash)
+        }
         val applied = applyParsed(conversationId, parsed, meta)
         storeHash(conversationId, currentHash)
         return if (applied.changed == 0 && applied.deleted == 0) SyncResult.UpToDate
         else SyncResult.Imported(applied.changed, applied.deleted)
+    }
+
+    /**
+     * File sửa ngoài có chạm vào lịch sử đã niêm phong không: đổi chữ tin
+     * cũ, xóa tin cũ, hoặc chèn tin mới vào giữa (trước tin cuối cùng).
+     * Chỉ thêm tin mới vào cuối thì không tính — nội dung cũ không đổi nên
+     * mạch suy luận còn nguyên. Điều kiện xóa khớp với [applyParsed].
+     */
+    private suspend fun touchesSealedHistory(
+        conversationId: String,
+        parsed: ParsedHistory,
+    ): Boolean {
+        val rows = db.messages().getAll(conversationId)
+        val byId = rows.associateBy { it.id }
+        val parsedById = parsed.messages.associateBy { it.id }
+        val knownTurns = (1 until parsed.nextTurn).toSet()
+        val maxTurnNo = rows.maxOfOrNull { it.turnNo } ?: 0
+        // Đổi chữ tin cũ.
+        if (parsed.messages.any { pm -> byId[pm.id]?.let { it.text != pm.text } == true }) return true
+        // Chèn tin mới vào giữa (không phải thêm vào cuối).
+        if (parsed.messages.any { pm -> pm.id !in byId && pm.turnNo <= maxTurnNo }) return true
+        // Xóa tin cũ.
+        if (rows.any { row ->
+                (row.role == "user" || row.role == "assistant") &&
+                    row.turnNo > 0 && row.turnNo in knownTurns &&
+                    row.status != "streaming" && row.id !in parsedById
+            }) return true
+        return false
+    }
+
+    /**
+     * Áp nội dung file đã parse vào một cuộc khác (dùng cho rẽ nhánh khi
+     * sửa ngoài chạm lịch sử niêm phong), rồi ghi nhận hash cho cuộc đó.
+     */
+    suspend fun importInto(conversationId: String, parsed: ParsedHistory, meta: HistoryMeta, mdHash: String) {
+        applyParsed(conversationId, parsed, meta)
+        storeHash(conversationId, mdHash)
+    }
+
+    /** Ghi nhận file đã xem cho một cuộc (để lần mở sau không áp lại cùng một bản sửa). */
+    suspend fun markFileSeen(conversationId: String, mdHash: String) {
+        storeHash(conversationId, mdHash)
     }
 
     private data class AppliedCounts(val changed: Int, val deleted: Int)
