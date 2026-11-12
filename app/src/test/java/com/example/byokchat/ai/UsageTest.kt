@@ -21,11 +21,29 @@ class UsageTest {
 
     @Test
     fun parsesOpenAiUsage() {
-        val u = Usage.fromOpenAi(obj("""{"prompt_tokens":300,"completion_tokens":40,"prompt_tokens_details":{"cached_tokens":250}}"""))
+        val u = Usage.fromOpenAi(obj("""{"prompt_tokens":300,"completion_tokens":40,"prompt_tokens_details":{"cached_tokens":250},"completion_tokens_details":{"reasoning_tokens":15}}"""))
         assertEquals(300, u.inputTokens)
         assertEquals(40, u.outputTokens)
         assertEquals(250, u.cachedTokens)
+        assertEquals(15, u.reasoningTokens)
         assertNull(u.cacheCreationTokens)
+    }
+
+    @Test
+    fun parsesResponsesUsage() {
+        val u = Usage.fromResponses(obj("""{"input_tokens":100,"output_tokens":50,"input_tokens_details":{"cached_tokens":80,"cache_write_tokens":5},"output_tokens_details":{"reasoning_tokens":30},"total_tokens":150}"""))
+        assertEquals(100, u.inputTokens)
+        assertEquals(50, u.outputTokens)
+        assertEquals(80, u.cachedTokens)
+        assertEquals(5, u.cacheCreationTokens)
+        assertEquals(30, u.reasoningTokens)
+        assertEquals("[usage] prompt 100 · cached 80 · cache write 5 · completion 50 · reasoning 30", u.summaryLine())
+    }
+
+    @Test
+    fun parsesClaudeThinkingTokens() {
+        val u = Usage.fromClaude(obj("""{"input_tokens":1200,"output_tokens":56,"output_tokens_details":{"thinking_tokens":40}}"""))
+        assertEquals(40, u.reasoningTokens)
     }
 
     @Test
