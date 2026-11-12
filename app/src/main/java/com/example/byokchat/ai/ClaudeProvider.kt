@@ -11,44 +11,44 @@ import kotlinx.serialization.json.*
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
+/**
+ * Chế độ thinking theo model (Đợt provider 12/11/2026 — theo bảng cấu hình
+ * từng model trong tài liệu Anthropic, đọc 12/11/2026):
+ * - MANUAL: model 4.5 trở về trước — `thinking: {type: "enabled",
+ *   budget_tokens}`; gửi `type: "adaptive"` là lỗi 400.
+ * - ADAPTIVE: model 4.6/4.7/4.8 — `thinking: {type: "adaptive"}` (+
+ *   output_config.effort quyết độ sâu); manual đã deprecated (4.6) hoặc
+ *   lỗi 400 (4.7/4.8). Thinking tắt theo mặc định.
+ * - ADAPTIVE_ALWAYS_ON: model 5.x (+ Mythos Preview) — thinking bật theo
+ *   mặc định của hãng, manual là lỗi 400; tắt cũng bị từ chối ở hầu hết
+ *   model này nên công tắc tắt chỉ có nghĩa là "app không gửi thêm cấu
+ *   hình" (xem ghi chú ở thẻ Metadata).
+ * Tên model do user gõ tay nên chỉ đoán theo tên (cùng cách app đoán
+ * giới hạn ngữ cảnh theo tên model): tên không nhận ra thì coi là model
+ * hiện tại (adaptive) — mọi model mới đều chỉ còn adaptive; nếu đoán sai
+ * thì API báo 400 rõ ràng chứ app không tự đổi lặng lẽ.
+ */
+internal enum class ClaudeThinkingMode { MANUAL, ADAPTIVE, ADAPTIVE_ALWAYS_ON }
+
+internal fun claudeThinkingModeFor(model: String): ClaudeThinkingMode {
+    val m = model.lowercase()
+    if (Regex("""claude[-_ ]?(opus|sonnet|haiku|fable|mythos)[-_ ]?5([.-]|$)""").containsMatchIn(m)) {
+        return ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON
+    }
+    if (Regex("""claude[-_ ]?5([.-]|$)""").containsMatchIn(m)) return ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON
+    if ("mythos-preview" in m) return ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON
+    if (Regex("""4[-_. ]?[678]""").containsMatchIn(m)) return ClaudeThinkingMode.ADAPTIVE
+    if (Regex("""4[-_. ]?5""").containsMatchIn(m)) return ClaudeThinkingMode.MANUAL
+    if (Regex("""claude[-_ ]?3""").containsMatchIn(m)) return ClaudeThinkingMode.MANUAL
+    if (Regex("""4[-_. ]?[0-4]""").containsMatchIn(m)) return ClaudeThinkingMode.MANUAL
+    return ClaudeThinkingMode.ADAPTIVE
+}
+
 class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLog? = null) : AiProvider {
     private val base: String get() = cfg.effectiveBaseUrl().trimEnd('/')
 
     private companion object {
         val CACHE_MARK: JsonElement = buildJsonObject { put("type", "ephemeral") }
-    }
-
-    /**
-     * Chế độ thinking theo model (Đợt provider 12/11/2026 — theo bảng cấu hình
-     * từng model trong tài liệu Anthropic, đọc 12/11/2026):
-     * - MANUAL: model 4.5 trở về trước — `thinking: {type: "enabled",
-     *   budget_tokens}`; gửi `type: "adaptive"` là lỗi 400.
-     * - ADAPTIVE: model 4.6/4.7/4.8 — `thinking: {type: "adaptive"}` (+
-     *   output_config.effort quyết độ sâu); manual đã deprecated (4.6) hoặc
-     *   lỗi 400 (4.7/4.8). Thinking tắt theo mặc định.
-     * - ADAPTIVE_ALWAYS_ON: model 5.x (+ Mythos Preview) — thinking bật theo
-     *   mặc định của hãng, manual là lỗi 400; tắt cũng bị từ chối ở hầu hết
-     *   model này nên công tắc tắt chỉ có nghĩa là "app không gửi thêm cấu
-     *   hình" (xem ghi chú ở thẻ Metadata).
-     * Tên model do user gõ tay nên chỉ đoán theo tên (cùng cách app đoán
-     * giới hạn ngữ cảnh theo tên model): tên không nhận ra thì coi là model
-     * hiện tại (adaptive) — mọi model mới đều chỉ còn adaptive; nếu đoán sai
-     * thì API báo 400 rõ ràng chứ app không tự đổi lặng lẽ.
-     */
-    internal enum class ThinkingMode { MANUAL, ADAPTIVE, ADAPTIVE_ALWAYS_ON }
-
-    internal fun thinkingModeFor(model: String): ThinkingMode {
-        val m = model.lowercase()
-        if (Regex("""claude[-_ ]?(opus|sonnet|haiku|fable|mythos)[-_ ]?5([.-]|$)""").containsMatchIn(m)) {
-            return ThinkingMode.ADAPTIVE_ALWAYS_ON
-        }
-        if (Regex("""claude[-_ ]?5([.-]|$)""").containsMatchIn(m)) return ThinkingMode.ADAPTIVE_ALWAYS_ON
-        if ("mythos-preview" in m) return ThinkingMode.ADAPTIVE_ALWAYS_ON
-        if (Regex("""4[-_. ]?[678]""").containsMatchIn(m)) return ThinkingMode.ADAPTIVE
-        if (Regex("""4[-_. ]?5""").containsMatchIn(m)) return ThinkingMode.MANUAL
-        if (Regex("""claude[-_ ]?3""").containsMatchIn(m)) return ThinkingMode.MANUAL
-        if (Regex("""4[-_. ]?[0-4]""").containsMatchIn(m)) return ThinkingMode.MANUAL
-        return ThinkingMode.ADAPTIVE
     }
 
     private fun Request.Builder.withAuth(): Request.Builder =
@@ -196,8 +196,8 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
             put("output_config", buildJsonObject { put("effort", effort) })
         }
         if (request.metadata.thinkingEnabled) {
-            when (thinkingModeFor(request.model)) {
-                ThinkingMode.MANUAL -> {
+            when (claudeThinkingModeFor(request.model)) {
+                ClaudeThinkingMode.MANUAL -> {
                     val budget = request.metadata.thinkingBudget
                     if (budget < 1024 || budget >= request.maxOutputTokens) {
                         throw AiException(
@@ -211,7 +211,7 @@ class ClaudeProvider(private val cfg: ProviderConfig, private val log: RequestLo
                         put("display", "summarized")
                     })
                 }
-                ThinkingMode.ADAPTIVE, ThinkingMode.ADAPTIVE_ALWAYS_ON -> put("thinking", buildJsonObject {
+                ClaudeThinkingMode.ADAPTIVE, ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON -> put("thinking", buildJsonObject {
                     put("type", "adaptive")
                     put("display", "summarized")
                 })

@@ -51,7 +51,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
+import com.example.byokchat.ai.ClaudeThinkingMode
 import com.example.byokchat.ai.MetadataParams
+import com.example.byokchat.ai.claudeThinkingModeFor
 import com.example.byokchat.ai.ReasoningEffort
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.FreeRole
@@ -128,6 +130,10 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var effort by remember(cardId) { mutableStateOf(savedMetadata.effort) }
     var stopText by remember(cardId) { mutableStateOf(savedMetadata.stopSequences.joinToString("\n")) }
     var keepSignature by remember(cardId) { mutableStateOf(savedMetadata.keepThoughtSignature) }
+    // Đợt provider 12/11/2026: thinking của Claude (mặc định TẮT — câu hỏi mở
+    // cho Duy, xem báo cáo cuối).
+    var thinkingEnabled by remember(cardId) { mutableStateOf(savedMetadata.thinkingEnabled) }
+    var thinkingBudgetText by remember(cardId) { mutableStateOf(savedMetadata.thinkingBudget.toString()) }
     var maxTokens by remember(cardId) { mutableStateOf((currentProvider?.maxOutputTokens ?: 8192).toString()) }
     val stopLines = stopText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     val stopsValid = stopLines.size <= 4
@@ -138,6 +144,16 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     val lastTurnsValid = lastTurns.toIntOrNull()?.let { it in 1..100 } == true
     // Đợt fix 11/11/2026 (I1): file thẻ trỏ tới có thể ở bất cứ đâu, đuôi
     // bất kỳ — không còn kiểm tra đuôi .md nữa.
+    // Đợt provider 12/11/2026: chế độ thinking của model Claude đang chọn
+    // (để quyết định có hiện ô budget không). Model chưa chọn thì coi như
+    // cần budget (còn đặt được giá trị trước).
+    val thinkingMode = if (providerType == ProviderType.CLAUDE) claudeThinkingModeFor(currentModel ?: "") else null
+    val showThinkingBudget = thinkingEnabled && (thinkingMode == ClaudeThinkingMode.MANUAL || currentModel.isNullOrBlank())
+    // Đợt provider 12/11/2026: budget thinking (chỉ khi ô budget đang hiện)
+    // phải ≥ 1024 token và nhỏ hơn độ dài tối đa của câu trả lời — quy định
+    // của Anthropic, sai thì báo rõ chứ không tự sửa.
+    val thinkingBudgetValid = !showThinkingBudget ||
+        (thinkingBudgetText.toIntOrNull()?.let { it in 1024 until (maxTokens.toIntOrNull() ?: 8192) } ?: false)
     val dirty = card != null && (
         text != card.text || label != card.label || role != card.role || policy != card.policy ||
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
@@ -147,9 +163,11 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             keepSignature != savedMetadata.keepThoughtSignature ||
+            thinkingEnabled != savedMetadata.thinkingEnabled ||
+            thinkingBudgetText != savedMetadata.thinkingBudget.toString() ||
             (currentProvider != null && maxTokens != currentProvider.maxOutputTokens.toString())
         )
-    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && stopsValid && maxTokensValid
+    val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && stopsValid && maxTokensValid && thinkingBudgetValid
     // Thẻ Time/Last turn không có gì để Save (sửa trực tiếp hoặc chỉ đọc).
     // Thẻ Tools CÓ Save (danh sách file) từ Đợt E.
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.LAST_TURN
@@ -213,6 +231,8 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     effort = effort,
                     stopSequences = stopLines.take(4),
                     keepThoughtSignature = keepSignature,
+                    thinkingEnabled = thinkingEnabled,
+                    thinkingBudget = thinkingBudgetText.toIntOrNull() ?: savedMetadata.thinkingBudget,
                 )
             )
             val cfg = currentProvider
@@ -342,41 +362,71 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // D3: hãng OpenAI(-compatible) không suy nghĩ và dùng
-                    // tool cùng lúc được trên Chat Completions — app luôn để
-                    // tool bật và không hiện lựa chọn thinking ở đây; hãng
-                    // khác (Claude/Gemini) thì thinking với tool dùng chung
-                    // được nên vẫn hiện lựa chọn.
-                    if (providerType == ProviderType.OPENAI || providerType == ProviderType.CUSTOM) {
-                        Text(
-                            "Thinking is off for this provider, so the tools always work. " +
-                                "This provider can't think and use tools at the same time, " +
-                                "so the app keeps the tools on.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // Đợt provider 12/11/2026: mọi hãng đều có lựa chọn mức
+                    // suy luận (OpenAI dùng Responses API — suy luận với tool
+                    // dùng chung được; DeepSeek gửi lại reasoning_content;
+                    // Claude/Gemini như cũ). D3 cũ (Chat Completions ép
+                    // effort "none" cho OpenAI) đã bỏ.
+                    Text("How hard the model thinks", style = MaterialTheme.typography.labelLarge)
+                    Text(
+                        "How hard the model thinks before it answers. Harder thinking " +
+                            "takes longer and costs more, but can give better answers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    savedMetadata.effortOptionsFor(providerType).forEach { option ->
+                        PolicyOption(
+                            selected = effort == option,
+                            title = option.name.lowercase(),
+                            desc = when (option) {
+                                ReasoningEffort.NONE -> "As little thinking as the provider allows."
+                                ReasoningEffort.MINIMAL -> "The least thinking."
+                                ReasoningEffort.LOW -> "A little thinking — faster answers."
+                                ReasoningEffort.MEDIUM -> "Balanced (default)."
+                                ReasoningEffort.HIGH -> "More thinking."
+                                ReasoningEffort.XHIGH -> "Very deep thinking."
+                                ReasoningEffort.MAX -> "Maximum thinking."
+                            },
+                            onClick = { effort = option },
                         )
-                    } else {
-                        Text("How hard the model thinks", style = MaterialTheme.typography.labelLarge)
-                        Text(
-                            "How hard the model thinks before it answers. Harder thinking " +
-                                "takes longer and costs more, but can give better answers.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    }
+                    // Đợt provider 12/11/2026: thinking của Claude — chỉ
+                    // hãng này mới có công tắc riêng (OpenAI/DeepSeek dùng
+                    // chung lựa chọn "How hard the model thinks" ở trên).
+                    if (providerType == ProviderType.CLAUDE) {
+                        SwitchRow(
+                            title = "Extended thinking",
+                            desc = "Let Claude think before it answers. The thinking is shown in the chat under \"Suy luận\" and sent back to Claude with the next request.",
+                            checked = thinkingEnabled,
+                            onChange = { thinkingEnabled = it },
                         )
-                        savedMetadata.effortOptionsFor(providerType).forEach { option ->
-                            PolicyOption(
-                                selected = effort == option,
-                                title = option.name.lowercase(),
-                                desc = when (option) {
-                                    ReasoningEffort.NONE -> "As little thinking as the provider allows."
-                                    ReasoningEffort.MINIMAL -> "The least thinking."
-                                    ReasoningEffort.LOW -> "A little thinking — faster answers."
-                                    ReasoningEffort.MEDIUM -> "Balanced (default)."
-                                    ReasoningEffort.HIGH -> "More thinking."
-                                    ReasoningEffort.XHIGH -> "Very deep thinking."
-                                    ReasoningEffort.MAX -> "Maximum thinking."
+                        if (thinkingEnabled && thinkingMode == ClaudeThinkingMode.ADAPTIVE) {
+                            Text(
+                                "This model manages its own thinking depth — \"How hard the model thinks\" above controls it. No separate budget for this model.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (thinkingEnabled && thinkingMode == ClaudeThinkingMode.ADAPTIVE_ALWAYS_ON) {
+                            Text(
+                                "This model thinks by default — Anthropic doesn't let it be turned off. Turning the switch off only stops the app from asking for a readable summary.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (showThinkingBudget) {
+                            OutlinedTextField(
+                                value = thinkingBudgetText,
+                                onValueChange = { thinkingBudgetText = it.filter { ch -> ch.isDigit() }.take(7) },
+                                label = { Text("Thinking budget (tokens)") },
+                                singleLine = true,
+                                isError = !thinkingBudgetValid,
+                                supportingText = {
+                                    if (!thinkingBudgetValid) Text("Enter a number from 1024 up to the longest answer above, minus 1.")
+                                    else Text("How many tokens Claude may spend thinking. At least 1024, and less than the longest answer.")
                                 },
-                                onClick = { effort = option },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.fillMaxWidth(),
                             )
                         }
                     }
