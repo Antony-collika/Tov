@@ -46,6 +46,9 @@ import com.example.byokchat.container
 import com.example.byokchat.data.ProviderType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 
 /** Văn bản dài thì thu gọn, bấm để đọc hết (dùng chung cho Inspector và Request log). */
 @Composable
@@ -259,7 +262,7 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
         } else {
             sentGroups.forEach { (t, msgs) ->
                 item { Text("Turn T$t", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp)) }
-                items(msgs) { m -> MessageCard(t, m) }
+                items(msgs) { m -> MessageCard(t, m, metadata, type, a.toolDefs.isNotEmpty()) }
             }
         }
         if (droppedGroups.isNotEmpty()) {
@@ -274,7 +277,7 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
             }
             droppedGroups.forEach { (t, msgs) ->
                 item { Text("Turn T$t (not sent)", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 8.dp)) }
-                items(msgs) { m -> MessageCard(t, m) }
+                items(msgs) { m -> MessageCard(t, m, metadata, type, a.toolDefs.isNotEmpty()) }
             }
         }
         item {
@@ -290,8 +293,91 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
     }
 }
 
+/**
+ * Preview phải thể hiện đúng lần gửi tiếp theo sẽ gửi (quyết định Duy
+ * 12/11/2026): suy luận của một lượt chỉ được coi là "sẽ gửi" khi hãng
+ * thật sự gửi lại nó — cùng luật với code gửi (ResponsesProvider cho
+ * OpenAI, OpenAiProvider cho Custom). Trả null khi lượt này không có suy
+ * luận để hiện. Gemini không lưu suy luận vào reasoningText/reasoningReplay
+ * (ContextBuilder bỏ) nên không bao giờ vào đây; chữ ký suy luận của
+ * Gemini là trường riêng (thoughtSignature), Preview không hiện nó.
+ */
+internal enum class ReasoningSendStatus {
+    SENT,
+    /** OpenAI: công tắc "Resend saved reasoning" tắt và đây là lượt thường. */
+    NOT_SENT_REASONING_OFF,
+    /** Custom: request không có tools nên reasoning_content không được gửi. */
+    NOT_SENT_NO_TOOLS,
+    /** Suy luận đã lưu là của hãng khác, hãng này không gửi lại được. */
+    NOT_SENT_OTHER_PROVIDER,
+    /** Chỉ còn chữ suy luận đọc được, không có item suy luận để gửi lại (OpenAI). */
+    NOT_SENT_NO_REPLAY,
+    /** Cả tin nhắn này cũng không được gửi (vượt ngân sách / ngoài số lượt). */
+    NOT_SENT_MESSAGE_DROPPED,
+}
+
+/** Item có type cho trước có trong replay JSON đã lưu không (OpenAI). */
+private fun replayHasItemType(replay: String?, itemType: String): Boolean {
+    if (replay == null) return false
+    val items = runCatching { Json.parseToJsonElement(replay).jsonArray }.getOrNull() ?: return false
+    return items.any { (it as? JsonObject)?.get("type")?.jsonPrimitive?.contentOrNull == itemType }
+}
+
+/**
+ * Suy luận của tin này có được gửi ở lần gửi tiếp theo không — cùng luật
+ * với code gửi, để Preview không nói sai:
+ * - OpenAI (Responses): gửi lại item reasoning khi công tắc
+ *   [MetadataParams.replayReasoning] bật, hoặc lượt này có tool call
+ *   (OpenAI bắt buộc reasoning đi kèm kết quả tool call). Chỉ item của
+ *   hãng openai mới dùng được. Replay JSON được ghi cho mọi câu trả lời
+ *   (kể cả khi không suy luận) nên phải kiểm tra trong đó thật sự có item
+ *   reasoning thì mới coi là "đã suy luận".
+ * - Custom (Chat Completions): gửi reasoningText làm reasoning_content chỉ
+ *   khi request có tools và suy luận là của hãng tương thích. Custom không
+ *   dùng replay JSON.
+ * - Gemini: không có suy luận ở đây (xem trên).
+ */
+internal fun reasoningSendStatus(
+    m: AssembledMessage,
+    metadata: MetadataParams,
+    type: ProviderType,
+    toolsOffered: Boolean,
+): ReasoningSendStatus? {
+    val msg = m.message
+    val hasText = !msg.reasoningText.isNullOrBlank()
+    val replayHasReasoning = replayHasItemType(msg.reasoningReplay, "reasoning")
+    if (!hasText && !replayHasReasoning) return null
+    if (!m.sent) return ReasoningSendStatus.NOT_SENT_MESSAGE_DROPPED
+    return when (type) {
+        ProviderType.OPENAI -> {
+            if (msg.reasoningProvider != "openai") return ReasoningSendStatus.NOT_SENT_OTHER_PROVIDER
+            if (!replayHasReasoning) return ReasoningSendStatus.NOT_SENT_NO_REPLAY
+            val hasToolCall = msg.toolCalls.isNotEmpty() || replayHasItemType(msg.reasoningReplay, "function_call")
+            if (metadata.replayReasoning || hasToolCall) ReasoningSendStatus.SENT
+            else ReasoningSendStatus.NOT_SENT_REASONING_OFF
+        }
+        ProviderType.CUSTOM -> {
+            if (!hasText) return null // Custom không dùng replay JSON.
+            if (msg.reasoningProvider != "custom" && msg.reasoningProvider != "deepseek") return ReasoningSendStatus.NOT_SENT_OTHER_PROVIDER
+            if (!toolsOffered) return ReasoningSendStatus.NOT_SENT_NO_TOOLS
+            ReasoningSendStatus.SENT
+        }
+        ProviderType.GEMINI -> null
+    }
+}
+
+/** Lý do suy luận không được gửi, để hiện trong Preview (chỉ gọi khi không gửi). */
+internal fun reasoningNotSentReason(status: ReasoningSendStatus, dropReason: String?): String = when (status) {
+    ReasoningSendStatus.SENT -> "" // Không dùng — chỉ gọi khi status != SENT.
+    ReasoningSendStatus.NOT_SENT_REASONING_OFF -> "Resend saved reasoning is off"
+    ReasoningSendStatus.NOT_SENT_NO_TOOLS -> "no tools offered, so reasoning isn't sent back"
+    ReasoningSendStatus.NOT_SENT_OTHER_PROVIDER -> "saved reasoning is from another provider"
+    ReasoningSendStatus.NOT_SENT_NO_REPLAY -> "no saved reasoning to send back"
+    ReasoningSendStatus.NOT_SENT_MESSAGE_DROPPED -> "this message isn't sent (${dropReason ?: "dropped"})"
+}
+
 @Composable
-private fun MessageCard(turn: Int, m: AssembledMessage) {
+private fun MessageCard(turn: Int, m: AssembledMessage, metadata: MetadataParams, type: ProviderType, toolsOffered: Boolean) {
     val msg = m.message
     val label = when (msg.role) {
         Role.USER -> "user"
@@ -310,18 +396,34 @@ private fun MessageCard(turn: Int, m: AssembledMessage) {
             } else {
                 ExpandableText(msg.text)
             }
-            // Đợt provider 12/11/2026: suy luận của lượt này cũng là một phần
-            // của request gửi đi (hãng nào cũng gửi lại) nên Preview hiện nó.
-            // Không có chữ đọc được thì ghi rõ là khối suy luận vẫn được gửi
-            // lại, chỉ không có bản tóm tắt.
-            if (!msg.reasoningText.isNullOrBlank()) {
-                Text("Suy luận", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                ExpandableText(msg.reasoningText)
-            } else if (msg.reasoningReplay != null) {
-                Text(
-                    "Thinking was used in this turn — sent back to the provider, no readable summary.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            // Suy luận của lượt này — chỉ hiện là "được gửi" khi lần gửi tiếp
+            // theo thật sự gửi lại nó (xem reasoningSendStatus). Không được
+            // gửi thì ghi rõ lý do thay vì im lặng bỏ qua hay nói sai là đã gửi.
+            when (val status = reasoningSendStatus(m, metadata, type, toolsOffered)) {
+                null -> Unit
+                ReasoningSendStatus.SENT -> {
+                    if (!msg.reasoningText.isNullOrBlank()) {
+                        Text("Suy luận", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        ExpandableText(msg.reasoningText)
+                    } else {
+                        Text(
+                            "Thinking was used in this turn — sent back to the provider, no readable summary.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+                else -> {
+                    val reason = reasoningNotSentReason(status, m.dropReason)
+                    if (!msg.reasoningText.isNullOrBlank()) {
+                        Text("Suy luận — not sent: $reason", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        ExpandableText(msg.reasoningText)
+                    } else {
+                        Text(
+                            "Thinking was used in this turn — not sent: $reason.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
             }
         }
     }
@@ -391,12 +493,28 @@ private fun inspectorMarkdown(a: AssembledRequest, ready: PreviewResult.Ready): 
         }
         appendLine("### T$turn · $label" + if (!m.sent) " · not sent (${m.dropReason ?: "dropped"})" else "")
         appendLine(m.message.text)
-        // Đợt provider 12/11/2026: suy luận của lượt này (như trên màn hình).
-        if (!m.message.reasoningText.isNullOrBlank()) {
-            appendLine("Suy luận:")
-            appendLine(m.message.reasoningText)
-        } else if (m.message.reasoningReplay != null) {
-            appendLine("(Thinking was used in this turn — sent back to the provider, no readable summary.)")
+        // Suy luận của lượt này — cùng luật hiển thị với màn hình (xem
+        // reasoningSendStatus): chỉ ghi "sent back" khi lần gửi tiếp theo
+        // thật sự gửi lại nó, không được gửi thì ghi rõ lý do.
+        when (val status = reasoningSendStatus(m, metadata, type, a.toolDefs.isNotEmpty())) {
+            null -> Unit
+            ReasoningSendStatus.SENT -> {
+                if (!m.message.reasoningText.isNullOrBlank()) {
+                    appendLine("Suy luận:")
+                    appendLine(m.message.reasoningText)
+                } else {
+                    appendLine("(Thinking was used in this turn — sent back to the provider, no readable summary.)")
+                }
+            }
+            else -> {
+                val reason = reasoningNotSentReason(status, m.dropReason)
+                if (!m.message.reasoningText.isNullOrBlank()) {
+                    appendLine("Suy luận — not sent: $reason")
+                    appendLine(m.message.reasoningText)
+                } else {
+                    appendLine("(Thinking was used in this turn — not sent: $reason.)")
+                }
+            }
         }
     }
     if (a.droppedTurnIds.isNotEmpty()) {
