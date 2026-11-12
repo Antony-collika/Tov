@@ -295,7 +295,9 @@ class ChatEngine(
             cancelled?.let { throw it }
             if (error != null || calls.isEmpty()) {
                 notifyFinished(conversationId, displayTitle(conv.title), success = error == null && text.isNotEmpty(), answer = text.toString())
-                exportHistory(conversationId, turnNo)
+                // Ghi file ở nền (Đợt fix 12/11/2026 — nút gửi): trả quyền cho
+                // user ngay, không chờ ghi history.md xong mới tắt nút gửi.
+                exportHistoryInBackground(conversationId, turnNo)
                 return
             }
 
@@ -314,7 +316,8 @@ class ChatEngine(
                     )
                 )
                 notifyFinished(conversationId, displayTitle(conv.title), success = false, answer = "")
-                exportHistory(conversationId, turnNo)
+                // Ghi file ở nền (Đợt fix 12/11/2026 — nút gửi): như trên.
+                exportHistoryInBackground(conversationId, turnNo)
                 return
             }
             for (call in calls) {
@@ -356,6 +359,10 @@ class ChatEngine(
      * Xuất sau khi một lượt vừa xong (Đợt fix 12/11/2026): thử append lượt đó
      * vào cuối file trước; không append được thì ghi đủ. Sửa giữa (edit/xóa/
      * hoàn tác) thì dùng [exportHistory] không số lượt — luôn ghi đủ.
+     *
+     * Đợt fix 12/11/2026 (nút gửi): hàm này CHỈ gọi qua
+     * [exportHistoryInBackground] ở cuối lượt — không chờ ghi file xong mới
+     * trả quyền cho user.
      */
     suspend fun exportHistory(conversationId: String, turnNo: Int) {
         if (historySync != null) {
@@ -365,6 +372,20 @@ class ChatEngine(
         }
         val f = fs ?: return
         HistoryExporter.exportHistory(f, db, conversationId)
+    }
+
+    /**
+     * Ghi history.md + history.meta.json ở nền sau khi một lượt xong (Đợt fix
+     * 12/11/2026 — nút gửi): `run()` trả về ngay để nút gửi trở lại, file ghi
+     * xong ở nền trong scope của engine (sống lâu hơn từng coroutine `run()`),
+     * nên user gõ/bấm gửi lượt tiếp theo được luôn. Tin đã lưu vào Room TRƯỚC
+     * khi trả về nên dù ghi file còn đang chạy nền thì tin vẫn an toàn. Các
+     * lần ghi xếp hàng một trong HistorySync (writeMutex) nên không đụng nhau
+     * khi user gửi lượt mới trong lúc lượt cũ chưa ghi xong. Best-effort như
+     * [exportHistory]: lỗi ghi được nuốt bên trong, không ném ra ngoài.
+     */
+    private fun exportHistoryInBackground(conversationId: String, turnNo: Int) {
+        scope.launch { exportHistory(conversationId, turnNo) }
     }
 
     private fun notifyFinished(conversationId: String, title: String, success: Boolean, answer: String) {

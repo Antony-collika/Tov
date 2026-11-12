@@ -8,6 +8,8 @@ import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.encodeImages
 import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
@@ -52,6 +54,19 @@ class HistorySync(
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
     private val headingRx = Regex("^## T(\\d+) (user|assistant)\\s*$")
+
+    /**
+     * Khóa ghi file: các lần ghi history.md + history.meta.json (appendTurn /
+     * export) chạy lần lượt, theo thứ tự, không chạy chồng lên nhau. Cần thiết
+     * từ khi ChatEngine ghi file ở nền sau mỗi lượt (Đợt fix 12/11/2026 — nút
+     * gửi): user có thể gửi lượt N+1 trong lúc lượt N chưa ghi xong; không có
+     * khóa này thì lượt N+1 có thể đọc file cũ (thiếu lượt N) rồi ghi trước
+     * lượt N, làm file lộn thứ tự. Mutex là FIFO nên các lần ghi chạy đúng
+     * thứ tự yêu cầu. Chỉ khóa ĐƯỜNG GHI — đường đọc (syncOnOpen) không khóa,
+     * vì đọc file dở dang thì chốt meta / lỗi parse sẽ từ chối sạch, không
+     * làm hỏng Room, và lần đồng bộ sau sẽ thử lại.
+     */
+    private val writeMutex = Mutex()
 
     sealed interface SyncResult {
         /** File khớp với Room (hoặc chưa có gì để đồng bộ). */
@@ -380,7 +395,9 @@ class HistorySync(
      * (vd chưa chọn thư mục, mất quyền) thay vì làm hỏng chat. Ghi xong thì
      * cập nhật hash để lần mở sau không parse lại chính file mình vừa ghi.
      */
-    suspend fun export(conversationId: String): Boolean {
+    suspend fun export(conversationId: String): Boolean = writeMutex.withLock { exportLocked(conversationId) }
+
+    private suspend fun exportLocked(conversationId: String): Boolean {
         return runCatching {
             val conv = db.conversations().get(conversationId) ?: return false
             val rows = db.messages().getAll(conversationId)
@@ -418,7 +435,10 @@ class HistorySync(
      * Trả false khi không append được (người gọi ghi đủ thay thế). Ghi xong
      * thì verify bằng đọc lại cả hai file rồi mới cập nhật hash.
      */
-    suspend fun appendTurn(conversationId: String, turnNo: Int): Boolean {
+    suspend fun appendTurn(conversationId: String, turnNo: Int): Boolean =
+        writeMutex.withLock { appendTurnLocked(conversationId, turnNo) }
+
+    private suspend fun appendTurnLocked(conversationId: String, turnNo: Int): Boolean {
         return runCatching {
             val conv = db.conversations().get(conversationId) ?: return false
             val rows = db.messages().getAll(conversationId)
