@@ -12,6 +12,9 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.security.MessageDigest
 import java.util.UUID
 
@@ -42,6 +45,7 @@ class HistorySync(
     private val prefs = context.applicationContext.getSharedPreferences("history_sync", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
+    private val headingRx = Regex("^## T(\\d+) (user|assistant)\\s*$")
 
     sealed interface SyncResult {
         /** File khớp với Room (hoặc chưa có gì để đồng bộ). */
@@ -280,8 +284,11 @@ class HistorySync(
         return runCatching {
             val conv = db.conversations().get(conversationId) ?: return false
             val rows = db.messages().getAll(conversationId)
-            val md = HistoryExporter.renderHistory(conv, rows)
-            val meta = HistoryExporter.renderMeta(conv, rows)
+            // Render trên IO: dựng toàn bộ history.md + meta của một cuộc dài
+            // trên luồng gọi (có thể là Main) sẽ giật (Đợt fix 12/11/2026).
+            val (md, meta) = withContext(Dispatchers.IO) {
+                HistoryExporter.renderHistory(conv, rows) to HistoryExporter.renderMeta(conv, rows)
+            }
             withContext(Dispatchers.IO) {
                 fs.writeSessionText(HistoryExporter.historyPath(conv), md)
                 fs.writeSessionText(HistoryExporter.metaPath(conv), meta)
@@ -293,6 +300,82 @@ class HistorySync(
             storeHash(conversationId, hashOf(md))
             true
         }.getOrDefault(false)
+    }
+
+    /**
+     * Ghi thêm một lượt vừa xong vào cuối history.md + history.meta.json
+     * (Đợt fix 12/11/2026) — thay vì ghi lại toàn bộ hai file sau mỗi lượt.
+     * Chỉ dùng khi lượt vừa xong là phần đuôi mới duy nhất; mọi nghi ngờ đều
+     * quay về ghi đủ ([export]) để tự sửa:
+     * - file .md hiện tại phải đúng hash đã lưu (không có sửa ngoài chưa sync);
+     * - file meta phải đã là JSONL v2 (file cũ v1 thì ghi đủ một lần để đổi format);
+     * - lượt phải chưa có trong file (số lượt lớn nhất trong file < turnNo) —
+     *   vd regenerate chạy lại cùng số lượt thì không append;
+     * - lượt phải đã xong (có assistant trả lời).
+     * Trả false khi không append được (người gọi ghi đủ thay thế). Ghi xong
+     * thì verify bằng đọc lại cả hai file rồi mới cập nhật hash.
+     */
+    suspend fun appendTurn(conversationId: String, turnNo: Int): Boolean {
+        return runCatching {
+            val conv = db.conversations().get(conversationId) ?: return false
+            val rows = db.messages().getAll(conversationId)
+            val stored = storedHash(conversationId) ?: return false
+            val (section, metaLines) = withContext(Dispatchers.IO) {
+                HistoryExporter.renderTurnSection(turnNo, rows) to
+                    HistoryExporter.renderMetaLines(turnNo, rows)
+            }
+            val mdSection = section ?: return false
+            val lines = metaLines ?: return false
+            val newHash: String? = withContext(Dispatchers.IO) {
+                val mdPath = HistoryExporter.historyPath(conv)
+                val metaPath = HistoryExporter.metaPath(conv)
+                val currentMd = fs.readSessionText(mdPath)
+                if (hashOf(currentMd) != stored) return@withContext null
+                if (maxTurnIn(currentMd) >= turnNo) return@withContext null
+                val currentMeta = fs.readSessionText(metaPath)
+                if (!isJsonlMeta(currentMeta)) return@withContext null
+                val mdAppend = if (currentMd.endsWith("\n")) mdSection else "\n$mdSection"
+                val metaAppend = (if (currentMeta.endsWith("\n") || currentMeta.isEmpty()) "" else "\n") +
+                    lines.joinToString("\n", postfix = "\n")
+                fs.appendSessionText(mdPath, mdAppend)
+                fs.appendSessionText(metaPath, metaAppend)
+                // Verify: đọc lại cả hai file. Md phải đúng hash mong đợi
+                // (nội dung cũ + đúng phần vừa append); meta phải parse được
+                // và chứa đủ các tin của lượt vừa append.
+                val backMd = fs.readSessionText(mdPath)
+                if (hashOf(backMd) != hashOf(currentMd + mdAppend)) {
+                    throw IllegalStateException("history.md verification failed after appending.")
+                }
+                val backMeta = HistoryMdParser.parseMeta(fs.readSessionText(metaPath))
+                val expectedIds = lines.map {
+                    json.decodeFromString(HistoryMetaEntry.serializer(), it).id
+                }
+                if (!expectedIds.all { it in backMeta.messages }) {
+                    throw IllegalStateException("history.meta.json verification failed after appending.")
+                }
+                hashOf(backMd)
+            }
+            val hash = newHash ?: return false
+            storeHash(conversationId, hash)
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Số lượt lớn nhất có trong history.md (quét heading "## Tn ..."). */
+    private fun maxTurnIn(md: String): Int {
+        var max = 0
+        for (line in md.lines()) {
+            val m = headingRx.matchEntire(line.trim()) ?: continue
+            max = maxOf(max, m.groupValues[1].toInt())
+        }
+        return max
+    }
+
+    /** File meta đã là JSONL v2 chưa (dòng đầu là header, không có "messages"). */
+    private fun isJsonlMeta(text: String): Boolean {
+        val first = text.lines().firstOrNull { it.isNotBlank() } ?: return false
+        val obj = runCatching { json.parseToJsonElement(first).jsonObject }.getOrNull() ?: return false
+        return obj["version"]?.jsonPrimitive?.intOrNull == 2 && "messages" !in obj
     }
 
     /**

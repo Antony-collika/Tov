@@ -242,7 +242,7 @@ class ChatEngine(
             cancelled?.let { throw it }
             if (error != null || calls.isEmpty()) {
                 notifyFinished(conversationId, displayTitle(conv.title), success = error == null && text.isNotEmpty(), answer = text.toString())
-                exportHistory(conversationId)
+                exportHistory(conversationId, turnNo)
                 return
             }
 
@@ -261,7 +261,7 @@ class ChatEngine(
                     )
                 )
                 notifyFinished(conversationId, displayTitle(conv.title), success = false, answer = "")
-                exportHistory(conversationId)
+                exportHistory(conversationId, turnNo)
                 return
             }
             for (call in calls) {
@@ -292,6 +292,21 @@ class ChatEngine(
      * đọc lại — xem HistorySync.export). Best-effort. */
     suspend fun exportHistory(conversationId: String) {
         if (historySync != null) {
+            historySync.export(conversationId)
+            return
+        }
+        val f = fs ?: return
+        HistoryExporter.exportHistory(f, db, conversationId)
+    }
+
+    /**
+     * Xuất sau khi một lượt vừa xong (Đợt fix 12/11/2026): thử append lượt đó
+     * vào cuối file trước; không append được thì ghi đủ. Sửa giữa (edit/xóa/
+     * hoàn tác) thì dùng [exportHistory] không số lượt — luôn ghi đủ.
+     */
+    suspend fun exportHistory(conversationId: String, turnNo: Int) {
+        if (historySync != null) {
+            if (historySync.appendTurn(conversationId, turnNo)) return
             historySync.export(conversationId)
             return
         }
