@@ -61,11 +61,22 @@ object ContextBuilder {
          * mới nhất đã nằm ở Last turn nên lịch sử cắt nghiêm theo ngân sách.
          */
         keepNewest: Boolean = true,
+        /**
+         * Bỏ kết quả tool của lượt này khỏi request (đợt bỏ provider: Retry
+         * sau lỗi chữ ký suy luận của Gemini). Lệnh gọi tool lẻ (không còn
+         * kết quả) cũng bị loại theo ở [sanitize]. null = không bỏ gì.
+         */
+        dropToolTurnId: String? = null,
     ): ContextPlan {
+        // Bỏ lượt tool cần loại TRƯỚC khi chia lượt: sanitize sẽ loại luôn
+        // lệnh gọi lẻ của tin assistant cùng lượt (và cả tin đó nếu chỉ còn
+        // lệnh gọi đã mất kết quả).
+        val effectiveRows = if (dropToolTurnId == null) rows
+        else rows.filterNot { it.role == "tool" && it.turnId == dropToolTurnId }
         val turns = LinkedHashMap<String, MutableList<MessageEntity>>()
-        rows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
+        effectiveRows.forEach { turns.getOrPut(it.turnId) { mutableListOf() }.add(it) }
         // Đợt 4: số lượt ổn định cho ghi chú rút gọn (không đếm theo vị trí).
-        val turnNumbers = TurnNumbers.effectiveTurnNumbers(rows)
+        val turnNumbers = TurnNumbers.effectiveTurnNumbers(effectiveRows)
         val converted = turns.entries
             .map { (turnId, rs) -> turnId to sanitize(rs.mapNotNull { r -> toAi(r, nameForUid, includeErrorTurns) }) }
             .filter { it.second.isNotEmpty() }

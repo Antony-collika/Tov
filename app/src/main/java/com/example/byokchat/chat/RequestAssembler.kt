@@ -71,6 +71,7 @@ object RequestAssembler {
         toolDefs: List<ToolDef>,
         budget: Int,
         nameForUid: (String) -> String?,
+        dropToolTurnId: String? = null,
     ): AssembledRequest = assemble(
         layout = RequestLayout.defaultLayout(systemPrompt),
         rows = rows,
@@ -78,6 +79,7 @@ object RequestAssembler {
         budget = budget,
         nameForUid = nameForUid,
         vars = emptyMap(),
+        dropToolTurnId = dropToolTurnId,
     )
 
     fun assemble(
@@ -87,6 +89,12 @@ object RequestAssembler {
         budget: Int,
         nameForUid: (String) -> String?,
         vars: Map<String, String>,
+        /**
+         * Bỏ kết quả tool của lượt này khỏi request (đợt bỏ provider: Retry
+         * sau lỗi chữ ký suy luận của Gemini — lượt tool có chữ ký hỏng/mất
+         * thì bỏ, model trả lời từ chữ trong lịch sử). null = không bỏ gì.
+         */
+        dropToolTurnId: String? = null,
     ): AssembledRequest {
         val historyCard = layout.historyCard()
             ?: RequestCard(RequestLayout.HISTORY_ID, CardKind.HISTORY)
@@ -107,6 +115,7 @@ object RequestAssembler {
             ContextBuilder.plan(
                 lastTurnRows, Int.MAX_VALUE, nameForUid,
                 includeErrorTurns = historyCard.includeErrorTurns,
+                dropToolTurnId = dropToolTurnId,
             )
         } else {
             ContextBuilder.plan(emptyList(), 0, nameForUid)
@@ -122,18 +131,21 @@ object RequestAssembler {
                 maxTurns = historyCard.lastTurns.coerceAtLeast(1),
                 dropReason = "outside last ${historyCard.lastTurns.coerceAtLeast(1)} turns",
                 keepNewest = false,
+                dropToolTurnId = dropToolTurnId,
             )
             HistoryPolicy.NO_CUT -> ContextBuilder.plan(
                 historyRows, Int.MAX_VALUE, nameForUid,
                 compactToolResults = historyCard.compactToolResults,
                 includeErrorTurns = historyCard.includeErrorTurns,
                 keepNewest = false,
+                dropToolTurnId = dropToolTurnId,
             )
             HistoryPolicy.BUDGET -> ContextBuilder.plan(
                 historyRows, historyBudget, nameForUid,
                 compactToolResults = historyCard.compactToolResults,
                 includeErrorTurns = historyCard.includeErrorTurns,
                 keepNewest = false,
+                dropToolTurnId = dropToolTurnId,
             )
         }
 

@@ -14,6 +14,7 @@ import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.HistorySync
+import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.chat.RequestAssembler
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
@@ -407,6 +409,44 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             } catch (e: Exception) {
                 _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
             }
+        }
+    }
+
+    /** Các lượt đã Retry một lần mà vẫn lỗi (chỉ nhớ trong phiên này): bong bóng lỗi của lượt đó sẽ thêm nút "Start a new chat". */
+    private val _retriedTurns = MutableStateFlow<Set<String>>(emptySet())
+    val retriedTurns: StateFlow<Set<String>> = _retriedTurns.asStateFlow()
+
+    /**
+     * Retry một lượt đã lỗi (nút Retry trong bong bóng lỗi, đợt bỏ provider
+     * 12/11/2026): đoán nguyên nhân từ lỗi rồi gửi lại đã sửa (xem
+     * RepairMode), không gửi y hệt request cũ. Lỗi không đoán được nguyên
+     * nhân thì gửi lại như thường. Retry xong mà vẫn lỗi thì lượt được ghi
+     * nhớ để bong bóng lỗi thêm nút mở cuộc mới.
+     */
+    fun retryTurn(turnId: String) {
+        if (generating.value) return
+        viewModelScope.launch {
+            // Lượt lỗi mà còn lượt mới hơn phía sau thì không Retry thẳng
+            // (sẽ xóa các lượt đó): bảo user dùng Regenerate trong menu —
+            // đường đó hỏi trước khi xóa.
+            if (laterTurnCount(turnId) > 0) {
+                _events.emit(ChatEvent.Error("This turn has newer turns after it. Use Regenerate from the message menu instead — it asks before deleting them."))
+                return@launch
+            }
+            val failed = db.messages().getTurn(conversationId, turnId).firstOrNull { it.status == "error" }
+            val repair = when (apiErrorCause(failed?.error, app.settings.currentModelProvider())) {
+                ApiErrorCause.MISSING_REASONING_CONTENT -> RepairMode.NO_TOOLS
+                ApiErrorCause.MISSING_THOUGHT_SIGNATURE -> RepairMode.DROP_LAST_TOOL_ROUND
+                null -> RepairMode.NONE
+            }
+            _retriedTurns.update { it + turnId }
+            // Đợt E: xung đột khi regenerate — như regenerateHere.
+            if (app.historySync?.hasExternalChange(conversationId) == true) {
+                _events.emit(ChatEvent.Error("History changed outside the app. The external edit was kept; the regeneration was cancelled."))
+                return@launch
+            }
+            app.ops.prepareRegenerateHere(conversationId, turnId, null)
+            app.engine.start(conversationId, turnId, repair)
         }
     }
 

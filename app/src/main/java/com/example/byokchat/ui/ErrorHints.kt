@@ -7,6 +7,48 @@ import com.example.byokchat.data.ProviderType
 internal enum class ErrorFix { PROVIDER_SETTINGS, PICK_MODEL }
 
 /**
+ * Why a provider request failed, when the app can tell from the error —
+ * so Retry can fix the cause instead of resending the identical request
+ * (đợt bỏ provider 12/11/2026: educate + Retry, không khóa gì cả).
+ * - MISSING_REASONING_CONTENT: máy chủ tương thích (vd DeepSeek) từ chối vì
+ *   thiếu reasoning_content khi request có tools.
+ * - MISSING_THOUGHT_SIGNATURE: Gemini từ chối vì thiếu/không khớp chữ ký
+ *   suy luận của một lệnh gọi tool trước đó.
+ */
+internal enum class ApiErrorCause { MISSING_REASONING_CONTENT, MISSING_THOUGHT_SIGNATURE }
+
+/**
+ * Đoán nguyên nhân lỗi từ chữ lỗi mà provider trả về (kèm trong dòng
+ * Details của lỗi HTTP, hoặc message lỗi giữa luồng). Chỉ nhận khi đúng
+ * hãng: reasoning_content là luật của máy chủ tương thích, thought
+ * signature là luật của Gemini.
+ */
+internal fun apiErrorCause(error: String?, provider: ProviderConfig?): ApiErrorCause? {
+    if (error == null) return null
+    val lower = error.lowercase()
+    return when (provider?.type) {
+        ProviderType.CUSTOM -> if ("reasoning_content" in lower) ApiErrorCause.MISSING_REASONING_CONTENT else null
+        ProviderType.GEMINI -> if ("thought_signature" in lower || "thought signature" in lower) ApiErrorCause.MISSING_THOUGHT_SIGNATURE else null
+        else -> null
+    }
+}
+
+/**
+ * Câu giải thích bằng lời dễ hiểu cho nguyên nhân đã đoán được (hiện dưới
+ * lỗi trong bong bóng chat). Lỗi khác thì trả null — câu thân thiện theo mã
+ * HTTP trong chính lỗi đã đủ giải thích.
+ */
+internal fun explainApiError(error: String?, provider: ProviderConfig?): String? = when (apiErrorCause(error, provider)) {
+    ApiErrorCause.MISSING_REASONING_CONTENT ->
+        "The server needs the earlier reasoning sent back with the tool calls, but it is missing — it can go missing if an earlier answer was edited or deleted. " +
+            "Retry sends the request again without tools, which the server accepts without that reasoning."
+    ApiErrorCause.MISSING_THOUGHT_SIGNATURE ->
+        "Gemini needs the thinking signature from an earlier tool call sent back, but it is missing or no longer matches — it can happen if an earlier answer was edited or deleted. " +
+            "Retry sends the request again without that last tool call, so Gemini can answer from the text alone."
+    null -> null
+}
+
+/**
  * Picks the extra button for an error card.
  *
  * Setup problems are decided from the CURRENT state (no provider, no key, bad address, no model), so the button

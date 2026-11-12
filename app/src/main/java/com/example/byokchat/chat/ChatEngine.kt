@@ -33,6 +33,20 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
+ * Cách Retry sửa nguyên nhân gây lỗi thay vì gửi lại y hệt request cũ
+ * (đợt bỏ provider 12/11/2026: educate + Retry, không khóa gì cả):
+ * - NONE: gửi lại như thường (lỗi không đoán được nguyên nhân);
+ * - NO_TOOLS: gửi lại không kèm tools — máy chủ tương thích (vd DeepSeek)
+ *   chỉ bắt buộc reasoning_content khi request có tools, nên không có
+ *   tools thì không cần reasoning đã mất;
+ * - DROP_LAST_TOOL_ROUND: gửi lại không có lượt tool gần nhất — chữ ký suy
+ *   luận của lượt đó đã hỏng/mất nên Gemini từ chối cả request; bỏ lượt
+ *   đó thì model trả lời từ chữ trong lịch sử.
+ * Chỉ áp cho lần gửi Retry đó; lượt sau gửi lại bình thường.
+ */
+enum class RepairMode { NONE, NO_TOOLS, DROP_LAST_TOOL_ROUND }
+
+/**
  * Điều phối việc AI trả lời. Chạy ở phạm vi toàn app nên thoát màn hình chat
  * thì AI vẫn tiếp tục trả lời; nút Dừng gọi stop().
  */
@@ -63,11 +77,11 @@ class ChatEngine(
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
 
-    fun start(conversationId: String, turnId: String) {
+    fun start(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
         if (jobs[conversationId]?.isActive == true) return
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                run(conversationId, turnId)
+                run(conversationId, turnId, repair)
             } finally {
                 tools.endTurn(turnId)
                 jobs.remove(conversationId)
@@ -83,7 +97,7 @@ class ChatEngine(
         jobs[conversationId]?.cancel()
     }
 
-    private suspend fun run(conversationId: String, turnId: String) {
+    private suspend fun run(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
         val msgDao = db.messages()
         // Đợt 4: tin assistant và kết quả tool dùng chung số lượt của tin user
         // cùng lượt (đã gán khi gửi). Tạo lại (regenerate) giữ nguyên số cũ.
@@ -92,6 +106,12 @@ class ChatEngine(
         // Đợt E: tạo thư mục session ở lần gửi đầu tiên (như FPilot) — nếu
         // chưa có file session thì xuất trạng thái hiện tại của Room.
         historySync?.let { runCatching { it.ensureSession(conversationId) } }
+        // Đợt bỏ provider: lượt tool gần nhất để bỏ khi Retry sau lỗi chữ ký
+        // suy luận (DROP_LAST_TOOL_ROUND) — tính MỘT lần ở đầu lượt chạy, để
+        // các vòng gọi tool mới trong lượt này không bị bỏ theo.
+        val dropToolTurnId = if (repair == RepairMode.DROP_LAST_TOOL_ROUND) {
+            msgDao.getAll(conversationId).filter { it.role == "tool" }.maxByOrNull { it.seq }?.turnId
+        } else null
         var rounds = 0
         while (true) {
             val conv = db.conversations().get(conversationId) ?: return
@@ -170,7 +190,10 @@ class ChatEngine(
                     )
                 }
                 exposed = toolsResolution.exposed
-                val toolDefs = layout.effectiveToolDefs(tools.definitions(exposed))
+                // Đợt bỏ provider: Retry NO_TOOLS thì không offer tool nào ở
+                // lượt này (model trả lời từ chữ trong lịch sử).
+                val toolDefs = if (repair == RepairMode.NO_TOOLS) emptyList()
+                else layout.effectiveToolDefs(tools.definitions(exposed))
                 val system = layout.systemText(vars)
                 val budget = ContextBuilder.budget(
                     cfg, model, system,
@@ -183,6 +206,7 @@ class ChatEngine(
                     budget = budget,
                     nameForUid = { uid -> tools.nameForUid(uid, exposed) },
                     vars = vars,
+                    dropToolTurnId = dropToolTurnId,
                 )
                 // Đợt 6: Metadata (một nguồn duy nhất với previewAssembled):
                 // cùng đọc settings.metadata. Tool luôn được gửi đủ, với mọi

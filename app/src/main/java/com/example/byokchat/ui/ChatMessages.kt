@@ -244,6 +244,13 @@ internal fun AssistantMessage(
     onEditSave: (EditState) -> Unit,
     onEditCancel: () -> Unit,
     liveText: String? = null,
+    /** Câu giải thích nguyên nhân lỗi bằng lời dễ hiểu (đợt bỏ provider 12/11/2026) — null = lỗi đã tự giải thích. */
+    errorExplanation: String? = null,
+    /** Retry trong bong bóng lỗi: sửa nguyên nhân rồi gửi lại (null = Regenerate thường). */
+    onRetryError: (() -> Unit)? = null,
+    /** Lượt này đã Retry một lần mà vẫn lỗi: thêm nút mở cuộc mới. */
+    showNewChat: Boolean = false,
+    onNewChat: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     // Đợt provider 12/11/2026: khối gập "Suy luận" mở hay đóng (theo từng tin).
@@ -359,11 +366,23 @@ internal fun AssistantMessage(
                                 style = MaterialTheme.typography.bodySmall,
                             )
                         }
+                        if (errorExplanation != null) {
+                            Text(
+                                errorExplanation,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            FilledTonalButton(onClick = { actions.regen(m) }, enabled = !generating) { Text("Retry") }
+                            FilledTonalButton(onClick = { onRetryError?.invoke() ?: actions.regen(m) }, enabled = !generating) { Text("Retry") }
                             if (errorFix != null) {
                                 OutlinedButton(onClick = { onErrorFix(errorFix) }) { Text(errorFix.label()) }
                             }
+                        }
+                        // Retry một lần mà vẫn lỗi thì mở cuộc mới (lịch sử
+                        // cũ có thể đã hỏng tới mức không sửa được nữa).
+                        if (showNewChat && onNewChat != null) {
+                            OutlinedButton(onClick = onNewChat, enabled = !generating) { Text("Start a new chat") }
                         }
                     }
                 }

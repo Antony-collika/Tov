@@ -3,7 +3,9 @@ package com.example.byokchat.ui
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.ProviderType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ErrorHintsTest {
@@ -42,5 +44,49 @@ class ErrorHintsTest {
 
     @Test fun missingModelOffersPicker() {
         assertEquals(ErrorFix.PICK_MODEL, errorFix("x", ok, ""))
+    }
+
+    // Đợt bỏ provider 12/11/2026: đoán nguyên nhân lỗi để Retry sửa rồi gửi
+    // lại — không đoán được thì không giải thích thêm.
+
+    private val custom = ProviderConfig(id = "p", type = ProviderType.CUSTOM, name = "DeepSeek", apiKey = "sk-1")
+    private val gemini = ProviderConfig(id = "p", type = ProviderType.GEMINI, name = "Gemini", apiKey = "k")
+
+    @Test fun customReasoningContentErrorMapsToMissingReasoning() {
+        val error = "The server returned an error.\n" +
+            "Details: Error 400: reasoning_content must be fully passed back to the API in all subsequent requests."
+        assertEquals(ApiErrorCause.MISSING_REASONING_CONTENT, apiErrorCause(error, custom))
+        val explanation = explainApiError(error, custom)
+        assertNotNull(explanation)
+        assertTrue(explanation!!.contains("without tools"))
+    }
+
+    @Test fun reasoningContentKeywordOnOtherProviderIsNotMapped() {
+        val error = "Details: Error 400: reasoning_content must be fully passed back."
+        assertNull(apiErrorCause(error, ok))
+        assertNull(explainApiError(error, ok))
+        assertNull(apiErrorCause(error, gemini))
+    }
+
+    @Test fun geminiThoughtSignatureErrorMapsToMissingSignature() {
+        val error = "The server returned an error.\n" +
+            "Details: Error 400: Function call with an invalid thought signature was found."
+        assertEquals(ApiErrorCause.MISSING_THOUGHT_SIGNATURE, apiErrorCause(error, gemini))
+        val explanation = explainApiError(error, gemini)
+        assertNotNull(explanation)
+        assertTrue(explanation!!.contains("without that last tool call"))
+    }
+
+    @Test fun thoughtSignatureKeywordOnOtherProviderIsNotMapped() {
+        val error = "Details: Error 400: invalid thought_signature."
+        assertNull(apiErrorCause(error, custom))
+        assertNull(explainApiError(error, custom))
+    }
+
+    @Test fun unmappedErrorExplainsNothing() {
+        assertNull(apiErrorCause("The server returned an error.\nDetails: Error 500: boom.", custom))
+        assertNull(explainApiError("The server returned an error.\nDetails: Error 500: boom.", custom))
+        assertNull(apiErrorCause(null, custom))
+        assertNull(explainApiError(null, custom))
     }
 }

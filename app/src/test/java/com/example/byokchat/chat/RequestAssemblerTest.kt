@@ -118,6 +118,35 @@ class RequestAssemblerTest {
     }
 
     @Test
+    fun dropToolTurnIdDropsThatTurnsToolRound() {
+        // Đợt bỏ provider 12/11/2026: Retry sau lỗi chữ ký suy luận của
+        // Gemini bỏ lượt tool gần nhất — kết quả tool biến mất và lệnh gọi
+        // lẻ của tin assistant cùng lượt cũng bị loại (sanitize), các lượt
+        // khác và chữ trong lượt đó còn nguyên.
+        val calls = json.encodeToString(callsSer, listOf(AiToolCall("c1", "old_name", "{}", uid = "calc")))
+        val rows = listOf(
+            row("u1", "t1", 1, "user", "hello"),
+            row("a1", "t1", 2, "assistant", "calling", toolCallsJson = calls),
+            row("r1", "t1", 3, "tool", "42", toolCallId = "c1", toolUid = "calc", toolName = "old_name"),
+            row("a1b", "t1", 4, "assistant", "result is 42"),
+            row("u2", "t2", 5, "user", "thanks"),
+        )
+        val out = RequestAssembler.assemble(
+            systemPrompt = "Be helpful",
+            rows = rows,
+            toolDefs = emptyList(),
+            budget = 10_000,
+            nameForUid = ::noRename,
+            dropToolTurnId = "t1",
+        )
+        assertEquals(listOf("hello", "calling", "result is 42", "thanks"), out.sentMessages.map { it.text })
+        assertTrue(out.sentMessages.none { it.role == Role.TOOL })
+        assertTrue(out.sentMessages.none { it.toolCalls.isNotEmpty() })
+        assertEquals(2, out.totalTurns)
+        assertEquals(emptyList<String>(), out.droppedTurnIds)
+    }
+
+    @Test
     fun dropsOldestTurnOverBudgetAndListsIt() {
         val rows = listOf(
             row("u1", "t1", 1, "user", "a".repeat(500)),

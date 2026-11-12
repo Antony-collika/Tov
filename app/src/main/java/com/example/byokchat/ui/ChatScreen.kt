@@ -117,6 +117,9 @@ fun ChatScreen(
     val conv by vm.conversation.collectAsState()
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()
+    // Đợt bỏ provider 12/11/2026: các lượt đã Retry một lần mà vẫn lỗi —
+    // bong bóng lỗi của lượt đó thêm nút "Start a new chat".
+    val retriedTurns by vm.retriedTurns.collectAsState()
     val providers by vm.providers.collectAsState()
     val currentProviderId by vm.currentModelProviderId.collectAsState()
     val currentModelName by vm.currentModel.collectAsState()
@@ -476,6 +479,13 @@ fun ChatScreen(
                                         ErrorFix.PICK_MODEL -> showModelPicker = true
                                     }
                                 },
+                                // Đợt bỏ provider 12/11/2026: giải thích
+                                // nguyên nhân lỗi + Retry sửa nguyên nhân rồi
+                                // gửi lại; Retry vẫn lỗi thì thêm nút mở cuộc mới.
+                                errorExplanation = if (m.status == "error") explainApiError(m.error, provider) else null,
+                                onRetryError = { vm.retryTurn(m.turnId) },
+                                showNewChat = m.status == "error" && m.turnId in retriedTurns,
+                                onNewChat = onNewChat,
                                 liveText = if (m.status == "streaming") liveText.value[m.id] else null,
                                 onEditChange = { t -> editing = editing?.copy(text = t) },
                                 onEditSave = { st -> editing = null; vm.saveEdit(st.messageId, st.text) },
