@@ -188,8 +188,9 @@ fun AppNav() {
                     // Đợt 4: chỉ thẻ History của một cuộc cụ thể mới mở được màn
                     // Messages (panel mở từ Settings thì không có cuộc nào).
                     onOpenMessages = entry.arguments?.getString("cid")?.let { cid -> { nav.navigate("messages/$cid") } },
-                    // Đợt provider 12/11/2026: id cuộc để khóa thẻ System/Tools
-                    // khi cuộc có thinking của Claude (null khi panel mở từ Settings).
+                    // Đợt provider 12/11/2026: id cuộc để rẽ nhánh khi sửa
+                    // thẻ System/Tools/Free trong cuộc có thinking của Claude
+                    // (null khi panel mở từ Settings).
                     conversationId = entry.arguments?.getString("cid"),
                     // Đợt provider 12/11/2026 (Q2): sửa thẻ trong cuộc có
                     // thinking của Claude thì mở cuộc nhánh mới.

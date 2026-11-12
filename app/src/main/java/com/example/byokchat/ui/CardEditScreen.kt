@@ -251,12 +251,20 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         }
         // Đợt provider 12/11/2026 (Q2 — sửa theo quyết định của Duy: không
         // chặn hẳn nữa): cuộc có thinking của Claude thì sửa thẻ System/
-        // Tools vẫn lưu (thẻ lưu chung cho mọi cuộc), rồi tạo cuộc mới kiểu
-        // branch (bỏ khối thinking cũ), mở nhánh và thông báo rõ lý do.
-        // Cuộc gốc giữ nguyên.
-        if ((c.kind == CardKind.SYSTEM || c.kind == CardKind.TOOLS) && conversationId != null) {
+        // Tools/Free vẫn lưu (thẻ lưu chung cho mọi cuộc), rồi tạo cuộc mới
+        // kiểu branch (bỏ khối thinking cũ), mở nhánh và thông báo rõ lý
+        // do. Cuộc gốc giữ nguyên.
+        // Đợt provider 12/11/2026 (Q4): thẻ Free cũng vào danh sách — NHƯNG
+        // chỉ khi provider của cuộc này yêu cầu niêm phong (Claude đang bật
+        // thinking). Provider nào cho phép sửa thì thẻ Free sửa bình thường.
+        if ((c.kind == CardKind.SYSTEM || c.kind == CardKind.TOOLS || c.kind == CardKind.FREE) && conversationId != null) {
             scope.launch {
-                if (container.ops.hasThinkingSeal(conversationId)) {
+                val needsBranch = when (c.kind) {
+                    CardKind.FREE -> container.ops.hasThinkingSeal(conversationId) &&
+                        providerType == ProviderType.CLAUDE && savedMetadata.thinkingEnabled
+                    else -> container.ops.hasThinkingSeal(conversationId)
+                }
+                if (needsBranch) {
                     saveCard(c, goBack = false)
                     try {
                         val branchId = container.ops.branchForModelSwitch(conversationId).conversationId
