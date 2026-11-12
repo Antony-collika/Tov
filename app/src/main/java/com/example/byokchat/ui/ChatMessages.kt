@@ -246,8 +246,12 @@ internal fun AssistantMessage(
     liveText: String? = null,
     /** Câu giải thích nguyên nhân lỗi bằng lời dễ hiểu (đợt bỏ provider 12/11/2026) — null = lỗi đã tự giải thích. */
     errorExplanation: String? = null,
-    /** Retry trong bong bóng lỗi: sửa nguyên nhân rồi gửi lại (null = Regenerate thường). */
+    /** Retry trong bong bóng lỗi: gửi lại request đầy đủ (null = Regenerate thường). */
     onRetryError: (() -> Unit)? = null,
+    /** Nút Retry đã BỚT, ghi rõ (dữ liệu đã mất, không khôi phục được) — null = không có nút này. */
+    reducedRetryLabel: String? = null,
+    /** Hành động cho nút Retry đã BỚT. */
+    onReducedRetry: (() -> Unit)? = null,
     /** Lượt này đã Retry một lần mà vẫn lỗi: thêm nút mở cuộc mới. */
     showNewChat: Boolean = false,
     onNewChat: (() -> Unit)? = null,
@@ -377,6 +381,13 @@ internal fun AssistantMessage(
                             FilledTonalButton(onClick = { onRetryError?.invoke() ?: actions.regen(m) }, enabled = !generating) { Text("Retry") }
                             if (errorFix != null) {
                                 OutlinedButton(onClick = { onErrorFix(errorFix) }) { Text(errorFix.label()) }
+                            }
+                        }
+                        // Nút Retry đã BỚT (dữ liệu đã mất, không khôi phục
+                        // được): tách riêng, ghi rõ — không phải Retry mặc định.
+                        if (reducedRetryLabel != null) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedButton(onClick = { onReducedRetry?.invoke() }, enabled = !generating) { Text(reducedRetryLabel) }
                             }
                         }
                         // Retry một lần mà vẫn lỗi thì mở cuộc mới (lịch sử

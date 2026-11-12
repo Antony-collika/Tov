@@ -418,12 +418,15 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /**
      * Retry một lượt đã lỗi (nút Retry trong bong bóng lỗi, đợt bỏ provider
-     * 12/11/2026): đoán nguyên nhân từ lỗi rồi gửi lại đã sửa (xem
-     * RepairMode), không gửi y hệt request cũ. Lỗi không đoán được nguyên
-     * nhân thì gửi lại như thường. Retry xong mà vẫn lỗi thì lượt được ghi
-     * nhớ để bong bóng lỗi thêm nút mở cuộc mới.
+     * 12/11/2026; sửa theo ý Duy 12/11/2026): mặc định gửi lại request ĐẦY
+     * ĐỦ ([RepairMode.NONE]) — dựng lại từ cài đặt hiện tại + reasoning đã
+     * lưu, để user sửa cài đặt xong (vd bật lại "Keep thought signature")
+     * rồi ấn Retry là gửi lại đúng phần hợp lệ. KHÔNG tự BỚT gì ở lần
+     * Retry đầu. Nút Retry đã BỚT (chỉ khi dữ liệu đã mất, xem
+     * [ApiErrorHelp]) gọi hàm này với repair tương ứng. Retry xong mà vẫn
+     * lỗi thì lượt được ghi nhớ để bong bóng lỗi thêm nút mở cuộc mới.
      */
-    fun retryTurn(turnId: String) {
+    fun retryTurn(turnId: String, repair: RepairMode = RepairMode.NONE) {
         if (generating.value) return
         viewModelScope.launch {
             // Lượt lỗi mà còn lượt mới hơn phía sau thì không Retry thẳng
@@ -432,12 +435,6 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             if (laterTurnCount(turnId) > 0) {
                 _events.emit(ChatEvent.Error("This turn has newer turns after it. Use Regenerate from the message menu instead — it asks before deleting them."))
                 return@launch
-            }
-            val failed = db.messages().getTurn(conversationId, turnId).firstOrNull { it.status == "error" }
-            val repair = when (apiErrorCause(failed?.error, app.settings.currentModelProvider())) {
-                ApiErrorCause.MISSING_REASONING_CONTENT -> RepairMode.NO_TOOLS
-                ApiErrorCause.MISSING_THOUGHT_SIGNATURE -> RepairMode.DROP_LAST_TOOL_ROUND
-                null -> RepairMode.NONE
             }
             _retriedTurns.update { it + turnId }
             // Đợt E: xung đột khi regenerate — như regenerateHere.

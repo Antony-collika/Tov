@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.ProviderType
 import org.junit.Assert.assertEquals
@@ -46,47 +47,68 @@ class ErrorHintsTest {
         assertEquals(ErrorFix.PICK_MODEL, errorFix("x", ok, ""))
     }
 
-    // Đợt bỏ provider 12/11/2026: đoán nguyên nhân lỗi để Retry sửa rồi gửi
-    // lại — không đoán được thì không giải thích thêm.
+    // Đợt bỏ provider 12/11/2026 (sửa theo ý Duy): đoán nguyên nhân lỗi để
+    // giải thích user cần làm gì — bật lại công tắc rồi Retry gửi lại đủ,
+    // hoặc dữ liệu đã mất thì dùng nút Retry đã BỚT, ghi rõ. Không đoán
+    // được thì không giải thích thêm.
 
     private val custom = ProviderConfig(id = "p", type = ProviderType.CUSTOM, name = "DeepSeek", apiKey = "sk-1")
     private val gemini = ProviderConfig(id = "p", type = ProviderType.GEMINI, name = "Gemini", apiKey = "k")
 
-    @Test fun customReasoningContentErrorMapsToMissingReasoning() {
+    @Test fun customReasoningContentErrorOffersReducedRetryWithoutTools() {
         val error = "The server returned an error.\n" +
             "Details: Error 400: reasoning_content must be fully passed back to the API in all subsequent requests."
         assertEquals(ApiErrorCause.MISSING_REASONING_CONTENT, apiErrorCause(error, custom))
-        val explanation = explainApiError(error, custom)
-        assertNotNull(explanation)
-        assertTrue(explanation!!.contains("without tools"))
+        val help = apiErrorHelp(error, custom, keepThoughtSignature = true)
+        assertNotNull(help)
+        assertTrue(help!!.explanation.contains("Retry without tools"))
+        assertEquals(ReducedRetry.WITHOUT_TOOLS, help.reducedRetry)
     }
 
     @Test fun reasoningContentKeywordOnOtherProviderIsNotMapped() {
         val error = "Details: Error 400: reasoning_content must be fully passed back."
         assertNull(apiErrorCause(error, ok))
-        assertNull(explainApiError(error, ok))
+        assertNull(apiErrorHelp(error, ok, keepThoughtSignature = true))
         assertNull(apiErrorCause(error, gemini))
     }
 
-    @Test fun geminiThoughtSignatureErrorMapsToMissingSignature() {
+    @Test fun geminiThoughtSignatureErrorWithSignatureOnOffersReducedRetry() {
         val error = "The server returned an error.\n" +
             "Details: Error 400: Function call with an invalid thought signature was found."
         assertEquals(ApiErrorCause.MISSING_THOUGHT_SIGNATURE, apiErrorCause(error, gemini))
-        val explanation = explainApiError(error, gemini)
-        assertNotNull(explanation)
-        assertTrue(explanation!!.contains("without that last tool call"))
+        val help = apiErrorHelp(error, gemini, keepThoughtSignature = true)
+        assertNotNull(help)
+        assertTrue(help!!.explanation.contains("Retry without the last tool call"))
+        assertEquals(ReducedRetry.WITHOUT_LAST_TOOL_CALL, help.reducedRetry)
+    }
+
+    @Test fun geminiThoughtSignatureErrorWithSignatureOffTellsUserToTurnItBackOn() {
+        val error = "The server returned an error.\n" +
+            "Details: Error 400: Function call with an invalid thought signature was found."
+        val help = apiErrorHelp(error, gemini, keepThoughtSignature = false)
+        assertNotNull(help)
+        assertTrue(help!!.explanation.contains("Keep thought signature"))
+        assertTrue(help.explanation.contains("Turn it back on"))
+        assertNull(help.reducedRetry)
     }
 
     @Test fun thoughtSignatureKeywordOnOtherProviderIsNotMapped() {
         val error = "Details: Error 400: invalid thought_signature."
         assertNull(apiErrorCause(error, custom))
-        assertNull(explainApiError(error, custom))
+        assertNull(apiErrorHelp(error, custom, keepThoughtSignature = true))
     }
 
     @Test fun unmappedErrorExplainsNothing() {
         assertNull(apiErrorCause("The server returned an error.\nDetails: Error 500: boom.", custom))
-        assertNull(explainApiError("The server returned an error.\nDetails: Error 500: boom.", custom))
+        assertNull(apiErrorHelp("The server returned an error.\nDetails: Error 500: boom.", custom, keepThoughtSignature = true))
         assertNull(apiErrorCause(null, custom))
-        assertNull(explainApiError(null, custom))
+        assertNull(apiErrorHelp(null, custom, keepThoughtSignature = true))
+    }
+
+    @Test fun reducedRetryMapsToRepairModeAndLabel() {
+        assertEquals(RepairMode.NO_TOOLS, ReducedRetry.WITHOUT_TOOLS.repairMode())
+        assertEquals(RepairMode.DROP_LAST_TOOL_ROUND, ReducedRetry.WITHOUT_LAST_TOOL_CALL.repairMode())
+        assertEquals("Retry without tools", ReducedRetry.WITHOUT_TOOLS.label())
+        assertEquals("Retry without the last tool call", ReducedRetry.WITHOUT_LAST_TOOL_CALL.label())
     }
 }

@@ -33,9 +33,12 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Cách Retry sửa nguyên nhân gây lỗi thay vì gửi lại y hệt request cũ
- * (đợt bỏ provider 12/11/2026: educate + Retry, không khóa gì cả):
- * - NONE: gửi lại như thường (lỗi không đoán được nguyên nhân);
+ * Cách nút Retry đã BỚT gửi lại sau lỗi (đợt bỏ provider 12/11/2026; sửa
+ * theo ý Duy 12/11/2026): chỉ dùng khi dữ liệu hãng cần đã mất hẳn, không
+ * khôi phục được — nút này tách riêng, ghi rõ, không phải Retry mặc định.
+ * Retry mặc định luôn là NONE (gửi lại request đầy đủ, dựng lại từ cài đặt
+ * hiện tại + reasoning đã lưu, để user sửa cài đặt xong rồi ấn Retry).
+ * - NONE: gửi lại như thường (Retry mặc định);
  * - NO_TOOLS: gửi lại không kèm tools — máy chủ tương thích (vd DeepSeek)
  *   chỉ bắt buộc reasoning_content khi request có tools, nên không có
  *   tools thì không cần reasoning đã mất;

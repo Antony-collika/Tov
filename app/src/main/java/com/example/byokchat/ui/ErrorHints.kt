@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.ProviderType
 
@@ -7,8 +8,7 @@ import com.example.byokchat.data.ProviderType
 internal enum class ErrorFix { PROVIDER_SETTINGS, PICK_MODEL }
 
 /**
- * Why a provider request failed, when the app can tell from the error —
- * so Retry can fix the cause instead of resending the identical request
+ * Why a provider request failed, when the app can tell from the error
  * (đợt bỏ provider 12/11/2026: educate + Retry, không khóa gì cả).
  * - MISSING_REASONING_CONTENT: máy chủ tương thích (vd DeepSeek) từ chối vì
  *   thiếu reasoning_content khi request có tools.
@@ -16,6 +16,41 @@ internal enum class ErrorFix { PROVIDER_SETTINGS, PICK_MODEL }
  *   suy luận của một lệnh gọi tool trước đó.
  */
 internal enum class ApiErrorCause { MISSING_REASONING_CONTENT, MISSING_THOUGHT_SIGNATURE }
+
+/**
+ * Reduced retry the app can offer as a SEPARATE, clearly labelled button
+ * when the data the server needs is gone for good and cannot be restored
+ * (sửa theo ý Duy 12/11/2026). It is never the default Retry: the default
+ * Retry always resends the full request, rebuilt from the current settings
+ * + stored reasoning, after the user has fixed the cause.
+ */
+internal enum class ReducedRetry { WITHOUT_TOOLS, WITHOUT_LAST_TOOL_CALL }
+
+/** Label shown on the reduced-retry button. */
+internal fun ReducedRetry.label(): String = when (this) {
+    ReducedRetry.WITHOUT_TOOLS -> "Retry without tools"
+    ReducedRetry.WITHOUT_LAST_TOOL_CALL -> "Retry without the last tool call"
+}
+
+/** The engine repair a reduced retry runs. */
+internal fun ReducedRetry.repairMode(): RepairMode = when (this) {
+    ReducedRetry.WITHOUT_TOOLS -> RepairMode.NO_TOOLS
+    ReducedRetry.WITHOUT_LAST_TOOL_CALL -> RepairMode.DROP_LAST_TOOL_ROUND
+}
+
+/**
+ * What the error bubble shows for a guessed provider error (null = the
+ * error already explains itself, nothing more to add).
+ * - [ApiErrorHelp.explanation]: plain-language explanation telling the user
+ *   what to do — either fix a setting and press Retry (the full request is
+ *   sent again), or accept that the data is lost and use the reduced retry.
+ * - [ApiErrorHelp.reducedRetry]: the reduced retry offered when the missing
+ *   data cannot be restored; null when the cause can be fixed by a setting.
+ */
+internal data class ApiErrorHelp(
+    val explanation: String,
+    val reducedRetry: ReducedRetry? = null,
+)
 
 /**
  * Đoán nguyên nhân lỗi từ chữ lỗi mà provider trả về (kèm trong dòng
@@ -34,19 +69,42 @@ internal fun apiErrorCause(error: String?, provider: ProviderConfig?): ApiErrorC
 }
 
 /**
- * Câu giải thích bằng lời dễ hiểu cho nguyên nhân đã đoán được (hiện dưới
- * lỗi trong bong bóng chat). Lỗi khác thì trả null — câu thân thiện theo mã
- * HTTP trong chính lỗi đã đủ giải thích.
+ * Help for a guessed provider error (null = nothing more to add — the
+ * friendly sentence from the HTTP status in the error itself is enough).
+ * [keepThoughtSignature] is the CURRENT "Keep thought signature" setting
+ * (Metadata card): a Gemini signature error while it is OFF most likely
+ * means the signatures were not sent — the user can fix it by turning the
+ * switch back on and pressing Retry; while it is ON, the signature itself
+ * is genuinely lost.
  */
-internal fun explainApiError(error: String?, provider: ProviderConfig?): String? = when (apiErrorCause(error, provider)) {
-    ApiErrorCause.MISSING_REASONING_CONTENT ->
-        "The server needs the earlier reasoning sent back with the tool calls, but it is missing — it can go missing if an earlier answer was edited or deleted. " +
-            "Retry sends the request again without tools, which the server accepts without that reasoning."
-    ApiErrorCause.MISSING_THOUGHT_SIGNATURE ->
-        "Gemini needs the thinking signature from an earlier tool call sent back, but it is missing or no longer matches — it can happen if an earlier answer was edited or deleted. " +
-            "Retry sends the request again without that last tool call, so Gemini can answer from the text alone."
-    null -> null
-}
+internal fun apiErrorHelp(error: String?, provider: ProviderConfig?, keepThoughtSignature: Boolean): ApiErrorHelp? =
+    when (apiErrorCause(error, provider)) {
+        ApiErrorCause.MISSING_REASONING_CONTENT ->
+            ApiErrorHelp(
+                explanation = "The server needs the earlier reasoning sent back with the tool calls, but it is gone — " +
+                    "it was lost when an earlier answer was edited or deleted, and it cannot be restored. " +
+                    "Retry sends the full request again, but the server will likely refuse it again for the same reason. " +
+                    "Use \"Retry without tools\" instead: the server accepts a request without tools even without that reasoning.",
+                reducedRetry = ReducedRetry.WITHOUT_TOOLS,
+            )
+        ApiErrorCause.MISSING_THOUGHT_SIGNATURE ->
+            if (!keepThoughtSignature) {
+                ApiErrorHelp(
+                    explanation = "Gemini needs the thinking signature from an earlier reply sent back, but " +
+                        "\"Keep thought signature\" is off in the Metadata card, so the signatures were not sent. " +
+                        "Turn it back on, then press Retry to send the full request again.",
+                )
+            } else {
+                ApiErrorHelp(
+                    explanation = "Gemini needs the thinking signature from an earlier tool call sent back, but it is gone " +
+                        "or no longer matches — it was lost when an earlier answer was edited or deleted, and it cannot be restored. " +
+                        "Retry sends the full request again, but Gemini will likely refuse it again for the same reason. " +
+                        "Use \"Retry without the last tool call\" instead: Gemini can answer from the text alone without that tool call.",
+                    reducedRetry = ReducedRetry.WITHOUT_LAST_TOOL_CALL,
+                )
+            }
+        null -> null
+    }
 
 /**
  * Picks the extra button for an error card.

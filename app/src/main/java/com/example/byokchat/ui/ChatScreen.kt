@@ -127,6 +127,10 @@ fun ChatScreen(
     val workspaceOk by container.fs.accessible.collectAsState()
     val sessionStorageUri by container.settings.sessionStorageUri.collectAsState()
     val toolPrefs by container.toolPrefs.prefs.collectAsState()
+    // Đợt bỏ provider 12/11/2026 (sửa theo ý Duy): cài đặt Metadata hiện tại
+    // — bong bóng lỗi cần biết "Keep thought signature" đang bật hay tắt để
+    // giải thích đúng (bật lại công tắc, hay dữ liệu đã mất).
+    val metadata by container.settings.metadata.collectAsState()
     // Text of the answer being streamed. Deliberately NOT read here (no `by`): only the streaming message reads it,
     // so only that message recomposes while the AI is typing.
     val liveText = container.engine.liveText.collectAsState()
@@ -469,6 +473,7 @@ fun ChatScreen(
                             )
                         } else {
                             val fix = if (m.status == "error") errorFix(m.error, provider, modelName) else null
+                            val help = if (m.status == "error") apiErrorHelp(m.error, provider, metadata.keepThoughtSignature) else null
                             AssistantMessage(
                                 m, generating, hl, edit, actions, toolResults,
                                 showActions = m.id == lastAnswerId,
@@ -479,11 +484,14 @@ fun ChatScreen(
                                         ErrorFix.PICK_MODEL -> showModelPicker = true
                                     }
                                 },
-                                // Đợt bỏ provider 12/11/2026: giải thích
-                                // nguyên nhân lỗi + Retry sửa nguyên nhân rồi
-                                // gửi lại; Retry vẫn lỗi thì thêm nút mở cuộc mới.
-                                errorExplanation = if (m.status == "error") explainApiError(m.error, provider) else null,
+                                // Đợt bỏ provider 12/11/2026 (sửa theo ý Duy):
+                                // giải thích nguyên nhân lỗi + Retry gửi lại
+                                // đủ; dữ liệu đã mất thì thêm nút Retry đã
+                                // BỚT, ghi rõ. Retry vẫn lỗi thì thêm nút mở cuộc mới.
+                                errorExplanation = help?.explanation,
                                 onRetryError = { vm.retryTurn(m.turnId) },
+                                reducedRetryLabel = help?.reducedRetry?.label(),
+                                onReducedRetry = help?.reducedRetry?.let { r -> { vm.retryTurn(m.turnId, r.repairMode()) } },
                                 showNewChat = m.status == "error" && m.turnId in retriedTurns,
                                 onNewChat = onNewChat,
                                 liveText = if (m.status == "streaming") liveText.value[m.id] else null,
