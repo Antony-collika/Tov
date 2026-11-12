@@ -171,6 +171,39 @@ class ProviderBodyTest {
         assertEquals(1, body["tools"]?.jsonArray?.size)
     }
 
+    @Test
+    fun geminiTextThoughtSignatureSentWhenKept() {
+        // Chữ ký của phần chữ được gửi lại khi công tắc bật; tắt thì không.
+        // Chữ ký của lệnh gọi tool thì luôn gửi, không phụ thuộc công tắc.
+        val assistant = AiMessage(
+            Role.ASSISTANT,
+            text = "It is 09:00.",
+            thoughtSignature = "sig-text",
+            toolCalls = listOf(AiToolCall("call-1", "time_now", "{}", signature = "sig-call")),
+        )
+        val req = AiRequest(
+            model = "test-model", system = "Be helpful",
+            messages = listOf(AiMessage(Role.USER, text = "Hi"), assistant),
+            tools = toolDefs(), maxOutputTokens = 8192,
+            metadata = MetadataParams(),
+        )
+        fun modelParts(body: JsonObject) = body["contents"]!!.jsonArray
+            .map { it.jsonObject }
+            .filter { it["role"]?.jsonPrimitive?.content == "model" }
+            .flatMap { it["parts"]!!.jsonArray.map { p -> p.jsonObject } }
+        val parts = modelParts(GeminiProvider(cfg(ProviderType.GEMINI)).buildBody(req))
+        assertEquals("sig-text", parts.first { it.containsKey("text") }["thoughtSignature"]?.jsonPrimitive?.content)
+        assertEquals("sig-call", parts.first { it.containsKey("functionCall") }["thoughtSignature"]?.jsonPrimitive?.content)
+
+        val offParts = modelParts(
+            GeminiProvider(cfg(ProviderType.GEMINI)).buildBody(
+                req.copy(metadata = MetadataParams(keepThoughtSignature = false)),
+            ),
+        )
+        assertNull(offParts.first { it.containsKey("text") }["thoughtSignature"])
+        assertEquals("sig-call", offParts.first { it.containsKey("functionCall") }["thoughtSignature"]?.jsonPrimitive?.content)
+    }
+
     // ---- Claude ----
 
     @Test

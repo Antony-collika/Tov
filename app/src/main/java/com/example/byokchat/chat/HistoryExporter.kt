@@ -13,6 +13,8 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -216,9 +218,14 @@ object HistoryExporter {
                 id = m.id,
                 attachments = if (m.role == "user") m.images() else emptyList(),
                 createdAt = m.createdAt,
-                // Đợt fix 12/11/2026 (K): thoughtSignature của Gemini sẽ ghi
-                // vào đây thay cho null — xem HistorySync.applyParsed.
-                extra_content = null,
+                // Đợt fix 12/11/2026 (K): chữ ký suy luận của Gemini cho phần
+                // chữ (nếu có) — đúng dạng template của FPilot
+                // {"google": {"thought_signature": "..."}}.
+                extra_content = m.thoughtSignature?.let { sig ->
+                    buildJsonObject {
+                        put("google", buildJsonObject { put("thought_signature", sig) })
+                    }
+                },
                 tool_rounds = rounds,
             )
         }

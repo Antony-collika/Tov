@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -149,6 +150,11 @@ class HistorySync(
 
     private data class AppliedCounts(val changed: Int, val deleted: Int)
 
+    /** Chữ ký suy luận của Gemini trong extra_content ({"google": {"thought_signature": ...}}). */
+    private fun thoughtSignatureOf(entry: HistoryMetaMessage): String? =
+        entry.extra_content?.jsonObject?.get("google")?.jsonObject
+            ?.get("thought_signature")?.jsonPrimitive?.contentOrNull
+
     /**
      * Áp nội dung file vào Room (một transaction).
      * - Tin trong file: có id thì cập nhật chữ/số lượt/trạng thái, chưa có thì thêm mới.
@@ -186,9 +192,11 @@ class HistorySync(
                 if (existing != null) {
                     val newStatus = if (pm.error != null) "error" else "done"
                     val newImages = if (pm.role == "user") encodeImages(entry.attachments) else existing.imagePaths
+                    val newSig = thoughtSignatureOf(entry)
                     if (existing.text != pm.text || existing.turnNo != pm.turnNo ||
                         existing.status != newStatus || existing.error != pm.error ||
-                        existing.toolCallsJson != callsJson || existing.imagePaths != newImages
+                        existing.toolCallsJson != callsJson || existing.imagePaths != newImages ||
+                        existing.thoughtSignature != newSig
                     ) {
                         db.messages().upsert(
                             existing.copy(
@@ -198,6 +206,7 @@ class HistorySync(
                                 error = pm.error,
                                 toolCallsJson = callsJson,
                                 imagePaths = newImages,
+                                thoughtSignature = newSig,
                                 edited = if (existing.text != pm.text) true else existing.edited,
                             ),
                         )
@@ -220,6 +229,7 @@ class HistorySync(
                             status = if (pm.error != null) "error" else "done",
                             error = pm.error,
                             createdAt = entry.createdAt,
+                            thoughtSignature = thoughtSignatureOf(entry),
                         ),
                     )
                     changed++

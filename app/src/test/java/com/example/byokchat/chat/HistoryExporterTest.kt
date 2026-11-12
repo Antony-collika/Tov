@@ -6,6 +6,8 @@ import com.example.byokchat.data.MessageEntity
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,7 +32,7 @@ class HistoryExporterTest {
             msg("m1", "t1", 1, "user", "What time is it?"),
             msg("m2", "t1", 2, "assistant", "", { copy(toolCallsJson = callsJson) }),
             msg("m3", "t1", 3, "tool", "2026-11-10 09:00", { copy(toolCallId = "call-1", toolUid = "time.now", toolName = "current_time") }),
-            msg("m4", "t1", 4, "assistant", "It is 09:00."),
+            msg("m4", "t1", 4, "assistant", "It is 09:00.", { copy(thoughtSignature = "sig-abc") }),
             msg("m5", "t2", 5, "user", "Thanks"),
             msg("m6", "t2", 6, "assistant", "You are welcome."),
         )
@@ -69,8 +71,16 @@ class HistoryExporterTest {
         assertEquals("current_time", rounds[0].name)
         assertEquals("2026-11-10 09:00", rounds[0].result)
         assertEquals(emptyList<HistoryToolRound>(), parsed.messages.getValue("m4").tool_rounds)
-        // extra_content luôn null: Room không lưu trường này (Đợt E, không đổi DB).
-        assertTrue(parsed.messages.values.all { it.extra_content == null })
+        // extra_content: chỉ tin assistant có thoughtSignature mới có
+        // {"google": {"thought_signature": ...}}; các tin khác null.
+        assertTrue(parsed.messages.getValue("m1").extra_content == null)
+        assertTrue(parsed.messages.getValue("m2").extra_content == null)
+        val extra = parsed.messages.getValue("m4").extra_content
+        assertTrue(extra != null)
+        assertEquals(
+            "sig-abc",
+            extra!!.jsonObject["google"]?.jsonObject?.get("thought_signature")?.jsonPrimitive?.content,
+        )
     }
 
     @Test

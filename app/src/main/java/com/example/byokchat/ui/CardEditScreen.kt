@@ -127,6 +127,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     val currentModel = container.settings.currentModel.value
     var effort by remember(cardId) { mutableStateOf(savedMetadata.effort) }
     var stopText by remember(cardId) { mutableStateOf(savedMetadata.stopSequences.joinToString("\n")) }
+    var keepSignature by remember(cardId) { mutableStateOf(savedMetadata.keepThoughtSignature) }
     var maxTokens by remember(cardId) { mutableStateOf((currentProvider?.maxOutputTokens ?: 8192).toString()) }
     val stopLines = stopText.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
     val stopsValid = stopLines.size <= 4
@@ -145,6 +146,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             toolsSource != (card?.toolsSource ?: ToolsSource.FILE) ||
             source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
+            keepSignature != savedMetadata.keepThoughtSignature ||
             (currentProvider != null && maxTokens != currentProvider.maxOutputTokens.toString())
         )
     val saveValid = (card?.kind != CardKind.HISTORY || policy != HistoryPolicy.LAST_N || lastTurnsValid) && stopsValid && maxTokensValid
@@ -210,6 +212,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 MetadataParams(
                     effort = effort,
                     stopSequences = stopLines.take(4),
+                    keepThoughtSignature = keepSignature,
                 )
             )
             val cfg = currentProvider
@@ -413,6 +416,15 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                             "For example, write \"User:\" so the model never starts a new turn by itself.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    // Đợt fix 12/11/2026 (K): công tắc chữ ký suy luận — chỉ
+                    // áp cho chữ ký của phần chữ trả lời; chữ ký của lệnh gọi
+                    // tool thì luôn gửi lại (Gemini bắt buộc).
+                    SwitchRow(
+                        title = "Keep thought signature",
+                        desc = "Sends Gemini's thought signature back with the reply, so the model keeps its train of thought. Tool signatures are always kept.",
+                        checked = keepSignature,
+                        onChange = { keepSignature = it },
                     )
                 }
                 CardKind.SYSTEM -> {
