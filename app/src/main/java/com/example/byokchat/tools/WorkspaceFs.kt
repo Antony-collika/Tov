@@ -407,6 +407,10 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     fun openOut(doc: DocumentFile): OutputStream =
         resolver.openOutputStream(doc.uri, "wt") ?: throw ToolException("Could not write '${doc.name}'.")
 
+    /** Mở file để ghi thêm vào cuối ("wa"): dùng cho append history.md/meta. */
+    fun openAppend(doc: DocumentFile): OutputStream =
+        resolver.openOutputStream(doc.uri, "wa") ?: throw ToolException("Could not write '${doc.name}'.")
+
     private fun looksBinary(bytes: ByteArray): Boolean {
         val n = minOf(bytes.size, 8000)
         for (i in 0 until n) if (bytes[i].toInt() == 0) return true
@@ -497,6 +501,25 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     /** Ghi file trong Session storage (Đợt E). */
     fun writeSessionText(path: String, text: String) = writeTextUnder(sessionRoot(), path, text)
+
+    /**
+     * Ghi thêm vào cuối file (tạo file nếu chưa có). Dùng cho append history
+     * (Đợt fix 12/11/2026): chỉ ghi phần mới, không ghi lại toàn bộ.
+     */
+    fun appendTextUnder(root: DocumentFile, path: String, text: String) {
+        val segs = segments(path)
+        if (segs.isEmpty()) throw ToolException("Missing file name.")
+        val parent = ensureDir(segs.dropLast(1), root = root)
+        val name = segs.last()
+        var doc = parent.findFile(name)
+        if (doc != null && doc.isDirectory) throw ToolException("'${display(path)}' is a folder.")
+        if (doc == null) doc = createFileNamed(parent, name)
+        openAppend(doc).use { it.write(text.toByteArray(Charsets.UTF_8)) }
+        clearMeta()
+    }
+
+    /** Ghi thêm vào cuối file trong Session storage (Đợt E). */
+    fun appendSessionText(path: String, text: String) = appendTextUnder(sessionRoot(), path, text)
 
     // ---------- Duyệt cây ----------
 
