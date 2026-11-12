@@ -52,6 +52,14 @@ data class MetadataParams(
     val effort: ReasoningEffort = ReasoningEffort.MEDIUM,
     /** Chuỗi dừng, tối đa 4 (giới hạn chặt nhất đã biết — OpenAI stop ≤ 4). Rỗng = không gửi. */
     val stopSequences: List<String> = emptyList(),
+    /**
+     * Giữ chữ ký suy luận của Gemini cho phần chữ trả lời (Đợt fix 12/11/2026):
+     * BẬT = gửi lại chữ ký ở request sau (mạch suy luận liền mạch hơn);
+     * TẮT = không gửi chữ ký của phần chữ. Chữ ký của LỆNH GỌI tool thì LUÔN
+     * gửi lại (Gemini bắt buộc, thiếu là lỗi 400) — công tắc này không ảnh
+     * hưởng tới chúng. Mặc định BẬT.
+     */
+    val keepThoughtSignature: Boolean = true,
 ) {
     /**
      * Effort thật sự áp cho hãng này. OpenAI(-compatible): LUÔN NONE —

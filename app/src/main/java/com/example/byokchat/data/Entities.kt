@@ -72,6 +72,12 @@ data class MessageEntity(
     val status: String = "done",
     val error: String? = null,
     val createdAt: Long,
+    /**
+     * Chữ ký suy luận của Gemini cho phần chữ của tin assistant này (Đợt fix
+     * 12/11/2026): gửi lại nguyên vẹn ở request sau để giữ mạch suy luận.
+     * Chỉ Gemini dùng; chữ ký của lệnh gọi tool nằm trong AiToolCall.signature.
+     */
+    val thoughtSignature: String? = null,
 )
 
 @Entity(tableName = "notes")

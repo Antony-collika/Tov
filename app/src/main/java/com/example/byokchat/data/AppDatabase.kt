@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -50,14 +50,26 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v5 -> v6 (Đợt fix 12/11/2026): chữ ký suy luận của Gemini cho phần
+         * chữ của tin assistant (`thoughtSignature` trên messages, null =
+         * không có / không phải Gemini). Hàng cũ để null — request sau chỉ
+         * gửi lại chữ ký khi có, không lỗi.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN thoughtSignature TEXT")
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "byokchat.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6)
                 // Không còn fallbackToDestructiveMigration(): từ v5 trở đi mọi
                 // thay đổi cấu trúc đều phải có migration thật (quy tắc kế hoạch
                 // Glassbox, mục 6 Đợt E). v2 -> v3 (bỏ systemPrompt) và v3 -> v4
                 // (bỏ providerId/model của từng cuộc) vẫn không có migration:
-                // bản cài đang ở v2/v3 khi nâng cấp lên v5 sẽ báo lỗi thay vì
+                // bản cài đang ở v2/v3 khi nâng cấp lên v6 sẽ báo lỗi thay vì
                 // bị xóa sạch DB — gỡ app và cài lại trong trường hợp đó.
                 .build()
     }
