@@ -12,6 +12,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
 
@@ -147,6 +154,15 @@ class SettingsRepository(context: Context) {
         plain.edit().putBoolean("notif_permission_asked", asked).apply()
     }
 
+    /** Thông báo một lần khi provider đã lưu được migrate (xem [loadProviders]): null = không có gì để báo. */
+    private val _providerMigrationNotice = MutableStateFlow(plain.getString("provider_migration_notice", null))
+    val providerMigrationNotice: StateFlow<String?> = _providerMigrationNotice.asStateFlow()
+
+    fun dismissProviderMigrationNotice() {
+        _providerMigrationNotice.value = null
+        plain.edit().remove("provider_migration_notice").apply()
+    }
+
     /** Nhật ký request (Đợt B): ghi mỗi lần gọi model ra file, mặc định bật. */
     private val _requestLogEnabled = MutableStateFlow(plain.getBoolean("request_log_enabled", true))
     val requestLogEnabled: StateFlow<Boolean> = _requestLogEnabled.asStateFlow()
@@ -245,9 +261,52 @@ class SettingsRepository(context: Context) {
         return migrated
     }
 
+    /**
+     * Đợt bỏ provider 12/11/2026: hãng Anthropic và loại DeepSeek riêng lẻ
+     * đã bỏ. Kho lưu cũ vẫn còn JSON với "type":"CLAUDE" / "DEEPSEEK" — enum
+     * mới không còn hai giá trị đó nên decode cả danh sách sẽ lỗi và mất
+     * hết provider đã lưu. Vì vậy đọc từng provider một, ghi nhận số lượng
+     * để báo user một lần (xem [providerMigrationNotice]):
+     * - DeepSeek → chuyển sang Custom, giữ nguyên key + địa chỉ (địa chỉ
+     *   trống thì ghi https://api.deepseek.com, vì Custom không có địa chỉ
+     *   mặc định); cuộc chat DeepSeek cũ tiếp tục chạy;
+     * - Anthropic → bỏ khỏi danh sách dùng được (cuộc chat cũ giữ nguyên
+     *   tin nhắn, chỉ không gửi tới Claude được nữa).
+     * Ghi đè danh sách đã migrate xuống kho (xem ensureSecureLoaded) nên
+     * lần sau không migrate lại.
+     */
+    private var migrationConvertedDeepSeek = 0
+    private var migrationRemovedAnthropic = 0
+    private var migrationRemovedIds: Set<String> = emptySet()
+
     private fun loadProviders(): List<ProviderConfig> {
         val raw = secure.getString("providers", null) ?: return emptyList()
-        return runCatching { json.decodeFromString(listSer, raw) }.getOrDefault(emptyList())
+        val arr = runCatching { json.parseToJsonElement(raw).jsonArray }.getOrNull() ?: return emptyList()
+        val out = mutableListOf<ProviderConfig>()
+        val removedIds = mutableSetOf<String>()
+        for (el in arr) {
+            val obj = el as? JsonObject ?: continue
+            // Đọc chuỗi an toàn: kho hỏng (kiểu sai) thì bỏ qua provider đó
+            // thay vì làm hỏng cả danh sách.
+            fun str(key: String): String? = (obj[key] as? JsonPrimitive)?.contentOrNull
+            when (str("type")) {
+                "CLAUDE" -> {
+                    migrationRemovedAnthropic++
+                    str("id")?.let { removedIds += it }
+                }
+                "DEEPSEEK" -> {
+                    val base = str("baseUrl").orEmpty()
+                    var fixed: Map<String, JsonElement> = obj + ("type" to JsonPrimitive(ProviderType.CUSTOM.name))
+                    if (base.isBlank()) fixed = fixed + ("baseUrl" to JsonPrimitive("https://api.deepseek.com"))
+                    runCatching { json.decodeFromJsonElement(ProviderConfig.serializer(), JsonObject(fixed)) }
+                        .getOrNull()?.let { out += it; migrationConvertedDeepSeek++ }
+                }
+                else -> runCatching { json.decodeFromJsonElement(ProviderConfig.serializer(), el) }
+                    .getOrNull()?.let { out += it }
+            }
+        }
+        migrationRemovedIds = removedIds
+        return out
     }
 
     /** Đọc nhà cung cấp và API key tìm kiếm từ kho mã hóa, đúng một lần. Gọi nhiều lần cũng được. */
@@ -256,6 +315,37 @@ class SettingsRepository(context: Context) {
         if (_ready.value) return
         _providers.value = migrateIncludeUsage(loadProviders())
         _searchKey.value = secure.getString("search_key", "") ?: ""
+        // Đợt bỏ provider 12/11/2026 (xem loadProviders): danh sách đã
+        // migrate thì ghi đè xuống kho; lựa chọn model toàn cục / provider
+        // mặc định đang trỏ tới provider Anthropic đã bỏ thì dọn, rồi báo
+        // user một lần bằng lời dễ hiểu (hiện ở màn AI providers cho tới
+        // khi user tắt).
+        var modelCleared = false
+        if (migrationRemovedIds.isNotEmpty()) {
+            if (_currentModelProviderId.value in migrationRemovedIds) {
+                setCurrentModel(null, null)
+                modelCleared = true
+            }
+            if (_activeProviderId.value in migrationRemovedIds) {
+                setActiveProvider(_providers.value.firstOrNull()?.id)
+            }
+        }
+        if (migrationConvertedDeepSeek > 0 || migrationRemovedAnthropic > 0) {
+            secure.edit().putString("providers", json.encodeToString(listSer, _providers.value)).apply()
+            val parts = mutableListOf<String>()
+            if (migrationConvertedDeepSeek > 0) {
+                parts += "DeepSeek is now set up as a Custom provider with the same API key and address (https://api.deepseek.com) — your DeepSeek chats keep working."
+            }
+            if (migrationRemovedAnthropic > 0) {
+                parts += "Anthropic (Claude) is no longer available in this app, so its saved provider was removed. Your old Claude chats are kept, but they can't send to Claude anymore."
+            }
+            if (modelCleared) {
+                parts += "The model you had chosen was a Claude model, so it was cleared — pick another model in the chat."
+            }
+            val notice = parts.joinToString(" ")
+            _providerMigrationNotice.value = notice
+            plain.edit().putString("provider_migration_notice", notice).apply()
+        }
         // Mặc định effort theo hãng (quyết định 15): khi user chưa từng
         // lưu Metadata thì mặc định đi theo provider đang chọn (NONE cho
         // OpenAI, MEDIUM cho Gemini/Custom). Chỉ đổi giá trị trong bộ
