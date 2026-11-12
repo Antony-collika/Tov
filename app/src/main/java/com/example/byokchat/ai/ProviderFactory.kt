@@ -10,8 +10,9 @@ object ProviderFactory {
     ): AiProvider = when (cfg.type) {
         ProviderType.CLAUDE -> ClaudeProvider(cfg, log)
         ProviderType.GEMINI -> GeminiProvider(cfg, log)
-        // Đợt 7: include_usage đọc từ chính provider (cfg.includeUsage),
-        // không còn giá trị toàn cục truyền vào đây nữa.
-        ProviderType.OPENAI, ProviderType.CUSTOM -> OpenAiProvider(cfg, log)
+        // Đợt provider 12/11/2026: OpenAI chính hãng dùng Responses API;
+        // DeepSeek + Custom ở lại Chat Completions (họ chỉ có endpoint đó).
+        ProviderType.OPENAI -> ResponsesProvider(cfg, log)
+        ProviderType.DEEPSEEK, ProviderType.CUSTOM -> OpenAiProvider(cfg, log)
     }
 }

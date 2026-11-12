@@ -8,6 +8,8 @@ enum class ProviderType(val label: String) {
     OPENAI("OpenAI"),
     GEMINI("Gemini (Google)"),
     CUSTOM("Custom (OpenAI-compatible)"),
+    /** DeepSeek (Đợt provider 12/11/2026): tách riêng khỏi Custom vì luật reasoning khác — Chat Completions + gửi lại reasoning_content. */
+    DEEPSEEK("DeepSeek"),
 }
 
 @Serializable
@@ -23,10 +25,11 @@ data class ProviderConfig(
     val contextTokens: Int = 0,
     val maxOutputTokens: Int = 8192,
     /**
-     * OpenAI / Custom: xin thêm số token thật trong luồng stream
+     * Custom / DeepSeek: xin thêm số token thật trong luồng stream
      * (`stream_options.include_usage`). Mặc định bật; máy chủ tự dựng có
      * thể từ chối trường này thì tắt đi để gửi như cũ. Chỉ có ý nghĩa với
-     * loại OpenAI/Custom — Claude/Gemini tự gửi usage nên không có trường
+     * loại Custom/DeepSeek — OpenAI Responses tự gửi usage trong event
+     * response.completed, Claude/Gemini tự gửi usage nên không có trường
      * này. Có giá trị mặc định nên dữ liệu provider cũ vẫn đọc được (đợt 7
      * migrate giá trị toàn cục cũ sang đây, xem SettingsRepository).
      */
@@ -41,6 +44,7 @@ data class ProviderConfig(
             ProviderType.OPENAI -> "https://api.openai.com/v1"
             ProviderType.GEMINI -> "https://generativelanguage.googleapis.com"
             ProviderType.CUSTOM -> ""
+            ProviderType.DEEPSEEK -> "https://api.deepseek.com"
         }
     }
 }
@@ -53,6 +57,7 @@ object ContextLimits {
         return when {
             "gemini" in m -> 1_000_000
             "claude" in m -> 200_000
+            "deepseek" in m -> 64_000
             "gpt-4.1" in m -> 1_000_000
             "gpt-5" in m -> 400_000
             Regex("\\bo[134]").containsMatchIn(m) -> 200_000

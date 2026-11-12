@@ -70,7 +70,8 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     var contextText by remember { mutableStateOf(existing?.contextTokens?.takeIf { it > 0 }?.toString() ?: "") }
     var maxOutText by remember { mutableStateOf((existing?.maxOutputTokens ?: 8192).toString()) }
     // Đợt 7: include_usage theo từng provider — chỉ có ý nghĩa với loại
-    // OpenAI/Custom (Claude/Gemini tự gửi usage). Provider mới mặc định bật.
+    // Custom/DeepSeek (OpenAI Responses và Claude/Gemini tự gửi usage).
+    // Provider mới mặc định bật.
     var includeUsage by remember { mutableStateOf(existing?.includeUsage ?: true) }
     var makeDefault by remember { mutableStateOf(existing == null || existing.id == activeId) }
     var fetching by remember { mutableStateOf(false) }
@@ -211,9 +212,10 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.fillMaxWidth(),
             )
-            // Chỉ loại OpenAI/Custom mới có trường này: Claude/Gemini tự gửi
+            // Chỉ loại Custom/DeepSeek mới có trường này: OpenAI Responses tự
+            // gửi usage trong event response.completed, Claude/Gemini tự gửi
             // usage nên không cần xin thêm, ẩn hẳn để user không nhầm.
-            if (type == ProviderType.OPENAI || type == ProviderType.CUSTOM) {
+            if (type == ProviderType.CUSTOM || type == ProviderType.DEEPSEEK) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Ask for real token counts")
