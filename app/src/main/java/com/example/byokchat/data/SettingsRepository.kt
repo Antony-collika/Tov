@@ -147,6 +147,16 @@ class SettingsRepository(context: Context) {
         plain.edit().putBoolean("notif_permission_asked", asked).apply()
     }
 
+    // Đợt provider 12/11/2026: đã đọc popup giáo dục về thinking của Claude
+    // (chỉ hiện một lần, khi Save provider Anthropic lần đầu).
+    private val _claudeThinkingEducated = MutableStateFlow(plain.getBoolean("claude_thinking_educated", false))
+    val claudeThinkingEducated: StateFlow<Boolean> = _claudeThinkingEducated.asStateFlow()
+
+    fun setClaudeThinkingEducated(educated: Boolean = true) {
+        _claudeThinkingEducated.value = educated
+        plain.edit().putBoolean("claude_thinking_educated", educated).apply()
+    }
+
     /** Nhật ký request (Đợt B): ghi mỗi lần gọi model ra file, mặc định bật. */
     private val _requestLogEnabled = MutableStateFlow(plain.getBoolean("request_log_enabled", true))
     val requestLogEnabled: StateFlow<Boolean> = _requestLogEnabled.asStateFlow()

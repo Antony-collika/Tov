@@ -54,10 +54,17 @@ import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
+/** Đợt provider 12/11/2026: nội dung giáo dục về thinking của Claude — hiện
+ * trong popup khi Save provider Anthropic lần đầu, và ở footnote cuối màn sửa
+ * provider Anthropic để đọc lại. */
+internal const val CLAUDE_THINKING_INFO =
+    "Claude's extended thinking: once a chat has used thinking, Claude requires the system prompt, tools, and earlier messages to stay exactly the same — changing them breaks the reasoning chain and the request fails. In this app, those parts are locked for that chat once thinking has been used. To change them, start a new chat. Switching to a different model mid-chat starts a new branch instead."
+
 fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit) {
     val context = LocalContext.current
     val settings = context.container.settings
     val activeId by settings.activeProviderId.collectAsState()
+    val educated by settings.claudeThinkingEducated.collectAsState()
     val existing = remember { providerId?.let { settings.provider(it) } }
     val type = existing?.type ?: runCatching { ProviderType.valueOf(newType ?: "") }.getOrDefault(ProviderType.OPENAI)
     val scope = rememberCoroutineScope()
@@ -79,6 +86,8 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     var fetchMessage by remember { mutableStateOf<String?>(null) }
     var fetchFailed by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    // Đợt provider 12/11/2026: popup giáo dục về thinking của Claude.
+    var showThinkingInfo by remember { mutableStateOf(false) }
 
     fun toast(msg: String) = Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
 
@@ -100,6 +109,20 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     // Cảnh báo (không chặn lưu): API key sắp được gửi qua địa chỉ http không mã hóa.
     val insecureHttp = baseUrl.trim().startsWith("http://", ignoreCase = true) && apiKey.isNotBlank()
 
+    fun save() {
+        val cfg = buildConfig()
+        when {
+            type == ProviderType.CUSTOM && !cfg.baseUrl.startsWith("http") ->
+                toast("The Custom type needs a server address starting with http:// or https://")
+            type != ProviderType.CUSTOM && cfg.apiKey.isBlank() ->
+                toast("Please enter an API key.")
+            else -> {
+                settings.saveProvider(cfg, makeDefault)
+                onDone()
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -111,17 +134,10 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 },
                 actions = {
                     TextButton(onClick = {
-                        val cfg = buildConfig()
-                        when {
-                            type == ProviderType.CUSTOM && !cfg.baseUrl.startsWith("http") ->
-                                toast("The Custom type needs a server address starting with http:// or https://")
-                            type != ProviderType.CUSTOM && cfg.apiKey.isBlank() ->
-                                toast("Please enter an API key.")
-                            else -> {
-                                settings.saveProvider(cfg, makeDefault)
-                                onDone()
-                            }
-                        }
+                        // Đợt provider 12/11/2026: lần đầu Save provider
+                        // Anthropic thì hiện popup giáo dục về thinking trước
+                        // (đã đọc rồi thì lưu thẳng).
+                        if (type == ProviderType.CLAUDE && !educated) showThinkingInfo = true else save()
                     }) { Text("Save") }
                 },
             )
@@ -238,7 +254,35 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     modifier = Modifier.padding(bottom = 24.dp),
                 ) { Text("Delete this provider", color = MaterialTheme.colorScheme.error) }
             }
+            // Đợt provider 12/11/2026: footnote đọc lại nội dung popup giáo
+            // dục về thinking của Claude.
+            if (type == ProviderType.CLAUDE) {
+                Text(
+                    CLAUDE_THINKING_INFO,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 24.dp),
+                )
+            }
         }
+    }
+
+    if (showThinkingInfo) {
+        AlertDialog(
+            onDismissRequest = { showThinkingInfo = false },
+            title = { Text("Before you use Claude thinking") },
+            text = { Text(CLAUDE_THINKING_INFO) },
+            confirmButton = {
+                TextButton(onClick = {
+                    settings.setClaudeThinkingEducated()
+                    showThinkingInfo = false
+                    save()
+                }) { Text("Confirm and Close") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showThinkingInfo = false }) { Text("Close") }
+            },
+        )
     }
 
     if (confirmDelete && existing != null) {
