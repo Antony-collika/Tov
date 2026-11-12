@@ -12,7 +12,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
 
-/** Dùng cho OpenAI và mọi dịch vụ tương thích OpenAI (mục Tùy chỉnh). */
+/** Chat Completions cho DeepSeek và mọi dịch vụ tương thích OpenAI (mục Tùy chỉnh). OpenAI chính hãng dùng ResponsesProvider. */
 class OpenAiProvider(
     private val cfg: ProviderConfig,
     private val log: RequestLog? = null,
@@ -53,6 +53,14 @@ class OpenAiProvider(
                 val delta = obj["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("delta")?.jsonObject
                     ?: return@collect
                 delta["content"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
+                // DeepSeek trả chuỗi suy luận ở reasoning_content, ngang hàng
+                // với content (Đợt provider 12/11/2026): tích lũy riêng, không
+                // trộn vào câu trả lời. Chỉ DeepSeek — Custom giữ nguyên
+                // (không đọc reasoning của hãng tương thích khác).
+                if (cfg.type == ProviderType.DEEPSEEK) {
+                    delta["reasoning_content"]?.jsonPrimitive?.contentOrNull
+                        ?.let { if (it.isNotEmpty()) emit(AiEvent.Reasoning(it)) }
+                }
                 delta["tool_calls"]?.jsonArray?.forEach { tc ->
                     val t = tc.jsonObject
                     val idx = t["index"]?.jsonPrimitive?.intOrNull ?: 0
@@ -82,10 +90,12 @@ class OpenAiProvider(
     /**
      * Body gửi đi, tách riêng khỏi stream() để test được (Đợt 6). Thẻ Metadata:
      * - max_completion_tokens (KHÔNG dùng max_tokens đã deprecated).
-     * - reasoning_effort LUÔN "none" (đợt fix 11/11/2026, D3): Chat
-     *   Completions chỉ cho gọi tool khi reasoning_effort "none" — server
-     *   mặc định medium nên bỏ qua cũng là medium; tool luôn được ưu tiên
-     *   hơn thinking, app tự ép về none (xem MetadataParams.effectiveEffort).
+     * - reasoning_effort theo lựa chọn của user, map riêng từng hãng (đợt
+     *   provider 12/11/2026): Custom gửi nguyên tên mức OpenAI, DeepSeek kẹp
+     *   về low/high/max. KHÔNG còn ép "none" chung — luật cũ của D3 (Chat
+     *   Completions + tool chỉ chạy khi none) chỉ đúng với OpenAI chính hãng
+     *   từ GPT-5.4, mà OpenAI chính hãng giờ dùng Responses API; DeepSeek
+     *   cho thinking + tool dùng chung trên Chat Completions.
      * - Tools: LUÔN gửi — không còn trường hợp nào tool bị tắt vì reasoning.
      *   tool_choice "auto" khi có tool.
      * - stop tối đa 4 chuỗi.
@@ -96,7 +106,7 @@ class OpenAiProvider(
     internal fun buildBody(request: AiRequest): JsonObject = buildJsonObject {
         put("model", request.model)
         put("max_completion_tokens", request.maxOutputTokens)
-        put("reasoning_effort", request.metadata.effortValueFor(ProviderType.OPENAI) ?: "none")
+        put("reasoning_effort", request.metadata.effortValueFor(cfg.type) ?: "none")
         put("stream", true)
         // Số token thật: xin thêm stream_options.include_usage theo từng
         // provider (cfg.includeUsage, Đợt 7); tắt đi nếu máy chủ tự dựng
@@ -149,6 +159,13 @@ class OpenAiProvider(
                 Role.ASSISTANT -> add(buildJsonObject {
                     put("role", "assistant")
                     if (m.text.isEmpty() && m.toolCalls.isNotEmpty()) put("content", JsonNull) else put("content", m.text)
+                    // DeepSeek: khi request có tools thì PHẢI gửi lại đầy đủ
+                    // reasoning_content của mọi lượt trước (thiếu là lỗi 400
+                    // — tài liệu DeepSeek). Tov luôn gửi tool nên luôn gửi
+                    // lại. Hãng khác không nhận trường này.
+                    if (cfg.type == ProviderType.DEEPSEEK) {
+                        m.reasoningText?.let { put("reasoning_content", it) }
+                    }
                     if (m.toolCalls.isNotEmpty()) {
                         put("tool_calls", buildJsonArray {
                             m.toolCalls.forEach { tc ->
