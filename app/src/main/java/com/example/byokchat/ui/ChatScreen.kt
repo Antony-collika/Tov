@@ -412,6 +412,9 @@ fun ChatScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // Thanh mini-player (kế hoạch media player, Đợt 3): đầu vùng nội
+            // dung chat, ngay dưới top bar; chỉ hiện khi đang có nhạc.
+            MediaMiniPlayerHost(container)
             val showBanner = remember(toolPrefs) { container.registry.hasEnabledWorkspaceTools() } && !workspaceOk
             if (showBanner) {
                 Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
