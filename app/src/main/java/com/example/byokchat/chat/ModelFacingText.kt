@@ -72,6 +72,9 @@ object ModelFacingText {
     fun mediaPlaying(name: String, duration: String, next: List<String>): String =
         "Đang phát: $name ($duration)" + if (next.isEmpty()) "" else ", tiếp theo: ${next.joinToString(", ")}"
 
+    /** Tool media.play: không xin được audio focus (âm thanh đang bận). */
+    fun mediaFocusBusy(): String = "Không phát được nhạc lúc này vì âm thanh đang bận."
+
     /** Tool media.play: không mở được file nhạc. */
     fun mediaPlayFailed(name: String): String = "Không phát được file '$name'."
 

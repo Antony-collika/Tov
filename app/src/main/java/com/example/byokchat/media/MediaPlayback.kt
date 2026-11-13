@@ -1,10 +1,14 @@
 package com.example.byokchat.media
 
 import android.content.Context
+import android.content.Intent
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.net.Uri
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.example.byokchat.chat.ModelFacingText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -62,6 +66,41 @@ class MediaPlayback(private val appContext: Context) {
     private var ticker: Job? = null
     private val playMutex = Mutex()
 
+    // ---------- Audio focus (Đợt 2) ----------
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var audioFocusRequest: AudioFocusRequest? = null
+
+    /** Có cuộc gọi / app khác phát thì dừng tạm; hết thì phát tiếp nếu trước đó đang phát. */
+    private var resumeOnFocusGain = false
+
+    /** Đang bị "duck" (app khác phát tiếng ngắn): giảm âm lượng, không dừng. */
+    private var ducked = false
+
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        scope.launch {
+            when (change) {
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    if (ducked) {
+                        setVolume(1f)
+                        ducked = false
+                    }
+                    if (resumeOnFocusGain) {
+                        resumeOnFocusGain = false
+                        resumeInternal()
+                    }
+                }
+                AudioManager.AUDIOFOCUS_LOSS, AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    resumeOnFocusGain = _state.value.playing
+                    pauseInternal()
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    setVolume(DUCK_VOLUME)
+                    ducked = true
+                }
+            }
+        }
+    }
+
     /** Tăng mỗi lần dừng/xóa hàng đợi — để lần prepare đang chờ không "hồi sinh" nhạc sau khi đã dừng. */
     private var generation = 0
 
@@ -75,11 +114,15 @@ class MediaPlayback(private val appContext: Context) {
             try {
                 withContext(Dispatchers.Main.immediate) {
                     stopInternal()
+                    if (!requestFocus()) {
+                        throw MediaPlayException(ModelFacingText.mediaFocusBusy())
+                    }
                     _state.value = MediaState(queue = tracks, index = 0)
                     if (!startTrack(0)) {
                         stopInternal()
                         throw MediaPlayException(ModelFacingText.mediaPlayFailed(tracks[0].name))
                     }
+                    startService()
                     _state.value.durationMs
                 }
             } catch (e: CancellationException) {
@@ -142,6 +185,7 @@ class MediaPlayback(private val appContext: Context) {
                 return false
             }
             this.player = player
+            player.setVolume(if (ducked) DUCK_VOLUME else 1f, if (ducked) DUCK_VOLUME else 1f)
             _state.update { it.copy(index = index, positionMs = 0, durationMs = player.duration, playing = true) }
             player.start()
             startTicker()
@@ -194,6 +238,10 @@ class MediaPlayback(private val appContext: Context) {
 
     private fun resumeInternal() {
         val p = player ?: return
+        if (ducked) {
+            setVolume(1f)
+            ducked = false
+        }
         runCatching { p.start() }
         _state.update { it.copy(playing = true) }
         startTicker()
@@ -211,7 +259,58 @@ class MediaPlayback(private val appContext: Context) {
         ticker?.cancel()
         ticker = null
         releasePlayer()
+        abandonFocus()
+        stopService()
         _state.value = MediaState()
+    }
+
+    // ---------- Audio focus + vòng đời service (Đợt 2) ----------
+
+    /** Xin quyền dùng âm thanh trước khi phát; không được thì báo lỗi cho AI. */
+    private fun requestFocus(): Boolean {
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            .setOnAudioFocusChangeListener(focusListener)
+            .build()
+        return if (audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            audioFocusRequest = request
+            true
+        } else {
+            false
+        }
+    }
+
+    private fun abandonFocus() {
+        audioFocusRequest?.let { request -> runCatching { audioManager.abandonAudioFocusRequest(request) } }
+        audioFocusRequest = null
+        resumeOnFocusGain = false
+        ducked = false
+    }
+
+    private fun setVolume(volume: Float) {
+        runCatching { player?.setVolume(volume, volume) }
+    }
+
+    /** Bật service nền để nhạc chạy khi tắt màn hình / chuyển app. */
+    private fun startService() {
+        val intent = Intent(appContext, MediaPlaybackService::class.java).setAction(MediaPlaybackService.ACTION_START)
+        try {
+            ContextCompat.startForegroundService(appContext, intent)
+        } catch (e: IllegalStateException) {
+            // Hệ thống không cho bật dịch vụ nền lúc này (vd app đang chạy
+            // nền mà không có dịch vụ nào khác): nhạc vẫn phát trong tiến
+            // trình, tắt màn hình có thể dừng.
+            Log.w("Tov", "Could not start the music service: ${e.message}")
+        }
+    }
+
+    private fun stopService() {
+        runCatching { appContext.stopService(Intent(appContext, MediaPlaybackService::class.java)) }
     }
 
     private fun releasePlayer() {
@@ -234,5 +333,6 @@ class MediaPlayback(private val appContext: Context) {
     companion object {
         private const val PREPARE_TIMEOUT_MS = 20_000L
         private const val TICKER_MS = 500L
+        private const val DUCK_VOLUME = 0.2f
     }
 }
