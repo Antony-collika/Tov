@@ -1,9 +1,16 @@
 package com.example.byokchat.ui
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
@@ -24,10 +31,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.AppContainer
 import com.example.byokchat.media.MediaState
 import com.example.byokchat.media.formatMediaTime
+
+/**
+ * Màu thanh trượt theo mẫu "Gradient" Duy duyệt 2026-11-13: giữ nguyên
+ * gradient hồng → tím → xanh như mẫu, KHÔNG chỉnh về tông tím của app
+ * (Duy: sau này làm theme cho app, tạm để gradient vậy đã).
+ */
+private val GradientPink = Color(0xFFEC4899)
+private val GradientPurple = Color(0xFF8B5CF6)
+private val GradientBlue = Color(0xFF4F46E5)
+private val SliderTrackUnplayed = Color(0xFFE4E1F0)
+private val SliderThumbBlue = Color(0xFF4F46E5)
 
 /**
  * Thanh mini-player (kế hoạch media player, Đợt 3): chỉ đúng một hàng
@@ -91,6 +113,9 @@ fun MediaMiniPlayerBar(
                 style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.widthIn(min = 76.dp),
             )
+            // Thanh trượt kiểu mẫu "Gradient" Duy duyệt: rãnh mảnh, phần đã
+            // phát gradient hồng → tím → xanh, nút kéo tròn xanh viền trắng.
+            // Chỉ đổi hình thức; cách kéo/tua giữ nguyên như cũ.
             Slider(
                 value = position.toFloat(),
                 onValueChange = { dragPosition = it },
@@ -102,6 +127,44 @@ fun MediaMiniPlayerBar(
                 },
                 valueRange = 0f..state.durationMs.toFloat().coerceAtLeast(1f),
                 modifier = Modifier.weight(1f),
+                thumb = {
+                    Box(
+                        Modifier
+                            .size(20.dp)
+                            .background(SliderThumbBlue, CircleShape)
+                            .border(2.dp, Color.White, CircleShape)
+                    )
+                },
+                track = { sliderState ->
+                    val range = sliderState.valueRange
+                    val fraction = if (range.endInclusive > range.start) {
+                        ((sliderState.value - range.start) /
+                            (range.endInclusive - range.start)).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
+                    Canvas(Modifier.fillMaxWidth().height(4.dp)) {
+                        // Rãnh chưa phát: lavender nhạt, toàn chiều rộng.
+                        drawRoundRect(
+                            color = SliderTrackUnplayed,
+                            cornerRadius = CornerRadius(size.height / 2),
+                        )
+                        // Rãnh đã phát: gradient, kết thúc đúng tâm nút kéo.
+                        val thumbRadiusPx = 10.dp.toPx()
+                        val centerX = thumbRadiusPx + fraction * (size.width - thumbRadiusPx * 2)
+                        if (centerX > 0f) {
+                            drawRoundRect(
+                                brush = Brush.horizontalGradient(
+                                    colors = listOf(GradientPink, GradientPurple, GradientBlue),
+                                    startX = 0f,
+                                    endX = centerX,
+                                ),
+                                size = Size(centerX, size.height),
+                                cornerRadius = CornerRadius(size.height / 2),
+                            )
+                        }
+                    }
+                },
             )
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.Close, contentDescription = "Stop music")
