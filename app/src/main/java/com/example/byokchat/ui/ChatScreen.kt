@@ -139,7 +139,10 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     // Chỉ số 0 là tin mới nhất (đáy màn hình); cuộn lên quá 1 mục thì hiện nút "xuống cuối".
     val showScrollDown by remember { derivedStateOf { listState.firstVisibleItemIndex > 1 } }
-    val pickFolder = rememberFolderPicker()
+    var conflictName by remember { mutableStateOf<String?>(null) }
+    val pickFolder = rememberFolderPicker(
+        onConflict = { conflictName = it },
+    )
 
     var showModelPicker by remember { mutableStateOf(false) }
     var showMemory by remember { mutableStateOf(false) }
@@ -414,13 +417,20 @@ fun ChatScreen(
                 Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "No workspace folder is chosen (or access was lost), so file tools are blocked. Other tools still work.",
+                            "No AI playground folder is chosen (or access was lost), so file tools are blocked. Other tools still work.",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = pickFolder) { Text("Choose folder") }
+                        TextButton(onClick = pickFolder) { Text("Add folder") }
                     }
                 }
+            }
+            conflictName?.let { name ->
+                InfoDialog(
+                    title = "Folder name conflict",
+                    message = "A folder named $name already exists in your AI playground. Please choose a folder with a different name.",
+                    onDismiss = { conflictName = null },
+                )
             }
             // Đợt fix 11/11/2026 (C2): chưa chọn data storage thì không có chỗ
             // lưu session — chat mới không có history.md/history.meta.json,

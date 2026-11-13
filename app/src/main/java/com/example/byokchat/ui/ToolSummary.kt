@@ -36,8 +36,8 @@ internal fun toolSummary(uid: String?, name: String, argsJson: String): String {
     val a = parseArgs(argsJson)
     val path = a.s("path")
     return when (uid) {
-        "fs.list" -> if (path == null) "List workspace folder" else "List folder ${short(path)}"
-        "fs.tree" -> if (path == null) "Show workspace folder tree" else "Show folder tree of ${short(path)}"
+        "fs.list" -> if (path == null) "List playground folders" else "List folder ${short(path)}"
+        "fs.tree" -> if (path == null) "Show playground folder tree" else "Show folder tree of ${short(path)}"
         "fs.info" -> "Get info for ${short(path)}"
         "fs.mkdir" -> "Create folder ${short(path)}"
         "fs.copy" -> "Copy ${short(a.s("source"))} \u2192 ${short(a.s("dest"))}"

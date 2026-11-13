@@ -86,7 +86,7 @@ class ToolRegistry(
 
     /**
      * Danh sách công cụ đưa cho model (Đợt E).
-     * - exposed == null (legacy, CHỈ khi chưa chọn workspace — fs == null):
+     * - exposed == null (legacy, CHỈ khi chưa chọn playground folder — fs == null):
      *   mọi tool dùng được, tên/mô tả/schema gốc. Không có thẻ Tools
      *   KHÔNG còn cho null nữa (xóa thẻ = 0 tool).
      * - exposed != null: chỉ các tool trong file, đúng thứ tự file/khối,
@@ -94,7 +94,7 @@ class ToolRegistry(
      *   không đổi được schema).
      * - Cả hai đường đều KHÔNG lọc tool mode OFF (quyết định 8): tool tắt
      *   vẫn được offer, chỉ chặn lúc gọi trong execute(). Chỉ lọc tool
-     *   không dùng được (chưa chọn workspace / thiếu API key) vì model có
+     *   không dùng được (chưa chọn playground folder / thiếu API key) vì model có
      *   gọi cũng không chạy được.
      */
     override suspend fun definitions(exposed: List<ParsedTool>?): List<ToolDef> {
@@ -133,12 +133,13 @@ class ToolRegistry(
     /**
      * Kiểm tra giới hạn ghi của AI (Đợt E, quyết định 6 + quyết định 14). Trả về câu báo lỗi
      * cho model nếu vi phạm, null nếu được phép.
-     * - Mọi đường dẫn ghi phải nằm dưới allowedWriteSubfolder (nếu có).
+     * - Mọi đường dẫn ghi phải nằm dưới allowedWriteSubfolder (nếu có) — áp
+     *   dụng BÊN TRONG từng folder playground (đoạn đầu là tên folder).
      * - Tool ghi nội dung văn bản (txt.* WRITE) thì đích phải là file
      *   dạng text — xét theo NỘI DUNG, không theo extension (quyết định
      *   14): file text sửa được bất kể đuôi nào, file nhị phân thì không.
-     *   note.save/update không có đường dẫn trong args (app
-     *   tự ghi Tov/notes/<id>.md) nên mặc nhiên đúng.
+     *   note.save/update không có đường dẫn trong args (app tự ghi
+     *   notes/<id>.md trong thư mục Storage) nên mặc nhiên đúng.
      * - Tool ghi khác (fs.copy/move/rename/zip, convert.*, csv.*, json.*):
      *   đích là file đầu ra theo đúng chức năng của tool (.zip/.json/.csv...)
      *   nên chỉ kiểm tra subfolder, không ép đuôi .md.
@@ -150,11 +151,7 @@ class ToolRegistry(
     private fun aiWriteViolation(tool: Tool, args: JsonObject): String? {
         if (tool.risk != Risk.WRITE) return null
         val sub = normalizeWriteSubfolder(env.settings.allowedWriteSubfolder.value)
-        fun underSubfolder(path: String): Boolean {
-            if (sub.isEmpty()) return true
-            val p = path.trim().replace('\\', '/').trim('/')
-            return p.startsWith("$sub/")
-        }
+        fun underSubfolder(path: String): Boolean = underWriteSubfolder(path, sub)
         /**
          * Đích ghi có phải file dạng text không (quyết định 14): xét theo
          * nội dung (không có byte NUL trong 2000 byte đầu — xem

@@ -1,6 +1,7 @@
 package com.example.byokchat.tools
 
 import androidx.documentfile.provider.DocumentFile
+import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.util.TextUtil
 import com.example.byokchat.util.fmtTime
 import com.example.byokchat.util.globToRegex
@@ -10,7 +11,7 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
-private const val PATH_NOTE = " Path relative to the workspace root (e.g. 'reports/november.md')."
+private const val PATH_NOTE = " Path starting with a playground folder name (e.g. 'folder_01/reports/november.md')."
 
 fun fsTool(
     uid: String,
@@ -27,11 +28,11 @@ object FsTools {
     fun build(): List<Tool> = listOf(
         fsTool(
             "fs.list", Risk.READ, "list_dir",
-            "List the files and subfolders inside a workspace folder. Leave path empty to list the workspace root.",
-            schema { str("path", "Folder path (default: workspace root).") },
+            "List the files and subfolders inside a playground folder. Leave path empty to list the playground folders.",
+            schema { str("path", "Folder path (default: playground folders).") },
         ) { env, a ->
             val path = a.str("path").orEmpty()
-            val items = env.fs.children(env.fs.requireDir(path))
+            val items = env.fs.children(env.fs.dirFor(path))
             if (items.isEmpty()) "Folder '${env.fs.display(path)}' is empty."
             else {
                 val sb = StringBuilder("Folder '${env.fs.display(path)}': ${items.size} items\n")
@@ -47,15 +48,15 @@ object FsTools {
 
         fsTool(
             "fs.tree", Risk.READ, "tree",
-            "Show the workspace folder tree (nested subfolders).",
+            "Show the folder tree of the AI playground (nested subfolders).",
             schema {
-                str("path", "Root folder of the tree (default: workspace root).")
+                str("path", "Root folder of the tree (default: playground folders).")
                 int("max_depth", "Maximum depth (default 3).")
             },
         ) { env, a ->
             val path = a.str("path").orEmpty()
             val depth = (a.int("max_depth") ?: 3).coerceIn(0, 10)
-            val dir = env.fs.requireDir(path)
+            val dir = env.fs.dirFor(path)
             val sb = StringBuilder("${env.fs.display(path)}/\n")
             var count = 0
             var truncated = false
@@ -75,23 +76,28 @@ object FsTools {
             schema { str("path", "File or folder path.$PATH_NOTE", required = true) },
         ) { env, a ->
             val path = a.reqStr("path")
-            val d = env.fs.require(path)
-            val sb = StringBuilder()
-            sb.append("Path: ${env.fs.display(path)}\n")
-            sb.append("Type: ${if (env.fs.isDir(d)) "folder" else "file"}\n")
-            sb.append("Last modified: ${fmtTime(env.fs.modifiedOf(d))}\n")
-            if (env.fs.isDir(d)) {
-                val kids = env.fs.children(d)
-                sb.append("Contains: ${kids.count { env.fs.isDir(it) }} folders, ${kids.count { !env.fs.isDir(it) }} files")
+            if (env.fs.segments(path).isEmpty()) {
+                val count = env.fs.roots().size
+                "Path: .\nType: folder\nContains: $count playground folder(s)"
             } else {
-                sb.append("Size: ${humanSize(env.fs.sizeOf(d))} (${env.fs.sizeOf(d)} bytes)\n")
-                sb.append("MIME type: ${d.type ?: "unknown"}")
-                if (env.fs.isTextFile(d)) {
-                    val text = env.fs.readDocText(d, path)
-                    sb.append("\nLines: ${TextDoc.parse(text).lines.size}")
+                val d = env.fs.require(path)
+                val sb = StringBuilder()
+                sb.append("Path: ${env.fs.display(path)}\n")
+                sb.append("Type: ${if (env.fs.isDir(d)) "folder" else "file"}\n")
+                sb.append("Last modified: ${fmtTime(env.fs.modifiedOf(d))}\n")
+                if (env.fs.isDir(d)) {
+                    val kids = env.fs.children(d)
+                    sb.append("Contains: ${kids.count { env.fs.isDir(it) }} folders, ${kids.count { !env.fs.isDir(it) }} files")
+                } else {
+                    sb.append("Size: ${humanSize(env.fs.sizeOf(d))} (${env.fs.sizeOf(d)} bytes)\n")
+                    sb.append("MIME type: ${d.type ?: "unknown"}")
+                    if (env.fs.isTextFile(d)) {
+                        val text = env.fs.readDocText(d, path)
+                        sb.append("\nLines: ${TextDoc.parse(text).lines.size}")
+                    }
                 }
+                sb.toString()
             }
-            sb.toString()
         },
 
         fsTool(
@@ -101,8 +107,10 @@ object FsTools {
             preview = { env, a -> "Create folder: ${env.fs.display(a.reqStr("path"))}" },
         ) { env, a ->
             val path = a.reqStr("path")
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Missing folder name.")
-            env.fs.ensureDir(env.fs.segments(path))
+            val segs = env.fs.segments(path)
+            if (segs.isEmpty()) throw ToolException("Missing folder name.")
+            if (segs.size < 2) throw ToolException(ModelFacingText.topLevelChangeDenied(env.fs.rootNames()))
+            env.fs.ensureDir(segs.drop(1), root = env.fs.rootForPath(path).requireDoc())
             "Created folder '${env.fs.display(path)}'."
         },
 
@@ -115,10 +123,12 @@ object FsTools {
             },
             preview = { env, a -> "Copy '${env.fs.display(a.reqStr("source"))}' → '${env.fs.display(a.reqStr("dest"))}'" },
         ) { env, a ->
-            val src = env.fs.require(a.reqStr("source"))
-            val (parent, name, finalSegs) = env.fs.resolveTarget(a.reqStr("source"), a.reqStr("dest"))
+            val source = a.reqStr("source")
+            env.fs.checkOp(PlaygroundOp.COPY_SOURCE, source)
+            val src = env.fs.require(source)
+            val (parent, name, finalSegs) = env.fs.resolveTarget(source, a.reqStr("dest"))
             env.fs.copyDoc(src, parent, name)
-            "Copied '${env.fs.display(a.reqStr("source"))}' → '${finalSegs.joinToString("/")}'."
+            "Copied '${env.fs.display(source)}' → '${finalSegs.joinToString("/")}'."
         },
 
         fsTool(
@@ -130,11 +140,13 @@ object FsTools {
             },
             preview = { env, a -> "Move '${env.fs.display(a.reqStr("source"))}' → '${env.fs.display(a.reqStr("dest"))}'" },
         ) { env, a ->
-            val src = env.fs.require(a.reqStr("source"))
-            val (parent, name, finalSegs) = env.fs.resolveTarget(a.reqStr("source"), a.reqStr("dest"))
+            val source = a.reqStr("source")
+            env.fs.checkOp(PlaygroundOp.MOVE_SOURCE, source)
+            val src = env.fs.require(source)
+            val (parent, name, finalSegs) = env.fs.resolveTarget(source, a.reqStr("dest"))
             env.fs.copyDoc(src, parent, name)
-            if (!src.delete()) throw ToolException("Copied, but could not delete the original '${env.fs.display(a.reqStr("source"))}'. The copy is at '${finalSegs.joinToString("/")}'.")
-            "Moved '${env.fs.display(a.reqStr("source"))}' → '${finalSegs.joinToString("/")}'."
+            if (!src.delete()) throw ToolException("Copied, but could not delete the original '${env.fs.display(source)}'. The copy is at '${finalSegs.joinToString("/")}'.")
+            "Moved '${env.fs.display(source)}' → '${finalSegs.joinToString("/")}'."
         },
 
         fsTool(
@@ -151,8 +163,8 @@ object FsTools {
             if (newName.isEmpty() || newName.contains('/') || newName.contains('\\') || newName == "." || newName == "..") {
                 throw ToolException("Invalid new name.")
             }
+            env.fs.checkOp(PlaygroundOp.RENAME, path)
             val doc = env.fs.require(path)
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Cannot rename the root folder.")
             val parentPath = env.fs.segments(path).dropLast(1).joinToString("/")
             if (env.fs.find(if (parentPath.isEmpty()) newName else "$parentPath/$newName") != null) {
                 throw ToolException("An item named '$newName' already exists in this folder.")
@@ -173,7 +185,7 @@ object FsTools {
             },
         ) { env, a ->
             val path = a.reqStr("path")
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Cannot delete the workspace root folder.")
+            env.fs.checkOp(PlaygroundOp.DELETE, path)
             val d = env.fs.require(path)
             if (!d.delete()) throw ToolException("Could not delete '${env.fs.display(path)}'.")
             "Deleted '${env.fs.display(path)}'."
@@ -181,17 +193,17 @@ object FsTools {
 
         fsTool(
             "fs.find", Risk.READ, "find_files",
-            "Find files/folders by name in the workspace. pattern can be part of a name (case- and accent-insensitive) or a glob using * and ? (e.g. '*.csv').",
+            "Find files/folders by name in the AI playground. pattern can be part of a name (case- and accent-insensitive) or a glob using * and ? (e.g. '*.csv').",
             schema {
                 str("pattern", "Name fragment or pattern to look for.", required = true)
-                str("path", "Folder to start searching from (default: workspace root).")
+                str("path", "Folder to start searching from (default: playground folders).")
                 int("max_results", "Maximum number of results (default 100).")
             },
         ) { env, a ->
             val pattern = a.reqStr("pattern")
             val path = a.str("path").orEmpty()
             val max = (a.int("max_results") ?: 100).coerceIn(1, 500)
-            val dir = env.fs.requireDir(path)
+            val dir = env.fs.dirFor(path)
             val isGlob = pattern.contains('*') || pattern.contains('?')
             val rx = if (isGlob) globToRegex(pattern) else null
             val needle = TextUtil.fold(pattern)
@@ -211,10 +223,10 @@ object FsTools {
 
         fsTool(
             "fs.grep", Risk.READ, "search_in_files",
-            "Search inside the text files of the workspace. Returns 'path:line-number: line content'.",
+            "Search inside the text files of the AI playground. Returns 'path:line-number: line content'.",
             schema {
                 str("query", "Text (or regular expression if regex=true) to look for.", required = true)
-                str("path", "Folder to start searching from (default: workspace root).")
+                str("path", "Folder to start searching from (default: playground folders).")
                 str("file_pattern", "Only search files whose name matches this pattern, e.g. '*.md'.")
                 bool("regex", "Treat query as a regular expression (default false).")
                 bool("case_sensitive", "Case-sensitive (default false).")
@@ -234,7 +246,7 @@ object FsTools {
             } else null
             val fileRx = a.str("file_pattern")?.takeIf { it.isNotBlank() }?.let { globToRegex(it) }
             val needle = if (caseSensitive) query else TextUtil.fold(query)
-            val dir = env.fs.requireDir(path)
+            val dir = env.fs.dirFor(path)
             val base = env.fs.segments(path).joinToString("/")
             val out = StringBuilder()
             var hits = 0
@@ -269,10 +281,10 @@ object FsTools {
 
         fsTool(
             "fs.zip", Risk.WRITE, "zip",
-            "Compress files/folders into a .zip file in the workspace.",
+            "Compress files/folders into a .zip file inside a playground folder.",
             schema {
                 strArray("sources", "List of file/folder paths to compress.", required = true)
-                str("dest", "Output zip file path (e.g. 'backup.zip').", required = true)
+                str("dest", "Output zip file path (e.g. 'folder_01/backup.zip').", required = true)
             },
             preview = { env, a ->
                 "Compress ${a.strList("sources").orEmpty().joinToString(", ") { env.fs.display(it) }}\ninto '${env.fs.display(a.reqStr("dest"))}'"
@@ -283,9 +295,11 @@ object FsTools {
             val dest = a.reqStr("dest")
             if (!dest.lowercase().endsWith(".zip")) throw ToolException("The destination file name must end with .zip")
             val docs = sources.map { env.fs.require(it) to env.fs.segments(it) }
-            if (docs.any { it.second.isEmpty() }) throw ToolException("Cannot compress the whole root folder; pick individual items.")
+            val folderSource = docs.firstOrNull { it.second.size < 2 }
+            if (folderSource != null) throw ToolException(ModelFacingText.playgroundFolderProtected(folderSource.second.firstOrNull().orEmpty()))
             val segs = env.fs.segments(dest)
-            val parent = env.fs.ensureDir(segs.dropLast(1))
+            if (segs.size < 2) throw ToolException(ModelFacingText.topLevelChangeDenied(env.fs.rootNames()))
+            val parent = env.fs.ensureDir(segs.drop(1).dropLast(1), root = env.fs.rootForPath(dest).requireDoc())
             if (env.fs.childByName(parent, segs.last()) != null) throw ToolException("File '${env.fs.display(dest)}' already exists.")
             val out = env.fs.createFileNamed(parent, segs.last())
             var files = 0
@@ -311,20 +325,24 @@ object FsTools {
 
         fsTool(
             "fs.unzip", Risk.WRITE, "unzip",
-            "Extract a .zip file into a workspace folder (overwrites files with the same name).",
+            "Extract a .zip file into a folder inside the AI playground (overwrites files with the same name).",
             schema {
                 str("source", "Zip file path.", required = true)
-                str("dest_dir", "Destination folder (default: workspace root).")
+                str("dest_dir", "Destination folder inside a playground folder (e.g. 'folder_01/extracted'). It cannot be empty — extracting to the top level is not allowed.")
             },
             preview = { env, a ->
                 "Extract '${env.fs.display(a.reqStr("source"))}' into '${env.fs.display(a.str("dest_dir").orEmpty())}' (files with the same name will be overwritten)"
             },
         ) { env, a ->
+            val srcSegs = env.fs.segments(a.reqStr("source"))
+            if (srcSegs.size < 2) throw ToolException(ModelFacingText.playgroundFolderProtected(srcSegs.firstOrNull().orEmpty()))
             val zip = env.fs.requireFile(a.reqStr("source"))
             val destSegs = env.fs.segments(a.str("dest_dir").orEmpty())
+            if (destSegs.isEmpty()) throw ToolException(ModelFacingText.topLevelChangeDenied(env.fs.rootNames()))
+            val destRootDoc = env.fs.rootForPath(a.str("dest_dir").orEmpty()).requireDoc()
             // Nhớ các thư mục đã tạo trong lần giải nén này (một tệp zip có thể có hàng trăm tệp cùng thư mục).
             val dirCache = HashMap<List<String>, DocumentFile>()
-            val destRoot = env.fs.ensureDir(destSegs, dirCache)
+            env.fs.ensureDir(destSegs.drop(1), dirCache, root = destRootDoc)
             var files = 0
             var skipped = 0
             var total = 0L
@@ -339,9 +357,9 @@ object FsTools {
                         continue
                     }
                     if (e.isDirectory) {
-                        env.fs.ensureDir(destSegs + segs, dirCache)
+                        env.fs.ensureDir(destSegs.drop(1) + segs, dirCache, root = destRootDoc)
                     } else {
-                        val parent = env.fs.ensureDir(destSegs + segs.dropLast(1), dirCache)
+                        val parent = env.fs.ensureDir(destSegs.drop(1) + segs.dropLast(1), dirCache, root = destRootDoc)
                         val name = segs.last()
                         val doc = env.fs.childByName(parent, name)?.takeIf { !env.fs.isDir(it) } ?: env.fs.createFileNamed(parent, name)
                         env.fs.openOut(doc).use { o ->

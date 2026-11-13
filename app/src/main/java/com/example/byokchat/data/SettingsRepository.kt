@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -24,7 +25,7 @@ enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK
 
 /**
  * Chuẩn hóa thư mục con cho phép ghi (Đợt E, quyết định 6): trim, '\' -> '/',
- * bỏ '/' ở hai đầu, gộp '/' lặp. Rỗng = ghi anywhere trong workspace.
+ * bỏ '/' ở hai đầu, gộp '/' lặp. Rỗng = ghi anywhere bên trong các folder playground.
  */
 fun normalizeWriteSubfolder(raw: String): String =
     raw.trim().replace('\\', '/').trim('/').replace(Regex("/+"), "/")
@@ -90,12 +91,33 @@ class SettingsRepository(context: Context) {
     }
 
     /**
+     * AI playground: danh sách URI các folder user đã chọn (handoff
+     * playground nhiều folder). Key mới "playground_uris", lưu JSON array,
+     * giữ thứ tự thêm. Key cũ "workspace_uri" (một folder) bị bỏ qua hoàn
+     * toàn — không migration (quyền SAF cũ còn trong hệ thống là chấp nhận
+     * được). Tên folder không lưu cứng mà tính lúc chạy từ DocumentFile.
+     */
+    private val _playgroundUris = MutableStateFlow(loadPlaygroundUris())
+    val playgroundUris: StateFlow<List<String>> = _playgroundUris.asStateFlow()
+
+    private fun loadPlaygroundUris(): List<String> = runCatching {
+        plain.getString("playground_uris", null)?.let {
+            json.decodeFromString(ListSerializer(String.serializer()), it)
+        }
+    }.getOrNull() ?: emptyList()
+
+    fun setPlaygroundUris(uris: List<String>) {
+        _playgroundUris.value = uris
+        plain.edit().putString("playground_uris", json.encodeToString(ListSerializer(String.serializer()), uris)).apply()
+    }
+
+    /**
      * Thư mục Session storage (Đợt E, quyết định 6 + mục 11): chỗ app lưu
      * sessions/<ngày>_<session-id>/history.md + history.meta.json, tách
-     * riêng khỏi Workspace (chỗ AI chơi). Chưa chọn thì không có session
+     * riêng khỏi playground (chỗ AI chơi). Chưa chọn thì không có session
      * storage: không ghi history.md, không đồng bộ ngoài app — chat vẫn
      * chạy, màn chat hiện banner báo (đợt fix 11/11/2026, C2 — không tự
-     * lấy workspace làm thay).
+     * lấy playground làm thay).
      */
     private val _sessionStorageUri = MutableStateFlow(plain.getString("session_storage_uri", null))
     val sessionStorageUri: StateFlow<String?> = _sessionStorageUri.asStateFlow()
@@ -107,7 +129,8 @@ class SettingsRepository(context: Context) {
 
     /**
      * Thư mục con AI được phép ghi (Đợt E, quyết định 6): rỗng = ghi anywhere
-     * trong workspace; khác rỗng thì đường dẫn ghi phải nằm dưới thư mục này.
+     * bên trong các folder playground; khác rỗng thì đường dẫn ghi phải nằm
+     * dưới thư mục này trong một folder playground.
      * CHƯA CÓ UI — thuộc Đợt 7. Thực thi ở ToolRegistry.execute (tầng tool).
      */
     private val _allowedWriteSubfolder = MutableStateFlow(

@@ -111,7 +111,7 @@ fun MessagesScreen(conversationId: String, onBack: () -> Unit) {
     }
     val usedFiles = remember(messages) { ModelFiles.extractUsedFiles(messages) }
     // File còn tồn tại hay không — kiểm chứng bằng WorkspaceFs; chưa chọn
-    // workspace thì không kiểm chứng được (null = chưa kiểm chứng).
+    // playground folder thì không kiểm chứng được (null = chưa kiểm chứng).
     var fileExists by remember { mutableStateOf<Map<String, Boolean?>>(emptyMap()) }
     LaunchedEffect(usedFiles, workspaceOk) {
         fileExists = if (!workspaceOk) {
@@ -280,10 +280,10 @@ private fun FilesCard(
                     )
                 }
             }
-            Text("Workspace files used by the model", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            Text("Playground files used by the model", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             if (!workspaceOk) {
                 Text(
-                    "No workspace folder is chosen, so file existence could not be checked. " +
+                    "No AI playground folder is chosen, so file existence could not be checked. " +
                         "The paths below come from successful tool calls.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

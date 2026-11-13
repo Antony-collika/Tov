@@ -70,3 +70,18 @@ fun ConfirmDialog(
     )
 }
 
+/** Hộp thoại thông tin một nút OK (vd báo trùng tên folder). */
+@Composable
+fun InfoDialog(
+    title: String,
+    message: String,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(message) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+    )
+}
+

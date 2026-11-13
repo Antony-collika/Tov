@@ -288,7 +288,7 @@ object TextTools {
             val dirPath = a.str("directory") ?: throw ToolException("Either 'paths' or 'directory' is required.")
             val fileRx = a.str("file_pattern")?.takeIf { it.isNotBlank() }?.let { globToRegex(it) }
             val base = env.fs.segments(dirPath).joinToString("/")
-            env.fs.walk(env.fs.requireDir(dirPath), base, Int.MAX_VALUE) { d, p, _ ->
+            env.fs.walk(env.fs.dirFor(dirPath), base, Int.MAX_VALUE) { d, p, _ ->
                 env.fs.stopIfCancelled()
                 if (!env.fs.isDir(d) && (fileRx == null || fileRx.matches(env.fs.nameOf(d))) && env.fs.isTextFile(d)) targets.add(p)
                 targets.size < 2000

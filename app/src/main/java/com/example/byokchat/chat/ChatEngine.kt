@@ -171,13 +171,13 @@ class ChatEngine(
                     ?: RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value)
                 val vars = RequestLayout.requestVars(model, cfg.name)
                 // Đợt D: thẻ System/Free trỏ file được đọc lại mỗi lần gửi.
-                // Đường RCP luôn chạy, kể cả khi chưa chọn workspace
+                // Đường RCP luôn chạy, kể cả khi chưa chọn playground folder
                 // (fs == null, quyết định 13): reader trả về lỗi thay vì
                 // crash — nguồn Text resolve bình thường (không cần đọc
                 // file), nguồn File đọc lỗi thì đường lỗi đã có của RCP
                 // chặn gửi. Không còn đường "legacy" offer tất cả tool.
                 val readFile: (String) -> Result<String> = { path ->
-                    runCatching { fs?.readCardFile(path) ?: error("No workspace folder has been chosen.") }
+                    runCatching { fs?.readCardFile(path) ?: error("No AI playground folder has been chosen.") }
                 }
                 val (layout, fileErrors) = withContext(Dispatchers.IO) { baseLayout.resolveFiles(readFile) }
                 // Đợt E phần A: file tools.md của thẻ Tools cũng đọc + parse

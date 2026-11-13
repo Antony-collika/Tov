@@ -14,7 +14,7 @@ data class ToolOutcome(
 interface ToolRuntime {
     /**
      * Danh sách công cụ đưa cho model.
-     * @param exposed null = đường "legacy" (CHỈ khi chưa chọn workspace —
+     * @param exposed null = đường "legacy" (CHỈ khi chưa chọn playground folder —
      *   fs == null): mọi tool Settings cho phép, tên/mô tả gốc. Không có
      *   thẻ Tools KHÔNG còn cho null nữa (xóa thẻ = 0 tool). Khác null =
      *   chỉ các tool parse được từ file tools.md của thẻ Tools, đúng thứ
