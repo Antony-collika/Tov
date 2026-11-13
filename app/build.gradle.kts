@@ -1,5 +1,3 @@
-import java.util.Base64
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -8,11 +6,30 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-val signingKeyFile = rootProject.file("build/tov-development.p12")
-if (!signingKeyFile.exists()) {
-    val encodedKey = rootProject.file("signing/tov-development.p12.base64").readText()
-    signingKeyFile.parentFile.mkdirs()
-    signingKeyFile.writeBytes(Base64.getDecoder().decode(encodedKey))
+val releaseStoreFile = rootProject.file("build/release-keystore.p12")
+val releaseStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+
+val hasReleaseSigning = listOf(
+    releaseStorePassword,
+    releaseKeyAlias,
+    releaseKeyPassword
+).all { !it.isNullOrBlank() }
+
+val releaseTaskRequested = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
+}
+
+if (releaseTaskRequested && !hasReleaseSigning) {
+    throw GradleException(
+        "Release signing secrets are missing. Set ANDROID_KEYSTORE_PASSWORD, " +
+            "ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD."
+    )
+}
+
+if (releaseTaskRequested && !releaseStoreFile.isFile) {
+    throw GradleException("Release keystore was not found at: ${releaseStoreFile.absolutePath}")
 }
 
 android {
@@ -28,11 +45,13 @@ android {
     }
 
     signingConfigs {
-        create("temporaryDevelopment") {
-            storeFile = signingKeyFile
-            storePassword = "tov-dev-temp-" + "2026"
-            keyAlias = "tov-development"
-            keyPassword = "tov-dev-temp-" + "2026"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -44,7 +63,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("temporaryDevelopment")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
