@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -81,12 +82,36 @@ class SettingsRepository(context: Context) {
     /** Nhà cung cấp của lựa chọn mô hình toàn cục (null nếu chưa chọn hoặc provider đã bị xóa). */
     fun currentModelProvider(): ProviderConfig? = currentModelProviderId.value?.let { provider(it) }
 
-    private val _workspaceUri = MutableStateFlow(plain.getString("workspace_uri", null))
-    val workspaceUri: StateFlow<String?> = _workspaceUri.asStateFlow()
+    /**
+     * Selected AI playground roots. The legacy single-root key is migrated
+     * in memory on first launch, preserving the existing SAF permission.
+     */
+    private val _workspaceUris = MutableStateFlow(
+        run {
+            val saved = plain.getString("workspace_uris", null)
+            val decoded = saved?.let {
+                runCatching { json.decodeFromString(ListSerializer(String.serializer()), it) }.getOrNull()
+            }
+            (decoded ?: listOfNotNull(plain.getString("workspace_uri", null))).distinct()
+        }
+    )
+    val workspaceUris: StateFlow<List<String>> = _workspaceUris.asStateFlow()
 
-    fun setWorkspaceUri(uri: String?) {
-        _workspaceUri.value = uri
-        plain.edit().putString("workspace_uri", uri).apply()
+    fun setWorkspaceUris(uris: List<String>) {
+        val normalized = uris.distinct()
+        _workspaceUris.value = normalized
+        plain.edit()
+            .putString("workspace_uris", json.encodeToString(ListSerializer(String.serializer()), normalized))
+            .remove("workspace_uri")
+            .apply()
+    }
+
+    fun addWorkspaceUri(uri: String) {
+        if (uri !in _workspaceUris.value) setWorkspaceUris(_workspaceUris.value + uri)
+    }
+
+    fun removeWorkspaceUri(uri: String) {
+        setWorkspaceUris(_workspaceUris.value.filterNot { it == uri })
     }
 
     /**

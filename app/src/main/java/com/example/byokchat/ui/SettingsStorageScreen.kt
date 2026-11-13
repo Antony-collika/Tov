@@ -1,3 +1,4 @@
+
 package com.example.byokchat.ui
 
 import android.widget.Toast
@@ -12,13 +13,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -40,20 +42,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/**
- * Màn chi tiết "Select Storage and Playground folder" (Đợt 7).
- * - Workspace: dời nguyên nội dung cũ từ SettingsScreen (picker, trạng
- *   thái, Remove, Check read/write access).
- * - Session storage: thư mục riêng lưu sessions/<ngày>_<session-id>/
- *   history.md + history.meta.json (setting session_storage_uri, Đợt E);
- *   chưa chọn thì dùng chung thư mục workspace.
- * - Allowed write subfolder: setting đã có từ Đợt E.
- * - Giới hạn chỉ ghi .md: LUÔN BẬT, không có công tắc — txt.* WRITE chỉ
- *   được ghi file .md/.markdown (ToolRegistry.aiWriteViolation); các tool
- *   ghi khác giữ đuôi theo đúng chức năng (.zip/.json/.csv...) nhưng vẫn
- *   phải nằm dưới subfolder cho phép. Màn này chỉ hiện thông tin, không
- *   bịa thêm công tắc.
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsStorageScreen(onBack: () -> Unit) {
@@ -61,18 +49,22 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
     val container = context.container
     val settings = container.settings
     val scope = rememberCoroutineScope()
-    val workspaceUri by settings.workspaceUri.collectAsState()
+    val workspaceUris by settings.workspaceUris.collectAsState()
     val sessionStorageUri by settings.sessionStorageUri.collectAsState()
     val accessible by container.fs.accessible.collectAsState()
     val allowedSubfolder by settings.allowedWriteSubfolder.collectAsState()
     var subfolderText by remember { mutableStateOf(allowedSubfolder) }
-    var confirmClearWorkspace by remember { mutableStateOf(false) }
+    var workspaceError by remember { mutableStateOf<String?>(null) }
     var confirmClearSession by remember { mutableStateOf(false) }
-    val pickWorkspace = rememberFolderPicker()
+    val pickWorkspace = rememberFolderPicker(onError = { workspaceError = it })
     val pickSession = rememberSessionFolderPicker()
-    // Reading the folder name touches the document provider, so it is done off the main thread.
-    val workspacePath by produceState<String?>(null, workspaceUri, accessible) {
-        value = withContext(Dispatchers.IO) { container.fs.displayPath() }
+    val workspacePaths by produceState<List<String>>(emptyList(), workspaceUris, accessible) {
+        value = withContext(Dispatchers.IO) { container.fs.displayPaths() }
+    }
+    val workspaceAccess by produceState<Map<String, Boolean>>(emptyMap(), workspaceUris) {
+        value = withContext(Dispatchers.IO) {
+            workspaceUris.associateWith { container.fs.isFolderAccessible(it) }
+        }
     }
     val sessionPath by produceState<String?>(null, sessionStorageUri) {
         value = withContext(Dispatchers.IO) { container.fs.displaySessionPath() }
@@ -92,44 +84,61 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState()),
         ) {
-            // ---------- Workspace ----------
-            StorageSectionTitle("Workspace folder")
-            ListItem(
-                headlineContent = { Text(if (workspaceUri == null) "No folder chosen" else workspacePath ?: "Folder selected") },
-                supportingContent = {
-                    Text(
-                        when {
-                            workspaceUri == null -> "File tools are blocked until you choose a folder."
-                            accessible -> "Active. The AI can only see and change things inside this folder."
-                            else -> "Access was lost or the folder no longer exists. Please choose it again."
-                        }
+            StorageSectionTitle("Select AI playground")
+            if (workspaceUris.isEmpty()) {
+                ListItem(
+                    headlineContent = { Text("No folder chosen") },
+                    supportingContent = { Text("File tools are blocked until you add a folder.") },
+                )
+            } else {
+                workspaceUris.forEachIndexed { index, uri ->
+                    val path = workspacePaths.getOrNull(index) ?: "./Selected folder"
+                    ListItem(
+                        headlineContent = { Text(path) },
+                        supportingContent = {
+                            Text(
+                                if (workspaceAccess[uri] == true) "Available to AI tools."
+                                else "Access unavailable. Re-select this folder to restore access.",
+                            )
+                        },
+                        trailingContent = {
+                            IconButton(onClick = {
+                                scope.launch(Dispatchers.IO) { container.fs.removeWorkspaceFolder(uri) }
+                            }) {
+                                Icon(Icons.Default.Close, contentDescription = "Remove $path")
+                            }
+                        },
                     )
-                },
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = pickWorkspace) { Text(if (workspaceUri == null) "Choose folder" else "Change folder") }
-                if (workspaceUri != null) {
-                    TextButton(onClick = { confirmClearWorkspace = true }) { Text("Remove") }
                 }
             }
-            if (workspaceUri != null) {
-                OutlinedButton(
-                    onClick = {
-                        scope.launch(Dispatchers.IO) {
-                            val msg = container.fs.selfTest()
-                            launch(Dispatchers.Main) { Toast.makeText(context, msg, Toast.LENGTH_LONG).show() }
+            if (workspaceUris.isNotEmpty()) {
+                Text(
+                    if (accessible) "The AI sees these folders under one virtual workspace root."
+                    else "File tools are blocked until at least one selected folder is accessible.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+            }
+            Button(onClick = pickWorkspace, modifier = Modifier.padding(vertical = 8.dp)) {
+                Text("Add folder")
+            }
+            if (workspaceUris.isNotEmpty() && accessible) {
+                TextButton(onClick = {
+                    scope.launch(Dispatchers.IO) {
+                        val msg = container.fs.selfTest()
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(context, msg, Toast.LENGTH_LONG).show()
                         }
-                    },
-                    modifier = Modifier.padding(vertical = 4.dp),
-                ) { Text("Check read/write access") }
+                    }
+                }) { Text("Check read/write access") }
             }
 
-            // ---------- Session storage ----------
             StorageSectionTitle("Session storage")
             ListItem(
                 headlineContent = { Text(sessionPath ?: "Not chosen") },
                 supportingContent = {
-                    Text("Where the app saves each chat as sessions/<date>_<session-id>/history.md. Separate from the workspace where the AI plays.")
+                    Text("Where the app saves each chat as sessions/<date>_<session-id>/history.md. Separate from the AI playground.")
                 },
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -139,26 +148,23 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
                 }
             }
 
-            // ---------- Allowed write subfolder ----------
             StorageSectionTitle("Allowed write subfolder")
             OutlinedTextField(
                 value = subfolderText,
                 onValueChange = { subfolderText = it; settings.setAllowedWriteSubfolder(it) },
                 label = { Text("Subfolder the AI may write in") },
                 singleLine = true,
-                supportingText = { Text("Empty means the AI can write anywhere in the workspace. Example: notes — then every AI write must stay under notes/.") },
+                supportingText = {
+                    Text("Empty means the AI can write anywhere inside each selected playground folder. Example: notes — then every AI write must stay under notes/.")
+                },
                 modifier = Modifier.padding(vertical = 4.dp),
             )
 
-            // ---------- Text-only writes (always on, no switch) ----------
             StorageSectionTitle("What the AI may write")
             Text(
-                "Text tools can only write text files — files whose content is plain text, " +
-                    "whatever the extension (.md, .txt, .json, .csv, .html, …). " +
-                    "Other tools keep the file type their job needs (.zip, .json, .csv, …), " +
-                    "but every AI write must stay inside the subfolder above. " +
-                    "This limit is always on — there is no switch for it — and a blocked " +
-                    "write is reported to the AI instead of asking you first.",
+                "Text tools can only write text files — files whose content is plain text, whatever the extension. " +
+                    "Other tools keep the file type their job needs, but every AI write must stay inside the allowed subfolder. " +
+                    "This limit is always on; a blocked write is reported to the AI instead of asking you first.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -166,19 +172,18 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
         }
     }
 
-    if (confirmClearWorkspace) {
-        ConfirmDialog(
-            title = "Remove the workspace folder?",
-            message = "The app will forget its access to this folder. The files in the folder are not affected.",
-            confirmLabel = "Remove",
-            onConfirm = { confirmClearWorkspace = false; scope.launch(Dispatchers.IO) { container.fs.clear() } },
-            onDismiss = { confirmClearWorkspace = false },
+    workspaceError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { workspaceError = null },
+            title = { Text("Folder name conflict") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { workspaceError = null }) { Text("OK") } },
         )
     }
     if (confirmClearSession) {
         ConfirmDialog(
             title = "Remove the session storage folder?",
-            message = "The app will forget this folder and save sessions under the workspace folder again. The files in the folder are not affected.",
+            message = "The app will forget this folder. The files in the folder are not affected.",
             confirmLabel = "Remove",
             onConfirm = { confirmClearSession = false; scope.launch(Dispatchers.IO) { container.fs.clearSessionStorage() } },
             onDismiss = { confirmClearSession = false },
@@ -186,8 +191,6 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
     }
 }
 
-/** Tiêu đề mục trong màn Storage: màn này đã có padding ngang 16dp nên
- *  không dùng SectionTitle chung (nó cộng thêm start 16dp). */
 @Composable
 private fun StorageSectionTitle(text: String) {
     Text(

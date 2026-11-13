@@ -17,6 +17,13 @@ class ProtectedPathTest {
     }
 
     @Test
+    fun protectedFolderIsDetectedBelowVirtualWorkspaceMount() {
+        assertTrue(isProtectedPath("folder_01/Tov/prompts/system.md", listOf("folder_01")))
+        assertTrue(isProtectedPath("folder_02/Tov", listOf("folder_02")))
+        assertFalse(isProtectedPath("folder_01/Tov2/notes.md", listOf("folder_01")))
+    }
+
+    @Test
     fun otherPathsAreNotProtected() {
         assertFalse(isProtectedPath("notes/x.md"))
         assertFalse(isProtectedPath("Tov2/x.md"))

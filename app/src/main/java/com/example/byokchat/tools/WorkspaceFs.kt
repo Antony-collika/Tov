@@ -53,31 +53,54 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return refresh()
     }
 
-    private fun computeAccess(): Boolean {
-        val uri = settings.workspaceUri.value?.let { Uri.parse(it) } ?: return false
+    private fun documentRoot(uriString: String): DocumentFile? =
+        runCatching { DocumentFile.fromTreeUri(ctx, Uri.parse(uriString)) }.getOrNull()
+
+    private fun folderName(uriString: String): String {
+        val uri = Uri.parse(uriString)
+        return runCatching { documentRoot(uriString)?.name }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: runCatching { DocumentsContract.getTreeDocumentId(uri).substringAfterLast(':').substringAfterLast('/') }
+                .getOrNull()?.takeIf { it.isNotBlank() }
+            ?: "Folder"
+    }
+
+    private fun hasAccess(uriString: String): Boolean {
+        val uri = Uri.parse(uriString)
         val granted = resolver.persistedUriPermissions.any {
             it.uri == uri && it.isReadPermission && it.isWritePermission
         }
         if (!granted) return false
-        val root = DocumentFile.fromTreeUri(ctx, uri) ?: return false
+        val root = documentRoot(uriString) ?: return false
         return runCatching { root.exists() && root.isDirectory && root.canWrite() }.getOrDefault(false)
     }
 
-    fun rootName(): String? =
-        runCatching { settings.workspaceUri.value?.let { DocumentFile.fromTreeUri(ctx, Uri.parse(it))?.name } }.getOrNull()
-
-    /**
-     * The chosen folder written the way the AI sees paths: relative, e.g. "./homework". Null if no folder is chosen.
-     * Blocking (reads from the document provider), so call it from a background thread.
-     */
-    fun displayPath(): String? {
-        val raw = settings.workspaceUri.value ?: return null
-        val uri = Uri.parse(raw)
-        val name = rootName()?.takeIf { it.isNotBlank() }
-            ?: runCatching { DocumentsContract.getTreeDocumentId(uri).substringAfterLast(':').substringAfterLast('/') }
-                .getOrNull()?.takeIf { it.isNotBlank() }
-        return "./" + (name ?: "")
+    private fun computeAccess(): Boolean {
+        val names = settings.workspaceUris.value.map(::folderName)
+        if (names.map { it.lowercase() }.distinct().size != names.size) return false
+        return settings.workspaceUris.value.any(::hasAccess)
     }
+
+    fun isFolderAccessible(uriString: String): Boolean = hasAccess(uriString)
+
+    fun rootNames(): List<String> = settings.workspaceUris.value.map(::folderName)
+
+    /** Remove the selected mount name before applying a path policy relative to each physical folder. */
+    fun pathInsideSelectedFolder(path: String): String {
+        // Do not validate here: write-policy checks run before the tool's
+        // exception boundary. Unsafe segments are rejected by the filesystem
+        // resolver when the tool actually executes.
+        val parts = path.trim().replace('\\', '/').split('/').filter { it.isNotEmpty() && it != "." }
+        val first = parts.firstOrNull()
+        return (if (first != null && first in rootNames()) parts.drop(1) else parts).joinToString("/")
+    }
+
+    fun rootName(): String? = settings.workspaceUris.value.firstOrNull()?.let(::folderName)
+
+    /** Paths shown to the user for all selected playground folders. */
+    fun displayPaths(): List<String> = settings.workspaceUris.value.map { "./" + folderName(it) }
+
+    /** Backward-compatible display helper for callers that only need one path. */
+    fun displayPath(): String? = displayPaths().firstOrNull()
 
     /**
      * Đợt 8: đường dẫn tương đối trong workspace của một document user vừa
@@ -90,12 +113,18 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
      * kiện bắt buộc: file ngoài workspace thì lưu URI (xem readCardFile).
      */
     fun relativePathForDocument(uri: Uri): String? {
-        val treeUri = settings.workspaceUri.value?.let { Uri.parse(it) } ?: return null
-        val treeId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return null
         val docId = runCatching { DocumentsContract.getDocumentId(uri) }.getOrNull() ?: return null
-        val prefix = "$treeId/"
-        if (!docId.startsWith(prefix)) return null
-        return docId.removePrefix(prefix).takeIf { it.isNotEmpty() }
+        for (raw in settings.workspaceUris.value) {
+            val treeUri = Uri.parse(raw)
+            val treeId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: continue
+            if (docId == treeId) return folderName(raw)
+            val prefix = "$treeId/"
+            if (docId.startsWith(prefix)) {
+                val relative = docId.removePrefix(prefix)
+                return folderName(raw) + if (relative.isEmpty()) "" else "/$relative"
+            }
+        }
+        return null
     }
 
     /**
@@ -137,7 +166,19 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
                 ?: throw ToolException("Could not read the file.")
             return readDocText(doc, doc.name ?: source, maxBytes)
         }
-        return readText(source, maxBytes)
+        // Older Tools/Prompt card files stored paths relative to the former
+        // single workspace root. Keep those paths working by resolving an
+        // unqualified path against the first selected mount; new paths should
+        // include their mount name explicitly.
+        val parts = segments(source)
+        val roots = rootNames()
+        val first = parts.firstOrNull()
+        val path = if (roots.isEmpty() || (first != null && first in roots)) {
+            source
+        } else {
+            (listOfNotNull(roots.firstOrNull()) + parts).joinToString("/")
+        }
+        return readText(path, maxBytes)
     }
 
     /**
@@ -160,26 +201,49 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         return source.substringAfterLast('/').ifEmpty { source }
     }
 
-    /** Gọi sau khi người dùng chọn thư mục bằng hộp chọn của hệ thống. */
+    /** Add a SAF tree as a direct child of the virtual workspace root. */
     fun onFolderPicked(uri: Uri) {
-        val old = settings.workspaceUri.value?.let { Uri.parse(it) }
-        resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-        if (old != null && old != uri) {
-            runCatching {
-                resolver.releasePersistableUriPermission(old, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            }
+        val raw = uri.toString()
+        if (raw in settings.workspaceUris.value) {
+            resolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
+            refresh()
+            return
         }
-        settings.setWorkspaceUri(uri.toString())
+        val selectedName = folderName(raw)
+        val conflict = hasWorkspaceFolderNameConflict(
+            settings.workspaceUris.value.map(::folderName),
+            selectedName,
+        )
+        if (conflict) {
+            throw IllegalArgumentException(
+                "A folder named '$selectedName' already exists in Select AI playground. Choose a folder with a different name."
+            )
+        }
+        resolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        )
+        settings.addWorkspaceUri(raw)
         refresh()
     }
 
-    fun clear() {
-        settings.workspaceUri.value?.let {
-            runCatching {
-                resolver.releasePersistableUriPermission(Uri.parse(it), Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-            }
+    fun removeWorkspaceFolder(uriString: String) {
+        settings.removeWorkspaceUri(uriString)
+        runCatching {
+            resolver.releasePersistableUriPermission(
+                Uri.parse(uriString),
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+            )
         }
-        settings.setWorkspaceUri(null)
+        refresh()
+    }
+
+    /** Clear all selected roots. Retained for callers from older screens. */
+    fun clear() {
+        settings.workspaceUris.value.toList().forEach(::removeWorkspaceFolder)
         refresh()
     }
 
@@ -228,22 +292,41 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     /** Thử tạo, ghi, đọc, xóa một file tạm để chắc chắn công cụ ghi đúng chỗ. */
     fun selfTest(): String {
-        if (!refresh()) return "No access to the workspace folder."
-        return try {
-            val name = ".byok_test.txt"
-            writeText(name, "ok-" + System.currentTimeMillis(), createParents = false)
-            val back = readText(name)
-            requireFile(name).delete()
-            if (back.startsWith("ok-")) "Check passed: the app can read and write in the folder '${rootName() ?: ""}'."
-            else "Check failed: the content read back does not match."
-        } catch (e: Exception) {
-            "Check failed: ${e.message}"
+        if (!refresh()) return "No access to any selected AI playground folder."
+        val accessibleNames = settings.workspaceUris.value.filter(::hasAccess).map(::folderName)
+        for (name in accessibleNames) {
+            val path = "$name/.byok_test.txt"
+            try {
+                val content = "ok-" + System.currentTimeMillis()
+                writeText(path, content, createParents = false)
+                val back = readText(path)
+                requireFile(path).delete()
+                if (back == content) return "Check passed: the app can read and write in './$name'."
+            } catch (e: Exception) {
+                return "Check failed in './$name': ${e.message}"
+            }
         }
+        return "Check failed: no selected folder could be tested."
     }
 
     // ---------- Đường dẫn ----------
 
-    fun root(): DocumentFile = rootFrom(settings.workspaceUri.value, "workspace")
+    fun root(): DocumentFile {
+        val selectedNames = settings.workspaceUris.value.map(::folderName)
+        if (selectedNames.map { it.lowercase() }.distinct().size != selectedNames.size) {
+            throw ToolException("Two selected AI playground folders have the same name. Remove one before using file tools.")
+        }
+        val mounts = settings.workspaceUris.value.mapNotNull { raw ->
+            if (!hasAccess(raw)) return@mapNotNull null
+            val treeUri = Uri.parse(raw)
+            val delegate = documentRoot(raw) ?: return@mapNotNull null
+            WorkspaceMountDocumentFile(folderName(raw), treeUri, delegate)
+        }
+        if (mounts.isEmpty()) throw ToolException("No accessible AI playground folder has been chosen.")
+        return WorkspaceRootDocumentFile(mounts)
+    }
+
+    fun isMountedRoot(doc: DocumentFile): Boolean = doc is WorkspaceMountDocumentFile
 
     private fun rootFrom(uriString: String?, label: String): DocumentFile {
         val uri = uriString ?: throw ToolException("No $label folder has been chosen.")
@@ -323,15 +406,34 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
 
     fun clearMeta() = meta.clear()
 
-    fun nameOf(d: DocumentFile): String = meta[d.uri.toString()]?.name ?: d.name.orEmpty()
-    fun isDir(d: DocumentFile): Boolean = meta[d.uri.toString()]?.isDir ?: d.isDirectory
+    fun nameOf(d: DocumentFile): String =
+        if (d is WorkspaceMountDocumentFile) d.mountName else meta[d.uri.toString()]?.name ?: d.name.orEmpty()
+    fun isDir(d: DocumentFile): Boolean =
+        d is WorkspaceRootDocumentFile || d is WorkspaceMountDocumentFile || (meta[d.uri.toString()]?.isDir ?: d.isDirectory)
     fun sizeOf(d: DocumentFile): Long = meta[d.uri.toString()]?.size ?: d.length()
     fun modifiedOf(d: DocumentFile): Long = meta[d.uri.toString()]?.modified ?: d.lastModified()
     fun mimeOf(d: DocumentFile): String? = meta[d.uri.toString()]?.mime ?: d.type
 
+    private fun findMountFor(documentUri: Uri): WorkspaceMountDocumentFile? {
+        val docId = runCatching { DocumentsContract.getDocumentId(documentUri) }.getOrNull() ?: return null
+        return settings.workspaceUris.value.firstNotNullOfOrNull { raw ->
+            val treeUri = Uri.parse(raw)
+            val treeId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return@firstNotNullOfOrNull null
+            if (docId == treeId || docId.startsWith("$treeId/")) {
+                val delegate = documentRoot(raw) ?: return@firstNotNullOfOrNull null
+                WorkspaceMountDocumentFile(folderName(raw), treeUri, delegate)
+            } else null
+        }
+    }
+
     /** Liệt kê thư mục: một truy vấn lấy đủ thông tin; nếu lỗi thì rơi về cách cũ (chậm nhưng chắc chắn). */
     fun children(dir: DocumentFile): List<DocumentFile> {
-        val treeUri = settings.workspaceUri.value?.let { Uri.parse(it) } ?: return childrenSlow(dir)
+        if (dir is WorkspaceRootDocumentFile) return dir.listFiles().toList()
+        val mount = when (dir) {
+            is WorkspaceMountDocumentFile -> dir
+            else -> findMountFor(dir.uri)
+        } ?: return childrenSlow(dir)
+        val treeUri = mount.treeUri
         return try {
             val listing = mutableListOf<Pair<DocumentFile, Meta>>()
             val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, DocumentsContract.getDocumentId(dir.uri))
@@ -595,9 +697,64 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     }
 
     companion object {
-        /**
-         * Việc của công cụ đang chạy (ToolRegistry gắn vào luồng công việc). Đọc từ luồng công cụ để biết đã bị hủy chưa.
-         */
+        /** Current tool job, used by long-running filesystem operations for cancellation. */
         val cancelJob = ThreadLocal<Job?>()
     }
 }
+
+/**
+ * SAF has no API for mounting several document trees below a synthetic parent.
+ * These DocumentFile adapters expose a stable in-memory directory tree while
+ * delegating every operation below a mount point to its real SAF tree.
+ */
+private class WorkspaceRootDocumentFile(
+    private val mounts: List<WorkspaceMountDocumentFile>,
+) : DocumentFile(null) {
+    override fun getUri(): Uri = Uri.parse("tov-workspace://root")
+    override fun getName(): String? = null
+    override fun getType(): String? = null
+    override fun isDirectory(): Boolean = true
+    override fun isFile(): Boolean = false
+    override fun lastModified(): Long = 0L
+    override fun length(): Long = 0L
+    override fun canRead(): Boolean = mounts.any { it.canRead() }
+    override fun canWrite(): Boolean = mounts.any { it.canWrite() }
+    override fun delete(): Boolean = false
+    override fun exists(): Boolean = true
+    override fun renameTo(displayName: String): Boolean = false
+    override fun createFile(mimeType: String, displayName: String): DocumentFile? = null
+    override fun createDirectory(displayName: String): DocumentFile? = null
+    override fun listFiles(): Array<DocumentFile> = mounts.toTypedArray()
+    override fun findFile(displayName: String): DocumentFile? =
+        mounts.firstOrNull { it.mountName == displayName }
+}
+
+private class WorkspaceMountDocumentFile(
+    val mountName: String,
+    val treeUri: Uri,
+    private val delegate: DocumentFile,
+) : DocumentFile(null) {
+    override fun getUri(): Uri = delegate.uri
+    override fun getName(): String = mountName
+    override fun getType(): String? = delegate.type
+    override fun isDirectory(): Boolean = true
+    override fun isFile(): Boolean = false
+    override fun lastModified(): Long = delegate.lastModified()
+    override fun length(): Long = delegate.length()
+    override fun canRead(): Boolean = delegate.canRead()
+    override fun canWrite(): Boolean = delegate.canWrite()
+    override fun delete(): Boolean = false
+    override fun exists(): Boolean = delegate.exists()
+    override fun renameTo(displayName: String): Boolean = false
+    override fun createFile(mimeType: String, displayName: String): DocumentFile? =
+        delegate.createFile(mimeType, displayName)
+    override fun createDirectory(displayName: String): DocumentFile? =
+        delegate.createDirectory(displayName)
+    override fun listFiles(): Array<DocumentFile> = delegate.listFiles()
+    override fun findFile(displayName: String): DocumentFile? = delegate.findFile(displayName)
+}
+
+
+/** Folder aliases in the virtual workspace must be unique regardless of case. */
+internal fun hasWorkspaceFolderNameConflict(existingNames: List<String>, candidate: String): Boolean =
+    existingNames.any { it.equals(candidate, ignoreCase = true) }

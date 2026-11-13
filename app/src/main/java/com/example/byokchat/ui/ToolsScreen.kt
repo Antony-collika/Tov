@@ -152,7 +152,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                             Column {
                                 Text(shortDescription(registry.effectiveDescription(t)), maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 val notes = listOfNotNull(
-                                    if (blocked) "blocked: " + (if (t.needsWorkspace && !workspaceOk) "no workspace folder" else t.unavailableHint ?: "not ready") else null,
+                                    if (blocked) "blocked: " + (if (t.needsWorkspace && !workspaceOk) "no accessible AI playground folder" else t.unavailableHint ?: "not ready") else null,
                                 )
                                 if (notes.isNotEmpty()) {
                                     Text(

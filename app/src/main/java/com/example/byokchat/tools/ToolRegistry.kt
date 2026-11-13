@@ -152,7 +152,7 @@ class ToolRegistry(
         val sub = normalizeWriteSubfolder(env.settings.allowedWriteSubfolder.value)
         fun underSubfolder(path: String): Boolean {
             if (sub.isEmpty()) return true
-            val p = path.trim().replace('\\', '/').trim('/')
+            val p = env.fs.pathInsideSelectedFolder(path)
             return p.startsWith("$sub/")
         }
         /**
@@ -210,10 +210,10 @@ class ToolRegistry(
         if (tool.risk == Risk.READ) return false
         if (listOf("path", "source", "dest", "output_path", "dest_dir", "directory").any { key ->
             val p = args.str(key) ?: return@any false
-            isProtectedPath(p)
+            isProtectedPath(p, env.fs.rootNames())
         }) return true
         // txt.replace_many ghi vào từng file trong danh sách 'paths'.
-        return args.strList("paths")?.any { isProtectedPath(it) } == true
+        return args.strList("paths")?.any { isProtectedPath(it, env.fs.rootNames()) } == true
     }
 
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
@@ -285,7 +285,9 @@ class ToolRegistry(
  * được, ghi luôn phải hỏi user. So theo đoạn đầu tiên của đường dẫn tương
  * đối trong workspace ("Tov/prompts/x.md" → true, "Tov2/x.md" → false).
  */
-fun isProtectedPath(path: String): Boolean {
-    val first = path.trim().replace('\\', '/').split('/').firstOrNull { it.isNotEmpty() && it != "." }
-    return first == "Tov"
+fun isProtectedPath(path: String, workspaceRoots: List<String> = emptyList()): Boolean {
+    val segments = path.trim().replace('\\', '/').split('/').filter { it.isNotEmpty() && it != "." }
+    val first = segments.firstOrNull()
+    val relative = if (first != null && first in workspaceRoots) segments.drop(1) else segments
+    return relative.firstOrNull() == "Tov"
 }

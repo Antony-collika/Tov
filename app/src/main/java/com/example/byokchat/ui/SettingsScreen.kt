@@ -54,11 +54,10 @@ fun SettingsScreen(
     val providers by settings.providers.collectAsState()
     val searchProvider by settings.searchProvider.collectAsState()
     val searchKey by settings.searchApiKey.collectAsState()
-    val workspaceUri by settings.workspaceUri.collectAsState()
+    val workspaceUris by settings.workspaceUris.collectAsState()
     val sessionStorageUri by settings.sessionStorageUri.collectAsState()
-    // Reading the folder name touches the document provider, so it is done off the main thread.
-    val workspacePath by produceState<String?>(null, workspaceUri) {
-        value = withContext(Dispatchers.IO) { container.fs.displayPath() }
+    val workspacePaths by produceState<List<String>>(emptyList(), workspaceUris) {
+        value = withContext(Dispatchers.IO) { container.fs.displayPaths() }
     }
     val sessionPath by produceState<String?>(null, sessionStorageUri) {
         value = withContext(Dispatchers.IO) { container.fs.displaySessionPath() }
@@ -102,9 +101,9 @@ fun SettingsScreen(
             SettingsCard(
                 title = "Select Storage and Playground folder",
                 summary = when {
-                    workspaceUri == null -> "No folder chosen"
-                    sessionStorageUri == null -> "Workspace: ${workspacePath ?: "Folder selected"} · Sessions: not chosen"
-                    else -> "Workspace: ${workspacePath ?: "Folder selected"} · Sessions: ${sessionPath ?: "Folder selected"}"
+                    workspaceUris.isEmpty() -> "No AI playground folders chosen"
+                    sessionStorageUri == null -> "AI playground: ${workspacePaths.joinToString(", ")} · Sessions: not chosen"
+                    else -> "AI playground: ${workspacePaths.joinToString(", ")} · Sessions: ${sessionPath ?: "Folder selected"}"
                 },
                 onClick = onStorage,
             )

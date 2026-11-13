@@ -130,8 +130,10 @@ object FsTools {
             },
             preview = { env, a -> "Move '${env.fs.display(a.reqStr("source"))}' → '${env.fs.display(a.reqStr("dest"))}'" },
         ) { env, a ->
-            val src = env.fs.require(a.reqStr("source"))
-            val (parent, name, finalSegs) = env.fs.resolveTarget(a.reqStr("source"), a.reqStr("dest"))
+            val sourcePath = a.reqStr("source")
+            if (env.fs.segments(sourcePath).size <= 1) throw ToolException("Cannot move a selected playground folder.")
+            val src = env.fs.require(sourcePath)
+            val (parent, name, finalSegs) = env.fs.resolveTarget(sourcePath, a.reqStr("dest"))
             env.fs.copyDoc(src, parent, name)
             if (!src.delete()) throw ToolException("Copied, but could not delete the original '${env.fs.display(a.reqStr("source"))}'. The copy is at '${finalSegs.joinToString("/")}'.")
             "Moved '${env.fs.display(a.reqStr("source"))}' → '${finalSegs.joinToString("/")}'."
@@ -152,7 +154,7 @@ object FsTools {
                 throw ToolException("Invalid new name.")
             }
             val doc = env.fs.require(path)
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Cannot rename the root folder.")
+            if (env.fs.segments(path).size <= 1) throw ToolException("Cannot rename the workspace root or a selected playground folder.")
             val parentPath = env.fs.segments(path).dropLast(1).joinToString("/")
             if (env.fs.find(if (parentPath.isEmpty()) newName else "$parentPath/$newName") != null) {
                 throw ToolException("An item named '$newName' already exists in this folder.")
@@ -173,7 +175,7 @@ object FsTools {
             },
         ) { env, a ->
             val path = a.reqStr("path")
-            if (env.fs.segments(path).isEmpty()) throw ToolException("Cannot delete the workspace root folder.")
+            if (env.fs.segments(path).size <= 1) throw ToolException("Cannot delete the workspace root or a selected playground folder.")
             val d = env.fs.require(path)
             if (!d.delete()) throw ToolException("Could not delete '${env.fs.display(path)}'.")
             "Deleted '${env.fs.display(path)}'."

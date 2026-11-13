@@ -414,11 +414,11 @@ fun ChatScreen(
                 Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "No workspace folder is chosen (or access was lost), so file tools are blocked. Other tools still work.",
+                            "No AI playground folder is accessible, so file tools are blocked. Other tools still work.",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
-                        TextButton(onClick = pickFolder) { Text("Choose folder") }
+                        TextButton(onClick = pickFolder) { Text("Add folder") }
                     }
                 }
             }
