@@ -30,7 +30,23 @@ object ModelFacingText {
 
     /** Đường dẫn ghi nằm ngoài thư mục con cho phép (Đợt E, quyết định 6). */
     fun outsideWriteSubfolder(path: String, subfolder: String): String =
-        "The AI can only write inside '$subfolder/'. '$path' is outside that folder, so this write was not done."
+        "The AI can only write inside '$subfolder/' within a playground folder. '$path' is outside that folder, so this write was not done."
+
+    /** AI dùng tên folder không có trong playground: báo kèm danh sách folder hiện có. */
+    fun unknownPlaygroundFolder(name: String, folders: List<String>): String =
+        "There is no playground folder named '$name'. The playground folders are: ${folders.joinToString(", ")}."
+
+    /** AI thử tạo/sửa thứ gì đó ở cấp gốc ảo (không nằm trong folder nào). */
+    fun topLevelChangeDenied(folders: List<String>): String =
+        "You cannot create or change items at the top level. Use a path inside one of these folders: ${folders.joinToString(", ")}."
+
+    /** AI thử xóa/đổi tên/di chuyển/copy/zip chính một folder đã chọn. */
+    fun playgroundFolderProtected(name: String): String =
+        "Folder '$name' is a playground folder and cannot be deleted, renamed or moved. You can change what is inside it."
+
+    /** AI thử ghi vào chính một folder đã chọn (không phải file bên trong nó). */
+    fun writeToPlaygroundFolder(name: String): String =
+        "Folder '$name' is a playground folder. Write a file inside it instead, e.g. '$name/file.txt'."
 
     /** Tham số gọi tool không phải object JSON. */
     const val ARGS_NOT_OBJECT = "The arguments must be a JSON object."
