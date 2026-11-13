@@ -82,14 +82,6 @@ class SettingsRepository(context: Context) {
     /** Nhà cung cấp của lựa chọn mô hình toàn cục (null nếu chưa chọn hoặc provider đã bị xóa). */
     fun currentModelProvider(): ProviderConfig? = currentModelProviderId.value?.let { provider(it) }
 
-    private val _workspaceUri = MutableStateFlow(plain.getString("workspace_uri", null))
-    val workspaceUri: StateFlow<String?> = _workspaceUri.asStateFlow()
-
-    fun setWorkspaceUri(uri: String?) {
-        _workspaceUri.value = uri
-        plain.edit().putString("workspace_uri", uri).apply()
-    }
-
     /**
      * AI playground: danh sách URI các folder user đã chọn (handoff
      * playground nhiều folder). Key mới "playground_uris", lưu JSON array,

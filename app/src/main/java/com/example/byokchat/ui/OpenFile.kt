@@ -8,10 +8,10 @@ import com.example.byokchat.tools.WorkspaceFs
 
 /**
  * Mở một file text/.md bằng app ngoài (ACTION_VIEW, text/markdown rồi
- * fallback text/plain). Dùng chung cho màn sửa thẻ (file trong workspace
+ * fallback text/plain). Dùng chung cho màn sửa thẻ (file trong playground
  * hoặc file ngoài lưu bằng URI — đợt fix 11/11/2026, I1) và màn Messages
  * (history.md trong session storage — [inSessionStorage] = true thì tìm
- * trong Session storage thay vì workspace). Đợt fix 11/11/2026 (E1):
+ * trong Session storage thay vì playground). Đợt fix 11/11/2026 (E1):
  * tách từ hàm cục bộ của CardEditScreen ra dùng chung.
  */
 fun openFileAt(
@@ -22,8 +22,8 @@ fun openFileAt(
     inSessionStorage: Boolean = false,
 ) {
     if (path.isEmpty()) return
-    // Đợt fix 11/11/2026 (I1): file ngoài workspace lưu bằng URI
-    // (content://...) — mở thẳng URI đó, không tìm trong workspace.
+    // Đợt fix 11/11/2026 (I1): file ngoài playground lưu bằng URI
+    // (content://...) — mở thẳng URI đó, không tìm trong playground.
     val externalUri = runCatching { Uri.parse(path) }.getOrNull()
         ?.takeIf { !inSessionStorage && it.scheme == "content" }
     if (externalUri != null) {

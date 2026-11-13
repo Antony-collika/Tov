@@ -185,11 +185,11 @@ class RequestLayoutTest {
     fun resolveFilesReplacesTextAndReportsErrors() {
         val layout = RequestLayout.defaultLayout("typed").copy(
             cards = RequestLayout.defaultLayout("typed").cards.map {
-                if (it.kind == CardKind.SYSTEM) it.copy(file = "Tov/prompts/system.md") else it
-            } + RequestCard("free-1", CardKind.FREE, text = "old", file = "Tov/prompts/missing.md")
+                if (it.kind == CardKind.SYSTEM) it.copy(file = "folder_01/prompts/system.md") else it
+            } + RequestCard("free-1", CardKind.FREE, text = "old", file = "folder_01/prompts/missing.md")
         )
         val (resolved, errors) = layout.resolveFiles { path ->
-            if (path == "Tov/prompts/system.md") Result.success("from file")
+            if (path == "folder_01/prompts/system.md") Result.success("from file")
             else Result.failure(Exception("Not found: $path"))
         }
         assertEquals("from file", resolved.systemCard()?.text)
@@ -204,7 +204,7 @@ class RequestLayoutTest {
         // bất kỳ — nội dung mới là thứ được parse, không còn kiểm tra .md.
         val layout = RequestLayout.defaultLayout("x").copy(
             cards = RequestLayout.defaultLayout("x").cards.map {
-                if (it.kind == CardKind.SYSTEM) it.copy(file = "Tov/prompts/system.txt") else it
+                if (it.kind == CardKind.SYSTEM) it.copy(file = "folder_01/prompts/system.txt") else it
             }
         )
         assertTrue(layout.validate().none { it.contains(".md") })

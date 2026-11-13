@@ -435,7 +435,7 @@ fun ChatScreen(
             // Đợt fix 11/11/2026 (C2): chưa chọn data storage thì không có chỗ
             // lưu session — chat mới không có history.md/history.meta.json,
             // không sửa ngoài app hay đồng bộ hai chiều được. Chat vẫn chạy,
-            // chỉ báo cho user biết hệ quả, không tự lấy workspace làm thay.
+            // chỉ báo cho user biết hệ quả, không tự lấy playground làm thay.
             if (sessionStorageUri == null) {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -30,7 +30,7 @@ import kotlinx.coroutines.withContext
 /**
  * Settings (Đợt 7): chỉ còn DANH SÁCH THẺ — tên + một dòng tóm tắt, ấn vào
  * mở màn chi tiết — cùng chuẩn thẻ với Request panel. Không còn điều khiển
- * inline nào trên màn này: web search, workspace, theme đã dời sang màn
+ * inline nào trên màn này: web search, playground, theme đã dời sang màn
  * chi tiết; switch include_usage đã dời sang từng provider (Đợt 7); hàng
  * Request log đã xóa — công tắc bật/tắt log vẫn nằm trên chính màn
  * Request log, nút mở log nằm trên Request panel cạnh Preview.

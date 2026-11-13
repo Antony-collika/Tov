@@ -16,8 +16,8 @@ class ToolSummaryTest {
     }
 
     @Test fun listRootFolder() {
-        assertEquals("List workspace folder", toolSummary("fs.list", "list_dir", "{}"))
-        assertEquals("List workspace folder", toolSummary("fs.list", "list_dir", ""))
+        assertEquals("List playground folders", toolSummary("fs.list", "list_dir", "{}"))
+        assertEquals("List playground folders", toolSummary("fs.list", "list_dir", ""))
     }
 
     @Test fun zipCountsItems() {

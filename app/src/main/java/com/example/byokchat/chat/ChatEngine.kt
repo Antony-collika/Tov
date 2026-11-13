@@ -61,7 +61,7 @@ class ChatEngine(
     private val requestLog: RequestLog? = null,
     /** Bố cục Request panel (Đợt C); null = bố cục mặc định từ Settings. */
     private val layoutStore: RequestLayoutStore? = null,
-    /** Workspace để đọc file của thẻ (Đợt D) và xuất history.md; null = bỏ qua. */
+    /** Playground để đọc file của thẻ (Đợt D) và xuất history.md; null = bỏ qua. */
     private val fs: WorkspaceFs? = null,
     /** Đồng bộ hai chiều history.md (Đợt E); null = chỉ xuất một chiều như Đợt D. */
     private val historySync: HistorySync? = null,
