@@ -23,7 +23,7 @@ import kotlinx.serialization.json.contentOrNull
  * Danh sách toàn bộ công cụ + cầu nối với vòng chat.
  * - UID cố định do app đặt; tên/mô tả GỐC lấy từ code, không bao giờ mất.
  *   Tên/mô tả model nhìn thấy chỉ còn đến từ file tools.md của thẻ Tools
- *   (đường "legacy" khi chưa chọn workspace — fs == null — thì dùng tên/mô
+ *   (đường "legacy" khi chưa chọn playground folder — fs == null — thì dùng tên/mô
  *   tả gốc; xóa thẻ Tools = 0 tool).
  * - Chế độ Auto/Ask/Off (tầng quyền) vẫn ở trong app (ToolPrefs); tool tắt
  *   vẫn được offer cho model, chỉ chặn lúc gọi (quyết định 8, Đợt E).
@@ -79,7 +79,7 @@ class ToolRegistry(
     fun isAvailable(t: Tool): Boolean =
         (!t.needsWorkspace || env.fs.accessible.value) && t.isAvailable(env)
 
-    /** Có công cụ tệp nào đang bật không (để cảnh báo khi chưa chọn workspace). */
+    /** Có công cụ tệp nào đang bật không (để cảnh báo khi chưa chọn playground folder). */
     fun hasEnabledWorkspaceTools(): Boolean = all.any { it.needsWorkspace && mode(it) != ToolMode.OFF }
 
     // ---------- ToolRuntime ----------
@@ -157,7 +157,7 @@ class ToolRegistry(
          * nội dung (không có byte NUL trong 2000 byte đầu — xem
          * WorkspaceFs.isTextFile), không theo extension.
          * - File chưa có → file mới, nội dung ghi là text nên cho phép mọi đuôi.
-         * - Không đọc được đích (chưa chọn workspace / đường dẫn sai) →
+         * - Không đọc được đích (chưa chọn playground folder / đường dẫn sai) →
          *   cho qua để tool tự báo lỗi như cũ, không crash ở đây.
          * - Thư mục → cho qua để tool tự báo lỗi như cũ.
          */
@@ -197,22 +197,6 @@ class ToolRegistry(
         return null
     }
 
-    /** Ghi vào Tov/ luôn phải hỏi user, kể cả khi công cụ đang ở mode Auto (Đợt D).
-     * Kiểm tra mọi tham số có thể là đích ghi: đường dẫn đích trực tiếp
-     * (path/source/dest), đầu ra chuyển đổi (output_path), thư mục giải nén
-     * (dest_dir), thư mục xử lý hàng loạt (directory) và danh sách file
-     * xử lý hàng loạt (paths). Tham số chỉ là nguồn đọc (vd 'sources' của
-     * fs.zip) không tính — đích ghi của nó đã nằm ở 'dest'. */
-    private fun targetsProtectedDir(tool: Tool, args: JsonObject): Boolean {
-        if (tool.risk == Risk.READ) return false
-        if (listOf("path", "source", "dest", "output_path", "dest_dir", "directory").any { key ->
-            val p = args.str(key) ?: return@any false
-            isProtectedPath(p)
-        }) return true
-        // txt.replace_many ghi vào từng file trong danh sách 'paths'.
-        return args.strList("paths")?.any { isProtectedPath(it) } == true
-    }
-
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
 
     override suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>?): ToolOutcome {
@@ -245,10 +229,9 @@ class ToolRegistry(
         // user để không hỏi về một lần ghi vốn đã bị chặn.
         aiWriteViolation(tool, args)?.let { return ToolOutcome(tool.uid, it, true) }
 
-        // Thư mục bảo vệ Tov/ (Đợt D): AI chỉ đọc được, ghi luôn phải hỏi
-        // user — kể cả khi công cụ đang ở mode Auto.
-        val protected = targetsProtectedDir(tool, args)
-        if (mode(tool) == ToolMode.ASK || protected) {
+        // Hỏi user trước khi chạy tool ở mode ASK (quyết định Ask): có hỏi
+        // hay không chỉ phụ thuộc mode của tool.
+        if (mode(tool) == ToolMode.ASK) {
             val detail = try {
                 // Luồng công việc gắn kèm Job hiện tại: khi bấm Dừng, các vòng lặp của công cụ sẽ thoát sớm.
                 withContext(Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job])) { tool.preview(env, args) }
@@ -256,7 +239,7 @@ class ToolRegistry(
                 throw e
             } catch (e: Exception) {
                 ModelFacingText.previewFailed(e.message) + "\n" + args.toString().take(500)
-            } + if (protected) "\nThis is inside the protected Tov/ folder, so it always asks first." else ""
+            }
             val allowed = confirmations.ask(ConfirmRequest(displayName, tool.uid, tool.risk, detail, turnId))
             if (!allowed) return ToolOutcome(tool.uid, ModelFacingText.DENIED_ACTION, true)
         }
@@ -275,14 +258,4 @@ class ToolRegistry(
             ToolOutcome(tool.uid, ModelFacingText.toolError(e.message ?: e.javaClass.simpleName), true)
         }
     }
-}
-
-/**
- * Đường dẫn có nằm trong thư mục bảo vệ Tov/ không (Đợt D): AI chỉ đọc
- * được, ghi luôn phải hỏi user. So theo đoạn đầu tiên của đường dẫn tương
- * đối trong workspace ("Tov/prompts/x.md" → true, "Tov2/x.md" → false).
- */
-fun isProtectedPath(path: String): Boolean {
-    val first = path.trim().replace('\\', '/').split('/').firstOrNull { it.isNotEmpty() && it != "." }
-    return first == "Tov"
 }

@@ -11,9 +11,9 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/** Một file trong workspace mà model đã dùng, suy ra từ một vòng tool thành công. */
+/** Một file trong AI playground mà model đã dùng, suy ra từ một vòng tool thành công. */
 data class UsedWorkspaceFile(
-    /** Đường dẫn tương đối trong workspace, như model đã gọi. */
+    /** Đường dẫn tương đối trong AI playground, như model đã gọi. */
     val path: String,
     /** Tên hiệu dụng của tool đã dùng file này. */
     val toolName: String,
@@ -30,8 +30,8 @@ data class UsedWorkspaceFile(
  * Chỉ tính lệnh gọi nào có đủ hai điều kiện:
  * - đối số chứa đường dẫn (một trong các khóa path / source / dest /
  *   output_path / dest_dir / directory, hoặc một phần tử của danh sách
- *   paths — cùng tập khóa mà ToolRegistry dùng để kiểm tra thư mục bảo vệ
- *   Tov/, trừ khóa nguồn đọc 'sources' của fs.zip vì đích ghi của nó đã
+ *   paths — cùng tập khóa mà ToolRegistry dùng để kiểm tra đích ghi,
+ *   trừ khóa nguồn đọc 'sources' của fs.zip vì đích ghi của nó đã
  *   nằm ở 'dest');
  * - có dòng kết quả tool khớp toolCallId và không báo lỗi (toolIsError).
  *

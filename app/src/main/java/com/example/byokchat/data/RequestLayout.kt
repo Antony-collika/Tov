@@ -50,7 +50,7 @@ data class RequestCard(
     /**
      * Thẻ System/Free: file trỏ tới — URI "content://..." của file ngoài
      * (chọn ở bất cứ đâu trên máy, đợt fix 11/11/2026, I1) hoặc đường dẫn
-     * tương đối trong workspace (vd "Tov/prompts/system.md", thẻ cũ). Khi
+     * tương đối trong AI playground (vd "folder_01/prompts/system.md", thẻ cũ). Khi
      * có file, nội dung file được đọc lại MỖI LẦN GỬI và thay văn bản trong
      * thẻ; đọc lỗi thì giữ văn bản cũ và báo lỗi (xem
      * RequestLayout.resolveFiles). Null = chỉ dùng văn bản trong thẻ.
@@ -59,7 +59,7 @@ data class RequestCard(
     /**
      * Thẻ Tools (Đợt E): danh sách file đã chọn, theo thứ tự — mỗi file là
      * URI "content://..." của file ngoài hoặc đường dẫn tương đối trong
-     * workspace (đợt fix 11/11/2026, I1). App gộp (hợp) tất cả tool trong
+     * AI playground (đợt fix 11/11/2026, I1). App gộp (hợp) tất cả tool trong
      * các file rồi đưa cho model: theo thứ tự file đã chọn, trong mỗi file
      * theo thứ tự khối. Giữ tương thích ngược với [file]: thẻ Tools cũ chỉ
      * có [file] thì coi như danh sách 1 file (xem [toolFiles]).
