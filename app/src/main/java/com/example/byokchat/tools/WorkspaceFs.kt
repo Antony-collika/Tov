@@ -410,7 +410,7 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     fun nameOf(d: DocumentFile): String =
         if (d is WorkspaceDocumentFile && d.isWorkspaceMount) d.mountName else meta[d.uri.toString()]?.name ?: d.name.orEmpty()
     fun isDir(d: DocumentFile): Boolean =
-        d is WorkspaceRootDocumentFile || d is WorkspaceMountDocumentFile || (meta[d.uri.toString()]?.isDir ?: d.isDirectory)
+        d is WorkspaceDocumentFile || (meta[d.uri.toString()]?.isDir ?: d.isDirectory)
     fun sizeOf(d: DocumentFile): Long = meta[d.uri.toString()]?.size ?: d.length()
     fun modifiedOf(d: DocumentFile): Long = meta[d.uri.toString()]?.modified ?: d.lastModified()
     fun mimeOf(d: DocumentFile): String? = meta[d.uri.toString()]?.mime ?: d.type
