@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - main
+      - basic
   pull_request:
     branches:
       - main
+      - basic
   workflow_dispatch:
 
 permissions:
@@ -43,21 +45,8 @@ jobs:
       - name: Run unit tests
         run: gradle --no-daemon testDebugUnitTest
 
-      - name: Build and sign optimized release APK
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          test -n "$ANDROID_KEYSTORE_BASE64"
-          test -n "$ANDROID_KEYSTORE_PASSWORD"
-          test -n "$ANDROID_KEY_ALIAS"
-          test -n "$ANDROID_KEY_PASSWORD"
-          mkdir -p build
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > build/release-keystore.p12
-          gradle --no-daemon assembleRelease
+      - name: Build optimized release APK
+        run: gradle --no-daemon assembleRelease
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
