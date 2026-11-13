@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
+import androidx.documentfile.provider.WorkspaceDocumentFile
 import com.example.byokchat.data.SettingsRepository
 import com.example.byokchat.util.humanSize
 import kotlinx.coroutines.Job
@@ -320,13 +321,13 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
             if (!hasAccess(raw)) return@mapNotNull null
             val treeUri = Uri.parse(raw)
             val delegate = documentRoot(raw) ?: return@mapNotNull null
-            WorkspaceMountDocumentFile(folderName(raw), treeUri, delegate)
+            WorkspaceDocumentFile.mount(folderName(raw), treeUri, delegate)
         }
         if (mounts.isEmpty()) throw ToolException("No accessible AI playground folder has been chosen.")
-        return WorkspaceRootDocumentFile(mounts)
+        return WorkspaceDocumentFile.root(mounts)
     }
 
-    fun isMountedRoot(doc: DocumentFile): Boolean = doc is WorkspaceMountDocumentFile
+    fun isMountedRoot(doc: DocumentFile): Boolean = doc is WorkspaceDocumentFile && doc.isWorkspaceMount
 
     private fun rootFrom(uriString: String?, label: String): DocumentFile {
         val uri = uriString ?: throw ToolException("No $label folder has been chosen.")
@@ -407,30 +408,30 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     fun clearMeta() = meta.clear()
 
     fun nameOf(d: DocumentFile): String =
-        if (d is WorkspaceMountDocumentFile) d.mountName else meta[d.uri.toString()]?.name ?: d.name.orEmpty()
+        if (d is WorkspaceDocumentFile && d.isWorkspaceMount) d.mountName else meta[d.uri.toString()]?.name ?: d.name.orEmpty()
     fun isDir(d: DocumentFile): Boolean =
         d is WorkspaceRootDocumentFile || d is WorkspaceMountDocumentFile || (meta[d.uri.toString()]?.isDir ?: d.isDirectory)
     fun sizeOf(d: DocumentFile): Long = meta[d.uri.toString()]?.size ?: d.length()
     fun modifiedOf(d: DocumentFile): Long = meta[d.uri.toString()]?.modified ?: d.lastModified()
     fun mimeOf(d: DocumentFile): String? = meta[d.uri.toString()]?.mime ?: d.type
 
-    private fun findMountFor(documentUri: Uri): WorkspaceMountDocumentFile? {
+    private fun findMountFor(documentUri: Uri): WorkspaceDocumentFile? {
         val docId = runCatching { DocumentsContract.getDocumentId(documentUri) }.getOrNull() ?: return null
         return settings.workspaceUris.value.firstNotNullOfOrNull { raw ->
             val treeUri = Uri.parse(raw)
             val treeId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }.getOrNull() ?: return@firstNotNullOfOrNull null
             if (docId == treeId || docId.startsWith("$treeId/")) {
                 val delegate = documentRoot(raw) ?: return@firstNotNullOfOrNull null
-                WorkspaceMountDocumentFile(folderName(raw), treeUri, delegate)
+                WorkspaceDocumentFile.mount(folderName(raw), treeUri, delegate)
             } else null
         }
     }
 
     /** Liệt kê thư mục: một truy vấn lấy đủ thông tin; nếu lỗi thì rơi về cách cũ (chậm nhưng chắc chắn). */
     fun children(dir: DocumentFile): List<DocumentFile> {
-        if (dir is WorkspaceRootDocumentFile) return dir.listFiles().toList()
+        if (dir is WorkspaceDocumentFile && dir.isWorkspaceRoot) return dir.listFiles().toList()
         val mount = when (dir) {
-            is WorkspaceMountDocumentFile -> dir
+            is WorkspaceDocumentFile -> dir
             else -> findMountFor(dir.uri)
         } ?: return childrenSlow(dir)
         val treeUri = mount.treeUri
@@ -701,59 +702,6 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         val cancelJob = ThreadLocal<Job?>()
     }
 }
-
-/**
- * SAF has no API for mounting several document trees below a synthetic parent.
- * These DocumentFile adapters expose a stable in-memory directory tree while
- * delegating every operation below a mount point to its real SAF tree.
- */
-private class WorkspaceRootDocumentFile(
-    private val mounts: List<WorkspaceMountDocumentFile>,
-) : DocumentFile(null) {
-    override fun getUri(): Uri = Uri.parse("tov-workspace://root")
-    override fun getName(): String? = null
-    override fun getType(): String? = null
-    override fun isDirectory(): Boolean = true
-    override fun isFile(): Boolean = false
-    override fun lastModified(): Long = 0L
-    override fun length(): Long = 0L
-    override fun canRead(): Boolean = mounts.any { it.canRead() }
-    override fun canWrite(): Boolean = mounts.any { it.canWrite() }
-    override fun delete(): Boolean = false
-    override fun exists(): Boolean = true
-    override fun renameTo(displayName: String): Boolean = false
-    override fun createFile(mimeType: String, displayName: String): DocumentFile? = null
-    override fun createDirectory(displayName: String): DocumentFile? = null
-    override fun listFiles(): Array<DocumentFile> = mounts.toTypedArray()
-    override fun findFile(displayName: String): DocumentFile? =
-        mounts.firstOrNull { it.mountName == displayName }
-}
-
-private class WorkspaceMountDocumentFile(
-    val mountName: String,
-    val treeUri: Uri,
-    private val delegate: DocumentFile,
-) : DocumentFile(null) {
-    override fun getUri(): Uri = delegate.uri
-    override fun getName(): String = mountName
-    override fun getType(): String? = delegate.type
-    override fun isDirectory(): Boolean = true
-    override fun isFile(): Boolean = false
-    override fun lastModified(): Long = delegate.lastModified()
-    override fun length(): Long = delegate.length()
-    override fun canRead(): Boolean = delegate.canRead()
-    override fun canWrite(): Boolean = delegate.canWrite()
-    override fun delete(): Boolean = false
-    override fun exists(): Boolean = delegate.exists()
-    override fun renameTo(displayName: String): Boolean = false
-    override fun createFile(mimeType: String, displayName: String): DocumentFile? =
-        delegate.createFile(mimeType, displayName)
-    override fun createDirectory(displayName: String): DocumentFile? =
-        delegate.createDirectory(displayName)
-    override fun listFiles(): Array<DocumentFile> = delegate.listFiles()
-    override fun findFile(displayName: String): DocumentFile? = delegate.findFile(displayName)
-}
-
 
 /** Folder aliases in the virtual workspace must be unique regardless of case. */
 internal fun hasWorkspaceFolderNameConflict(existingNames: List<String>, candidate: String): Boolean =
