@@ -17,6 +17,21 @@ val hasReleaseSigning = listOf(
     releaseKeyPassword
 ).all { !it.isNullOrBlank() }
 
+val releaseTaskRequested = gradle.startParameter.taskNames.any {
+    it.contains("release", ignoreCase = true)
+}
+
+if (releaseTaskRequested && !hasReleaseSigning) {
+    throw GradleException(
+        "Release signing secrets are missing. Set ANDROID_KEYSTORE_PASSWORD, " +
+            "ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD."
+    )
+}
+
+if (releaseTaskRequested && !releaseStoreFile.isFile) {
+    throw GradleException("Release keystore was not found at: ${releaseStoreFile.absolutePath}")
+}
+
 
 android {
     namespace = "com.example.byokchat"
