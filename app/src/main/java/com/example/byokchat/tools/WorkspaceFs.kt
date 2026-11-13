@@ -692,8 +692,8 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         walkInner(dir, dirPath, maxDepth, 0, visit)
 
     /** Duyệt đệ quy một [FsDir]: gốc ảo duyệt từng folder đã chọn rồi đi sâu vào từng folder. */
-    fun walk(dir: FsDir, dirPath: String, maxDepth: Int, visit: (DocumentFile, String, Int) -> Boolean): Boolean =
-        when (dir) {
+    fun walk(dir: FsDir, dirPath: String, maxDepth: Int, visit: (DocumentFile, String, Int) -> Boolean): Boolean {
+        return when (dir) {
             is FsDir.VirtualRoot -> {
                 for (root in roots().mapNotNull { it.doc }.sortedBy { it.name?.lowercase() ?: "" }) {
                     stopIfCancelled()
@@ -705,6 +705,7 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
             }
             is FsDir.Real -> walk(dir.doc, dirPath, maxDepth, visit)
         }
+    }
 
     private fun walkInner(dir: DocumentFile, dirPath: String, maxDepth: Int, depth: Int, visit: (DocumentFile, String, Int) -> Boolean): Boolean {
         for (child in children(dir)) {

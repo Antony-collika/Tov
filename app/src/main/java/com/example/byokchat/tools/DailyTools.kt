@@ -219,7 +219,7 @@ private fun deleteNoteFile(env: ToolEnv, id: String) {
  * chính xác, app không bao giờ đọc lại file này). Ghi đè toàn bộ file sau
  * mỗi lần thêm / đổi trạng thái / xóa. Best-effort như notes.
  */
-private fun exportTodos(env: ToolEnv) {
+private suspend fun exportTodos(env: ToolEnv) {
     runCatching {
         val text = buildString {
             appendLine("# To-dos")
