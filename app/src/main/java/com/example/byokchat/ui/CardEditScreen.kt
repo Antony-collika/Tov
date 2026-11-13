@@ -263,46 +263,49 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         saveCard(c)
     }
 
-    /** Tạo file mẫu (nếu chưa có) rồi trỏ thẻ tới file đó. */
+    /** Tạo file mẫu trong Storage/template/ (nếu chưa có) rồi trỏ thẻ tới URI của file đó. */
     fun createTemplate() {
         val c = card ?: return
-        // Đợt E: mẫu tools.md liệt kê TẤT CẢ tool kèm tên/mô tả gốc — chỉ để
-        // user lấy lại khi cần, KHÔNG tự ghi đè file của user (chỉ ghi khi
-        // file chưa có; xem ToolsMdParser.buildTemplate).
-        if (c.kind == CardKind.TOOLS) {
-            // Đợt fix 11/11/2026 (A2): không còn ô gõ đường dẫn tay — mẫu luôn
-            // ở đường mặc định.
-            val path = "Tov/prompts/tools.md"
-            scope.launch(Dispatchers.IO) {
-                runCatching {
-                    if (container.fs.find(path) == null) {
-                        container.fs.writeText(path, ToolsMdParser.buildTemplate(container.registry.all))
-                    }
-                }.onSuccess {
-                    withContext(Dispatchers.Main) {
-                        if (path !in toolFiles) toolFiles = toolFiles + path
-                        fileError = null
-                    }
-                }.onFailure { e ->
-                    withContext(Dispatchers.Main) { fileError = e.message ?: "Could not create the file." }
-                }
-            }
-            return
-        }
-        val path = file.trim().ifBlank {
-            when (c.kind) {
-                CardKind.SYSTEM -> "Tov/prompts/system.md"
-                else -> "Tov/prompts/" + label.trim().lowercase()
-                    .replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "free-card" } + ".md"
+        // Mẫu luôn nằm trong thư mục Session storage (template/): file đã
+        // có thì dùng lại, KHÔNG ghi đè (quy tắc cũ). Thẻ lưu URI
+        // content:// của file (đường file ngoài đã có sẵn), không lưu
+        // đường dẫn tương đối trong playground.
+        val (relPath, content) = when (c.kind) {
+            CardKind.TOOLS -> "template/tools.md" to ToolsMdParser.buildTemplate(container.registry.all)
+            CardKind.SYSTEM -> "template/system.md" to templateText(c.kind)
+            else -> {
+                val slug = label.trim().lowercase()
+                    .replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "free-card" }
+                "template/$slug.md" to templateText(c.kind)
             }
         }
         scope.launch(Dispatchers.IO) {
             runCatching {
-                if (container.fs.find(path) == null) {
-                    container.fs.writeText(path, templateText(c.kind))
+                if (container.fs.sessionRootOrNull() == null) {
+                    error("Choose a Session storage folder first (Settings → Select Storage and Playground folder).")
                 }
-            }.onSuccess {
-                withContext(Dispatchers.Main) { file = path; fileError = null; source = CardSource.FILE }
+                if (container.fs.findSession(relPath) == null) {
+                    container.fs.writeSessionText(relPath, content)
+                }
+                val doc = container.fs.findSession(relPath)
+                    ?: error("Could not find the created file.")
+                val uriString = doc.uri.toString()
+                // Quyền đọc file con trong cây Storage: thường đã có sẵn từ
+                // quyền của cả cây; giữ thêm cho chắc — lỗi ở đây không phải
+                // lỗi (handoff §4.9), chỉ cần đọc lại được là đủ.
+                runCatching { container.fs.takeCardFilePermission(doc.uri) }
+                container.fs.readCardFile(uriString)
+                uriString
+            }.onSuccess { uriString ->
+                withContext(Dispatchers.Main) {
+                    if (c.kind == CardKind.TOOLS) {
+                        if (uriString !in toolFiles) toolFiles = toolFiles + uriString
+                    } else {
+                        file = uriString
+                        source = CardSource.FILE
+                    }
+                    fileError = null
+                }
             }.onFailure { e ->
                 withContext(Dispatchers.Main) { fileError = e.message ?: "Could not create the file." }
             }
@@ -766,11 +769,11 @@ private fun templateText(kind: CardKind): String = when (kind) {
  * thẻ System/Free và trình sửa thẻ Tools (đợt fix 11/11/2026, A1+A2 — theo
  * mẫu FPilot: chọn bằng hộp chọn, không gõ đường dẫn tay).
  * Đợt fix 11/11/2026 (I1): file có thể ở BẤT CỨ ĐÂU trên máy, đuôi bất kỳ
- * — nội dung mới là thứ được parse, workspace chỉ là thư mục của AI chứ
+ * — nội dung mới là thứ được parse, playground chỉ là thư mục của AI chứ
  * không phải nơi bắt buộc chứa file của thẻ. Chọn xong thì giữ quyền đọc
  * lâu dài (persistable) rồi trả về URI dạng chuỗi; giữ không được quyền
  * thì báo lỗi (không lưu URI sẽ mất quyền khi khởi động lại app). File
- * trong workspace vẫn lưu bằng đường dẫn tương đối như thẻ cũ.
+ * trong playground vẫn lưu bằng đường dẫn tương đối như thẻ cũ.
  */
 @Composable
 private fun rememberCardFilePicker(
@@ -781,7 +784,7 @@ private fun rememberCardFilePicker(
     val fs = LocalContext.current.container.fs
     return rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        // File trong workspace thì lưu đường dẫn tương đối như thẻ cũ (dễ
+        // File trong playground thì lưu đường dẫn tương đối như thẻ cũ (dễ
         // đọc, quyền đọc đã có sẵn từ quyền của cả cây); file ngoài thì
         // giữ quyền đọc lâu dài rồi lưu URI dạng chuỗi.
         val relative = fs.relativePathForDocument(uri)
@@ -790,7 +793,7 @@ private fun rememberCardFilePicker(
             return@rememberLauncherForActivityResult
         }
         if (!fs.takeCardFilePermission(uri)) {
-            onPickError("Could not keep access to this file. Pick it again, or copy it into the workspace.")
+            onPickError("Could not keep access to this file. Pick it again, or copy it into one of the playground folders.")
             return@rememberLauncherForActivityResult
         }
         onPicked(uri.toString())
@@ -810,7 +813,7 @@ private fun FileSection(
     fileError: String?,
     onCreateTemplate: () -> Unit,
     onOpenFile: () -> Unit,
-    /** File vừa chọn bằng hộp chọn của hệ thống (URI file ngoài, hoặc đường dẫn tương đối trong workspace — thẻ cũ). */
+    /** File vừa chọn bằng hộp chọn của hệ thống (URI file ngoài, hoặc đường dẫn tương đối trong playground — thẻ cũ). */
     onFilePicked: (String) -> Unit,
     /** File đã chọn không dùng được (không giữ được quyền, ...). */
     onPickError: (String) -> Unit,
@@ -835,7 +838,7 @@ private fun FileSection(
         Text(displayName, style = MaterialTheme.typography.bodyMedium)
     }
     Text(
-        "It can be any file on this device — it does not have to be in the workspace. " +
+        "It can be any file on this device — it does not have to be in the AI playground. " +
             "Its content is read again on every send. Edit the file in any editor and the next send " +
             "uses the new text. If the file cannot be read, the card's saved text is used instead " +
             "and an error is shown.",

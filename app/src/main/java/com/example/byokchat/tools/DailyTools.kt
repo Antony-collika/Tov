@@ -201,17 +201,34 @@ private fun htmlToText(html: String): String {
 
 private fun noteId() = UUID.randomUUID().toString().take(8)
 
-/** Xuất một note ra Tov/notes/<id>.md (Đợt D). Best-effort: workspace chưa
+/** Xuất một note ra Storage/notes/<id>.md. Best-effort: Storage chưa
  * chọn hay lỗi ghi đều bỏ qua, không bao giờ làm lỗi tool. */
 private fun exportNote(env: ToolEnv, note: NoteEntity) {
     runCatching {
-        env.fs.writeText("Tov/notes/${note.id}.md", "# ${note.title}\n\n${note.content}")
+        env.fs.writeSessionText("notes/${note.id}.md", "# ${note.title}\n\n${note.content}")
     }
 }
 
-/** Xóa file .md của một note (Đợt D). Best-effort. */
+/** Xóa file .md của một note trong Storage. Best-effort. */
 private fun deleteNoteFile(env: ToolEnv, id: String) {
-    runCatching { env.fs.find("Tov/notes/$id.md")?.delete() }
+    runCatching { env.fs.findSession("notes/$id.md")?.delete() }
+}
+
+/**
+ * Xuất toàn bộ to-dos ra Storage/to-dos/to-dos.md (một chiều: DB là nguồn
+ * chính xác, app không bao giờ đọc lại file này). Ghi đè toàn bộ file sau
+ * mỗi lần thêm / đổi trạng thái / xóa. Best-effort như notes.
+ */
+private fun exportTodos(env: ToolEnv) {
+    runCatching {
+        val text = buildString {
+            appendLine("# To-dos")
+            for (t in env.db.todos().all()) {
+                appendLine("- [${if (t.done) "x" else " "}] ${t.text}")
+            }
+        }
+        env.fs.writeSessionText("to-dos/to-dos.md", text)
+    }
 }
 
 /** Nhóm 4: công cụ công việc hằng ngày. */
@@ -382,6 +399,7 @@ object DailyTools {
             preview = { _, a -> "Add to-do: ${a.reqStr("text")}" }) { env, a ->
             val id = noteId()
             env.db.todos().upsert(TodoEntity(id, a.reqStr("text").trim(), false, System.currentTimeMillis()))
+            exportTodos(env)
             "To-do added (id: $id)."
         },
 
@@ -400,6 +418,7 @@ object DailyTools {
             preview = { env, a -> "Mark ${if (a.bool("done") == false) "NOT done" else "done"}: " + (env.db.todos().get(a.reqStr("id").trim())?.text ?: a.reqStr("id")) }) { env, a ->
             val t = env.db.todos().get(a.reqStr("id").trim()) ?: throw ToolException("No to-do with id '${a.reqStr("id")}'.")
             env.db.todos().upsert(t.copy(done = a.bool("done") ?: true))
+            exportTodos(env)
             "Updated: ${t.text}"
         },
 
@@ -408,6 +427,7 @@ object DailyTools {
             preview = { env, a -> "DELETE to-do: " + (env.db.todos().get(a.reqStr("id").trim())?.text ?: a.reqStr("id")) }) { env, a ->
             env.db.todos().get(a.reqStr("id").trim()) ?: throw ToolException("No to-do with id '${a.reqStr("id")}'.")
             env.db.todos().delete(a.reqStr("id").trim())
+            exportTodos(env)
             "To-do deleted."
         },
 
