@@ -12,7 +12,7 @@ enum class ToolMode(val label: String) {
 }
 
 enum class ToolGroup(val label: String) {
-    FILES("Files & folders"), TEXT("Text files"), DAILY("Daily tools")
+    FILES("Files & folders"), TEXT("Text files"), DAILY("Daily tools"), MEDIA("Media")
 }
 
 class ToolException(message: String) : Exception(message)

@@ -12,6 +12,7 @@ import com.example.byokchat.chat.ChatNotifier
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.GenerationService
 import com.example.byokchat.chat.ChatOps
+import com.example.byokchat.media.MediaPlayback
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.ConversationRepository
 import com.example.byokchat.data.RequestLayoutStore
@@ -83,6 +84,8 @@ class AppContainer(val context: Context) {
     val toolPrefs = ToolPrefs(context)
     private val env = ToolEnv(context, fs, db, settings, permissions)
     val registry = ToolRegistry(env, toolPrefs, confirmations)
+    /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
+    val media = MediaPlayback(context)
     val notifier = ChatNotifier(context)
     /** Bố cục Request panel (Đợt C): danh sách thẻ toàn cục, lưu SharedPreferences. */
     val layoutStore = RequestLayoutStore(context, settings)
