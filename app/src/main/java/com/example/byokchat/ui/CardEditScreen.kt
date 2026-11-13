@@ -263,20 +263,25 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         saveCard(c)
     }
 
-    /** Tạo file mẫu trong Storage/template/ (nếu chưa có) rồi trỏ thẻ tới URI của file đó. */
+    /**
+     * Tạo file mẫu MỚI trong Storage/template/ rồi trỏ thẻ tới URI của file
+     * đó. Mỗi lần bấm là một file mới (quyết định 13/11/2026): tên gốc là
+     * `<loại>_template.md` (tools → tools_template.md); trùng tên thì tự
+     * thêm số, vd tools_template_(01).md, _(02)... — KHÔNG dùng lại hay ghi
+     * đè file cũ, nên dù cậu có dùng chính file mẫu đó rồi sửa hỏng thì lần
+     * bấm sau vẫn tạo ra bản chuẩn mới. Thẻ lưu URI content:// của file
+     * (đường file ngoài đã có sẵn), không lưu đường dẫn tương đối trong
+     * playground.
+     */
     fun createTemplate() {
         val c = card ?: return
-        // Mẫu luôn nằm trong thư mục Session storage (template/): file đã
-        // có thì dùng lại, KHÔNG ghi đè (quy tắc cũ). Thẻ lưu URI
-        // content:// của file (đường file ngoài đã có sẵn), không lưu
-        // đường dẫn tương đối trong playground.
-        val (relPath, content) = when (c.kind) {
-            CardKind.TOOLS -> "template/tools.md" to ToolsMdParser.buildTemplate(container.registry.all)
-            CardKind.SYSTEM -> "template/system.md" to templateText(c.kind)
+        val (baseName, content) = when (c.kind) {
+            CardKind.TOOLS -> "tools_template.md" to ToolsMdParser.buildTemplate(container.registry.all)
+            CardKind.SYSTEM -> "system_template.md" to templateText(c.kind)
             else -> {
                 val slug = label.trim().lowercase()
                     .replace(Regex("[^a-z0-9]+"), "-").trim('-').ifEmpty { "free-card" }
-                "template/$slug.md" to templateText(c.kind)
+                "${slug}_template.md" to templateText(c.kind)
             }
         }
         scope.launch(Dispatchers.IO) {
@@ -284,9 +289,10 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 if (container.fs.sessionRootOrNull() == null) {
                     error("Choose a Session storage folder first (Settings → Select Storage and Playground folder).")
                 }
-                if (container.fs.findSession(relPath) == null) {
-                    container.fs.writeSessionText(relPath, content)
+                val relPath = "template/" + uniqueTemplateName(baseName) { name ->
+                    container.fs.findSession("template/$name") != null
                 }
+                container.fs.writeSessionText(relPath, content)
                 val doc = container.fs.findSession(relPath)
                     ?: error("Could not find the created file.")
                 val uriString = doc.uri.toString()
@@ -762,6 +768,23 @@ private fun TimeCardEditor() {
 private fun templateText(kind: CardKind): String = when (kind) {
     CardKind.SYSTEM -> "# System prompt\n\nWrite the instructions for the AI here. This file is read again on every send, so edits take effect immediately.\n\nYou can use {date}, {time}, {model} and {provider}.\n"
     else -> "# Note for the AI\n\nWrite here what the AI should know. This file is read again on every send.\n"
+}
+
+/**
+ * Chọn tên file mẫu chưa trùng trong thư mục template (logic thuần, có test
+ * riêng — quyết định 13/11/2026: mỗi lần bấm "Create template" là một file
+ * mới). Tên gốc còn trống thì dùng luôn; trùng thì thêm số, vd
+ * tools_template.md → tools_template_(01).md → _(02)... Số đệm 2 chữ số.
+ */
+internal fun uniqueTemplateName(baseName: String, exists: (String) -> Boolean): String {
+    if (!exists(baseName)) return baseName
+    val dot = baseName.lastIndexOf('.')
+    val (stem, ext) = if (dot > 0) baseName.substring(0, dot) to baseName.substring(dot) else baseName to ""
+    for (i in 1..9999) {
+        val candidate = stem + "_(" + i.toString().padStart(2, '0') + ")" + ext
+        if (!exists(candidate)) return candidate
+    }
+    error("Too many template files named like $baseName.")
 }
 
 /**
