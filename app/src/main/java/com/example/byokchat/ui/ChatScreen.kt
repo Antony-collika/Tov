@@ -54,6 +54,7 @@ import com.example.byokchat.chat.TurnNumbers
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
+import com.example.byokchat.tools.MediaTools
 import com.example.byokchat.util.TextUtil
 import kotlinx.coroutines.launch
 import java.io.File
@@ -152,6 +153,7 @@ fun ChatScreen(
         if (showMemory) memoryStats = vm.computeTokenStats()
     }
     var showMenu by remember { mutableStateOf(false) }
+    var showRecentlyPlayed by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<EditState?>(null) }
     var regenPrompt by remember { mutableStateOf<RegenPrompt?>(null) }
     var deleteConfirm by remember { mutableStateOf<MessageEntity?>(null) }
@@ -400,6 +402,7 @@ fun ChatScreen(
                             }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(text = { Text("Search") }, onClick = { showMenu = false; searchOpen = true })
+                                DropdownMenuItem(text = { Text("Recently played") }, onClick = { showMenu = false; showRecentlyPlayed = true })
                                 DropdownMenuItem(text = { Text("Context window") }, onClick = { showMenu = false; showMemory = true })
                                 DropdownMenuItem(text = { Text("Preview request") }, onClick = { showMenu = false; onOpenInspector() })
                                 DropdownMenuItem(text = { Text("Log") }, onClick = { showMenu = false; onOpenRequestLog() })
@@ -433,6 +436,25 @@ fun ChatScreen(
                     title = "Folder name conflict",
                     message = "A folder named $name already exists in your AI playground. Please choose a folder with a different name.",
                     onDismiss = { conflictName = null },
+                )
+            }
+            // "Recently played" (menu ⋮, dưới Search): bấm một bài để phát
+            // lại; lỗi (file đã xóa, video không còn, bài VIP) thì báo bằng
+            // snackbar, không phát bài khác thay thế.
+            if (showRecentlyPlayed) {
+                RecentlyPlayedDialog(
+                    tracks = container.recentlyPlayed.list(conversationId),
+                    onDismiss = { showRecentlyPlayed = false },
+                    onReplay = { track ->
+                        showRecentlyPlayed = false
+                        scope.launch {
+                            try {
+                                MediaTools.replayPlayedTrack(container, conversationId, track)
+                            } catch (e: Exception) {
+                                snackbar.showSnackbar(e.message ?: "Could not play this track.")
+                            }
+                        }
+                    },
                 )
             }
             // Đợt fix 11/11/2026 (C2): chưa chọn data storage thì không có chỗ
