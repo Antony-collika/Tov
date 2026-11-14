@@ -1,9 +1,12 @@
 package com.example.byokchat.tools
 
+import com.example.byokchat.AppContainer
 import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.container
 import com.example.byokchat.media.MediaPlayException
 import com.example.byokchat.media.MediaPlayback
+import com.example.byokchat.media.PlayedSource
+import com.example.byokchat.media.PlayedTrack
 import com.example.byokchat.media.QueueTrack
 import com.example.byokchat.media.formatMediaTime
 import com.example.byokchat.nct.NctApi
@@ -52,12 +55,7 @@ object MediaTools {
             if (paths.isEmpty()) throw ToolException(ModelFacingText.MEDIA_NEED_PATHS)
             // Kiểm tra hết cả batch trước khi phát bài nào: file nào lỗi thì
             // chưa phát gì cả, AI báo lại đúng file đó.
-            val tracks = paths.map { path ->
-                val display = env.fs.display(path)
-                val doc = env.fs.find(path) ?: throw ToolException(ModelFacingText.mediaNotFound(display))
-                if (env.fs.isDir(doc)) throw ToolException(ModelFacingText.mediaIsFolder(display))
-                QueueTrack(display, doc.uri.toString(), env.fs.nameOf(doc))
-            }
+            val tracks = paths.map { path -> resolveLocalTrack(env.fs, path) }
             playTracks(env, tracks)
         },
 
@@ -79,14 +77,7 @@ object MediaTools {
             val tracks = videos.map { input ->
                 val videoId = parseVideoId(input)
                     ?: throw ToolException("'$input' is not a YouTube video ID or link.")
-                val resolved = YouTubeExtractor.fetch(videoId)
-                val stream = YouTubeExtractor.bestAudioStream(resolved.audioStreams)
-                    ?: throw ToolException("Video '${resolved.title.ifBlank { videoId }}' has no audio stream to play.")
-                QueueTrack(
-                    displayPath = resolved.title.ifBlank { videoId },
-                    uri = stream.content,
-                    name = resolved.title.ifBlank { videoId },
-                )
+                resolveYouTubeTrack(videoId)
             }
             playTracks(env, tracks)
         },
@@ -109,24 +100,7 @@ object MediaTools {
             val tracks = songs.map { input ->
                 val key = parseNctSongKey(input)
                     ?: throw ToolException("'$input' is not an NCT song key or link.")
-                val song = NctApi().songByKey(key)
-                val stream = selectStream(song, null)
-                    ?: if (song.onlyVip) {
-                        throw ToolException(
-                            "Song '${song.title}' by ${song.artistName} is VIP-only on NhacCuaTui, " +
-                                "so it cannot be played.",
-                        )
-                    } else {
-                        throw ToolException("Song '${song.title}' has no audio stream to play.")
-                    }
-                if (isSignedUrlExpired(stream.streamUrl)) {
-                    throw ToolException(
-                        "NhacCuaTui gave a stream link for '${song.title}' that is already expired. Try again.",
-                    )
-                }
-                val display = if (song.artistName.isBlank()) song.title.ifBlank { key }
-                else "${song.title.ifBlank { key }} - ${song.artistName}"
-                QueueTrack(displayPath = display, uri = stream.streamUrl, name = display)
+                resolveNctTrack(key)
             }
             playTracks(env, tracks)
         },
@@ -149,12 +123,7 @@ object MediaTools {
             val queue = tracks.map { input ->
                 val url = parseSoundCloudLink(input)
                     ?: throw ToolException("'$input' is not a SoundCloud track link.")
-                val resolved = SoundCloudExtractor.fetch(url)
-                val stream = YouTubeExtractor.bestAudioStream(resolved.audioStreams)
-                    ?: throw ToolException("Track '${resolved.track.title.ifBlank { url }}' has no audio stream to play.")
-                val display = if (resolved.track.artist.isBlank()) resolved.track.title.ifBlank { url }
-                else "${resolved.track.title.ifBlank { url }} - ${resolved.track.artist}"
-                QueueTrack(displayPath = display, uri = stream.content, name = display)
+                resolveSoundCloudTrack(url)
             }
             playTracks(env, queue)
         },
@@ -167,7 +136,96 @@ object MediaTools {
         } catch (e: MediaPlayException) {
             return e.message ?: ModelFacingText.mediaPlayFailed(tracks[0].name)
         }
+        // Ghi vào "Recently played" của đúng cuộc trò chuyện này (chỉ ghi
+        // khi đã phát được — lỗi mở bài thì không ghi). Lịch sử sống riêng
+        // khỏi hàng đợi nên bấm X không xóa nó.
+        currentConversationId()?.let { conversationId ->
+            val store = env.app.container.recentlyPlayed
+            store.recordAll(
+                conversationId,
+                tracks.mapNotNull { track ->
+                    val source = track.replaySource ?: return@mapNotNull null
+                    val key = track.replayKey ?: return@mapNotNull null
+                    PlayedTrack(source, key, track.name)
+                },
+            )
+        }
         val first = tracks[0]
         return ModelFacingText.mediaPlaying(first.name, formatMediaTime(durationMs), tracks.drop(1).map { it.name })
+    }
+
+    /**
+     * Resolve một bài thành QueueTrack, dùng chung cho tool phát nhạc và
+     * cho phát lại từ "Recently played". Mỗi lần gọi đều resolve lại link
+     * stream mới — không bao giờ dùng lại link cũ đã lưu (link YouTube/NCT
+     * có hạn dùng, NCT ~7 ngày). Lỗi nào cũng ném ToolException với câu
+     * báo rõ, không bao giờ tự đổi sang bài khác.
+     */
+    private suspend fun resolveLocalTrack(fs: WorkspaceFs, path: String): QueueTrack {
+        val display = fs.display(path)
+        val doc = fs.find(path) ?: throw ToolException(ModelFacingText.mediaNotFound(display))
+        if (fs.isDir(doc)) throw ToolException(ModelFacingText.mediaIsFolder(display))
+        return QueueTrack(display, doc.uri.toString(), fs.nameOf(doc), PlayedSource.LOCAL, path)
+    }
+
+    private suspend fun resolveYouTubeTrack(videoId: String): QueueTrack {
+        val resolved = YouTubeExtractor.fetch(videoId)
+        val stream = YouTubeExtractor.bestAudioStream(resolved.audioStreams)
+            ?: throw ToolException("Video '${resolved.title.ifBlank { videoId }}' has no audio stream to play.")
+        val name = resolved.title.ifBlank { videoId }
+        return QueueTrack(name, stream.content, name, PlayedSource.YOUTUBE, videoId)
+    }
+
+    private suspend fun resolveNctTrack(key: String): QueueTrack {
+        val song = NctApi().songByKey(key)
+        val stream = selectStream(song, null)
+            ?: if (song.onlyVip) {
+                throw ToolException(
+                    "Song '${song.title}' by ${song.artistName} is VIP-only on NhacCuaTui, " +
+                        "so it cannot be played.",
+                )
+            } else {
+                throw ToolException("Song '${song.title}' has no audio stream to play.")
+            }
+        if (isSignedUrlExpired(stream.streamUrl)) {
+            throw ToolException(
+                "NhacCuaTui gave a stream link for '${song.title}' that is already expired. Try again.",
+            )
+        }
+        val display = if (song.artistName.isBlank()) song.title.ifBlank { key }
+        else "${song.title.ifBlank { key }} - ${song.artistName}"
+        return QueueTrack(display, stream.streamUrl, display, PlayedSource.NCT, key)
+    }
+
+    private suspend fun resolveSoundCloudTrack(url: String): QueueTrack {
+        val resolved = SoundCloudExtractor.fetch(url)
+        val stream = YouTubeExtractor.bestAudioStream(resolved.audioStreams)
+            ?: throw ToolException("Track '${resolved.track.title.ifBlank { url }}' has no audio stream to play.")
+        val display = if (resolved.track.artist.isBlank()) resolved.track.title.ifBlank { url }
+        else "${resolved.track.title.ifBlank { url }} - ${resolved.track.artist}"
+        return QueueTrack(display, stream.content, display, PlayedSource.SOUNDCLOUD, url)
+    }
+
+    /**
+     * Phát lại một bài từ "Recently played": resolve lại stream mới từ khóa
+     * rồi phát như tool phát nhạc. Trả về câu "đang phát" cho UI; lỗi (file
+     * đã xóa, video không còn, bài VIP) thì ném Exception với câu báo rõ
+     * để UI hiện lên, không phát bài khác thay thế. Phát lại thành công
+     * cũng ghi vào lịch sử (bài đó lại thành mới nhất).
+     */
+    suspend fun replayPlayedTrack(container: AppContainer, conversationId: String, track: PlayedTrack): String {
+        val queueTrack = when (track.source) {
+            PlayedSource.LOCAL -> resolveLocalTrack(container.fs, track.key)
+            PlayedSource.YOUTUBE -> resolveYouTubeTrack(track.key)
+            PlayedSource.NCT -> resolveNctTrack(track.key)
+            PlayedSource.SOUNDCLOUD -> resolveSoundCloudTrack(track.key)
+        }
+        val durationMs = try {
+            container.media.play(listOf(queueTrack))
+        } catch (e: MediaPlayException) {
+            throw ToolException(e.message ?: ModelFacingText.mediaPlayFailed(queueTrack.name))
+        }
+        container.recentlyPlayed.record(conversationId, track)
+        return ModelFacingText.mediaPlaying(queueTrack.name, formatMediaTime(durationMs), emptyList())
     }
 }
