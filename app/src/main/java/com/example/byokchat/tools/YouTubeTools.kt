@@ -1,6 +1,5 @@
 package com.example.byokchat.tools
 
-import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.youtube.CommentsResult
 import com.example.byokchat.youtube.SearchItem
 import com.example.byokchat.youtube.SearchResults
