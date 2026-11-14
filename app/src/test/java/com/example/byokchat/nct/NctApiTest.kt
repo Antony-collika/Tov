@@ -89,10 +89,15 @@ class NctApiTest {
             b, "GFY5JjU8Ualq", "Haru Haru (Lo-Fi beat)", "BIGBANG", 185,
             listOf(
                 stream(b, "320", "320kbps", true),
+                stream(b, "128", "128kbps", false),
                 stream(b, "flac", "Lossless", false),
             ),
         )
-        val songsArr = b.arr(s1, s2, s3)
+        val s4 = song(
+            b, "bZf3h6S6y3", "Haru Haru (Acoustic version)", "BIGBANG", 265,
+            listOf(stream(b, "320", "320kbps", true)),
+        )
+        val songsArr = b.arr(s1, s2, s3, s4)
         val catData = b.obj("songs" to songsArr)
         val cat = b.obj("tab" to b.str("all"), "data" to catData)
         val data = b.obj("search-category-result" to cat)
@@ -123,7 +128,7 @@ class NctApiTest {
     @Test
     fun searchPageParsesSongsWithStreamsAndVipFlags() {
         val songs = parseSearchSongs(searchPageHtml())
-        assertEquals(3, songs.size)
+        assertEquals(4, songs.size)
         val first = songs[0]
         assertEquals("PgrxRcNASk", first.key)
         assertEquals("Haru Haru", first.title)
@@ -136,10 +141,12 @@ class NctApiTest {
         assertEquals("128", first.streams[0].type)
         assertEquals("320", first.streams[1].type)
         assertFalse(first.streams[0].onlyVip)
-        // 128-only song, and the VIP-flagged 320 stream.
+        // 128-only song, the VIP-flagged 320 stream, and the all-VIP song.
         assertEquals(listOf("128kbps"), songs[1].qualityLabels())
         assertTrue(songs[2].streams[0].onlyVip)
-        assertFalse(songs[2].onlyVip) // its FLAC stream is not VIP
+        assertFalse(songs[2].onlyVip) // its 128 and FLAC streams are not VIP
+        assertTrue(songs[3].onlyVip)
+        assertEquals(listOf("320kbps"), songs[3].qualityLabels())
     }
 
     @Test
@@ -157,7 +164,7 @@ class NctApiTest {
     }
 
     @Test
-    fun selectStreamDefaultsToHqNeverFlac() {
+    fun selectStreamDefaultsToBestFreeStreamNeverFlac() {
         val songs = parseSearchSongs(searchPageHtml())
         val withBoth = songs[0]
         assertEquals("320", selectStream(withBoth, null)?.type)
@@ -168,9 +175,15 @@ class NctApiTest {
         // 128-only song falls back to 128 by default.
         assertEquals("128", selectStream(songs[1], null)?.type)
         assertNull(selectStream(songs[1], "320"))
-        // FLAC only when explicitly asked, and only when the song has it.
+        // VIP 320 + free 128 + free FLAC: default picks the free 128, never
+        // the VIP 320 and never FLAC; explicit hq still names the VIP stream
+        // (the caller reports VIP-only), explicit flac picks FLAC.
+        assertEquals("128", selectStream(songs[2], null)?.type)
+        assertEquals("320", selectStream(songs[2], "hq")?.type)
         assertEquals("flac", selectStream(songs[2], "flac")?.type)
-        assertEquals("320", selectStream(songs[2], null)?.type) // default still picks 320, even VIP
+        // All-VIP song: no default stream at all.
+        assertNull(selectStream(songs[3], null))
+        assertEquals("320", selectStream(songs[3], "hq")?.type)
     }
 
     @Test

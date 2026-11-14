@@ -277,14 +277,20 @@ fun isSignedUrlExpired(url: String, nowEpochSeconds: Long = System.currentTimeMi
 
 /**
  * Pick the stream for a requested quality. Default (no quality given) is
- * the 320kbps stream, falling back to 128kbps — never FLAC. An explicitly
- * requested quality that the song does not have returns null: the caller
- * reports the available qualities instead of silently downgrading.
+ * the best stream that is NOT VIP-only: 320kbps, then 128kbps — never
+ * FLAC, never a VIP-only stream. An explicitly requested quality is picked
+ * by type even when it is VIP-only (the caller then reports VIP-only
+ * instead of playing it). A requested quality the song does not have, or
+ * a song whose 320/128 streams are all VIP-only, returns null: the caller
+ * reports the available qualities / VIP-only instead of silently
+ * downgrading or substituting another song.
  */
 fun selectStream(song: NctSong, quality: String?): NctStream? {
     return when (quality?.trim()?.lowercase()) {
-        null, "", "hq", "320", "320kbps", "best" ->
-            song.streams.firstOrNull { it.isHq } ?: song.streams.firstOrNull { it.is128 }
+        null, "", "hq", "320", "320kbps", "best" -> {
+            val free = song.streams.filter { !it.onlyVip }
+            free.firstOrNull { it.isHq } ?: free.firstOrNull { it.is128 }
+        }
         "128", "128kbps" -> song.streams.firstOrNull { it.is128 }
         "flac", "lossless" -> song.streams.firstOrNull { it.isFlac }
         else -> null
