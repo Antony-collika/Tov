@@ -41,6 +41,8 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
     val searchProvider by settings.searchProvider.collectAsState()
     var searchKey by remember { mutableStateOf(settings.searchApiKey.value) }
     var showKey by remember { mutableStateOf(false) }
+    var youtubeKey by remember { mutableStateOf(settings.youtubeApiKey.value) }
+    var showYoutubeKey by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -76,6 +78,18 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
                 visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
                 supportingText = { Text("If empty, the web search tool is not offered to the AI. The key is encrypted on this device.") },
+                keyboardOptions = KeyboardOptions.Default,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text("YouTube Data API v3 key (for the YouTube tools)", modifier = Modifier.padding(top = 16.dp))
+            OutlinedTextField(
+                value = youtubeKey,
+                onValueChange = { youtubeKey = it; settings.setYoutubeApiKey(it.trim()) },
+                label = { Text("Your YouTube Data API v3 key") },
+                singleLine = true,
+                visualTransformation = if (showYoutubeKey) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = { TextButton(onClick = { showYoutubeKey = !showYoutubeKey }) { Text(if (showYoutubeKey) "Hide" else "Show") } },
+                supportingText = { Text("If empty, YouTube search and comments are not offered to the AI. Downloads and audio playback do not need this key. The key is encrypted on this device.") },
                 keyboardOptions = KeyboardOptions.Default,
                 modifier = Modifier.fillMaxWidth(),
             )

@@ -153,6 +153,21 @@ class SettingsRepository(context: Context) {
         secure.edit().putString("search_key", k).apply()
     }
 
+    /**
+     * YouTube Data API v3 key (YouTube tools, 2026-11-13): nhập trong màn
+     * Web search, cùng chỗ với key tìm kiếm web — không làm màn riêng.
+     * Chỉ youtube_search / youtube_comments cần key này; tải về và phát
+     * audio dùng NewPipeExtractor nên không cần key.
+     */
+    private val _youtubeKey = MutableStateFlow("")
+    val youtubeApiKey: StateFlow<String> = _youtubeKey.asStateFlow()
+
+    fun setYoutubeApiKey(k: String) {
+        ensureSecureLoaded() // không ghi đè khi chưa đọc xong
+        _youtubeKey.value = k
+        secure.edit().putString("youtube_key", k).apply()
+    }
+
     private val _onboardingDone = MutableStateFlow(plain.getBoolean("onboarding_done", false))
     val onboardingDone: StateFlow<Boolean> = _onboardingDone.asStateFlow()
 
@@ -330,6 +345,7 @@ class SettingsRepository(context: Context) {
         if (_ready.value) return
         _providers.value = migrateIncludeUsage(loadProviders())
         _searchKey.value = secure.getString("search_key", "") ?: ""
+        _youtubeKey.value = secure.getString("youtube_key", "") ?: ""
         // Đợt bỏ provider 12/11/2026 (xem loadProviders): danh sách đã
         // migrate thì ghi đè xuống kho; lựa chọn model toàn cục / provider
         // mặc định đang trỏ tới provider Anthropic đã bỏ thì dọn, rồi báo

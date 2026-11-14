@@ -72,6 +72,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
@@ -102,6 +103,12 @@ dependencies {
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
+
+    // YouTube tools: subtitles / audio-video streams / downloads only.
+    // Search and comments go through the official YouTube Data API v3.
+    implementation(libs.newpipe.extractor)
+    // NewPipeExtractor needs core library desugaring below minSdk 33.
+    coreLibraryDesugaring(libs.desugar.jdk.libs)
 
     implementation(libs.markwon.core)
     implementation(libs.markwon.strikethrough)
