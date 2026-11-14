@@ -170,5 +170,5 @@ internal fun InputBar(
             }
         }
     }
-    viewerIndex?.let { idx -> ImageViewerDialog(images, idx) { viewerIndex = null } }
+    viewerIndex?.let { idx -> ImageViewerDialog(images.map { File(it) }, idx) { viewerIndex = null } }
 }

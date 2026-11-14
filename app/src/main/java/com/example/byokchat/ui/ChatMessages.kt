@@ -217,7 +217,7 @@ internal fun UserMessage(
             if (m.edited) EditedLabel()
         }
     }
-    viewerIndex?.let { idx -> ImageViewerDialog(imgs, idx) { viewerIndex = null } }
+    viewerIndex?.let { idx -> ImageViewerDialog(imgs.map { File(it) }, idx) { viewerIndex = null } }
     if (selectOpen) SelectTextSheet(m.text, onCopyAll = { actions.copy(m.text) }, onDismiss = { selectOpen = false })
 }
 
