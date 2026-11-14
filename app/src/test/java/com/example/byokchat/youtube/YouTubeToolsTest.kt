@@ -38,7 +38,9 @@ class YouTubeToolsTest {
         val tools = YouTubeTools.build()
         val search = tools[0]
         assertTrue(search.defaultDescription.contains("default 20"))
-        assertTrue(search.defaultDescription.contains("youtube_search"))
+        // The locked description does not name itself; it documents channel
+        // listing via channel_id instead (draft FINAL, byte-identical).
+        assertTrue(search.defaultDescription.contains("channel_id"))
         assertTrue(search.schema["required"]?.let { (it as JsonArray).map { e -> (e as JsonPrimitive).content } }?.contains("q") == true)
         val comments = tools[1]
         assertTrue(comments.defaultDescription.contains("Default 20 threads"))
