@@ -19,8 +19,9 @@ package com.example.byokchat.media
  * - Cùng một bài phát hai lần liên tiếp chỉ ghi một lần (so với mục mới
  *   nhất cùng nguồn + khóa).
  * - Tối đa 50 mục mỗi cuộc trò chuyện, cũ nhất rớt ra.
- * - Chỉ giữ trong bộ nhớ của phiên chạy app (không lưu DB): tắt app rồi
- *   mở lại thì danh sách trống. Đây là giới hạn đã biết, không phải lỗi.
+ * - Lưu bền vào DB (bảng recently_played, từ v8): kill app rồi mở lại
+ *   vẫn còn. Store giữ một bản sao trong bộ nhớ để UI đọc ngay; mọi lần
+ *   ghi đều lưu xuống DB trước khi trả về.
  */
 enum class PlayedSource {
     LOCAL, YOUTUBE, SOUNDCLOUD,
@@ -34,28 +35,66 @@ data class PlayedTrack(
     val name: String,
 )
 
+/**
+ * Bộ nhớ lâu dài cho RecentlyPlayedStore — store giữ luật (mới nhất trước,
+ * chống trùng liên tiếp, tối đa 50), đây chỉ đọc/ghi nguyên danh sách.
+ * Room là bản thật (xem RoomRecentlyPlayedStorage); test dùng bản fake.
+ */
+interface RecentlyPlayedStorage {
+    suspend fun load(conversationId: String): List<PlayedTrack>
+    suspend fun save(conversationId: String, tracks: List<PlayedTrack>)
+}
+
 /** Lịch sử phát lại theo từng cuộc trò chuyện, thuần Kotlin, test được trên JVM. */
-class RecentlyPlayedStore {
+class RecentlyPlayedStore(private val storage: RecentlyPlayedStorage? = null) {
     private val lock = Any()
     private val histories = mutableMapOf<String, ArrayDeque<PlayedTrack>>()
+    /** Những cuộc đã nạp từ bộ nhớ lâu dài trong phiên chạy này. */
+    private val loaded = mutableSetOf<String>()
+
+    /**
+     * Nạp lịch sử của một cuộc từ bộ nhớ lâu dài (chỉ lần đầu trong phiên
+     * chạy; những lần sau cache trong bộ nhớ đã là mới nhất). Không có
+     * storage (test không cần lưu bền) thì không làm gì.
+     */
+    suspend fun load(conversationId: String) {
+        val s = storage ?: return
+        if (synchronized(lock) { conversationId in loaded }) return
+        val tracks = s.load(conversationId)
+        synchronized(lock) {
+            if (conversationId !in loaded) {
+                histories[conversationId] = ArrayDeque(tracks.take(MAX_ENTRIES))
+                loaded.add(conversationId)
+            }
+        }
+    }
 
     /** Ghi một bài. Cùng bài với mục mới nhất (cùng nguồn + khóa) thì bỏ qua. */
-    fun record(conversationId: String, track: PlayedTrack) {
-        synchronized(lock) {
-            val history = histories.getOrPut(conversationId) { ArrayDeque() }
-            if (history.firstOrNull()?.let { it.source == track.source && it.key == track.key } == true) return
-            history.addFirst(track)
-            while (history.size > MAX_ENTRIES) history.removeLast()
-        }
+    suspend fun record(conversationId: String, track: PlayedTrack) {
+        recordAll(conversationId, listOf(track))
     }
 
     /**
      * Ghi cả một batch theo thứ tự phát: bài đầu batch (đang phát) lên đầu
      * danh sách, rồi tới các bài sau. Ghi ngược từ cuối batch về đầu để
-     * addFirst giữ đúng thứ tự đó.
+     * addFirst giữ đúng thứ tự đó. Không có gì đổi (toàn trùng liên tiếp)
+     * thì không ghi xuống DB.
      */
-    fun recordAll(conversationId: String, tracks: List<PlayedTrack>) {
-        for (track in tracks.asReversed()) record(conversationId, track)
+    suspend fun recordAll(conversationId: String, tracks: List<PlayedTrack>) {
+        val snapshot = synchronized(lock) {
+            val history = histories.getOrPut(conversationId) { ArrayDeque() }
+            var changed = false
+            for (track in tracks.asReversed()) {
+                if (history.firstOrNull()?.let { it.source == track.source && it.key == track.key } == true) continue
+                history.addFirst(track)
+                while (history.size > MAX_ENTRIES) history.removeLast()
+                changed = true
+            }
+            if (!changed) return
+            loaded.add(conversationId)
+            history.toList()
+        }
+        storage?.save(conversationId, snapshot)
     }
 
     /** Danh sách đã phát của cuộc trò chuyện, mới nhất trước. */

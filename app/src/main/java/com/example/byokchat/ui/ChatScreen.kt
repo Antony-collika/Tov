@@ -54,6 +54,7 @@ import com.example.byokchat.chat.TurnNumbers
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
+import com.example.byokchat.media.PlayedTrack
 import com.example.byokchat.tools.MediaTools
 import com.example.byokchat.util.TextUtil
 import kotlinx.coroutines.launch
@@ -154,6 +155,15 @@ fun ChatScreen(
     }
     var showMenu by remember { mutableStateOf(false) }
     var showRecentlyPlayed by remember { mutableStateOf(false) }
+    // Danh sách "Recently played" của cuộc này: nạp từ DB lần đầu mở hộp
+    // thoại trong phiên chạy (store giữ cache trong bộ nhớ sau đó).
+    var recentlyPlayedTracks by remember { mutableStateOf<List<PlayedTrack>>(emptyList()) }
+    LaunchedEffect(showRecentlyPlayed, conversationId) {
+        if (showRecentlyPlayed) {
+            container.recentlyPlayed.load(conversationId)
+            recentlyPlayedTracks = container.recentlyPlayed.list(conversationId)
+        }
+    }
     var editing by remember { mutableStateOf<EditState?>(null) }
     var regenPrompt by remember { mutableStateOf<RegenPrompt?>(null) }
     var deleteConfirm by remember { mutableStateOf<MessageEntity?>(null) }
@@ -443,7 +453,7 @@ fun ChatScreen(
             // snackbar, không phát bài khác thay thế.
             if (showRecentlyPlayed) {
                 RecentlyPlayedDialog(
-                    tracks = container.recentlyPlayed.list(conversationId),
+                    tracks = recentlyPlayedTracks,
                     onDismiss = { showRecentlyPlayed = false },
                     onReplay = { track ->
                         showRecentlyPlayed = false

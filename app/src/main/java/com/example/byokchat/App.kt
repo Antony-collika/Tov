@@ -16,6 +16,7 @@ import com.example.byokchat.media.MediaPlayback
 import com.example.byokchat.media.RecentlyPlayedStore
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.ConversationRepository
+import com.example.byokchat.data.RoomRecentlyPlayedStorage
 import com.example.byokchat.data.RequestLayoutStore
 import com.example.byokchat.data.SettingsRepository
 import com.example.byokchat.tools.ConfirmationBroker
@@ -90,8 +91,8 @@ class AppContainer(val context: Context) {
     val registry = ToolRegistry(env, toolPrefs, confirmations)
     /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
     val media = MediaPlayback(context)
-    /** Những bài AI đã phát trong từng cuộc trò chuyện ("Recently played", menu ⋮): chỉ giữ trong bộ nhớ của phiên chạy app. */
-    val recentlyPlayed = RecentlyPlayedStore()
+    /** Những bài AI đã phát trong từng cuộc trò chuyện ("Recently played", menu ⋮): lưu vào DB (bảng recently_played) nên không mất khi app bị kill; store giữ một bản sao trong bộ nhớ để UI đọc ngay. */
+    val recentlyPlayed = RecentlyPlayedStore(RoomRecentlyPlayedStorage(db.recentlyPlayed()))
     val notifier = ChatNotifier(context)
     /** Bố cục Request panel (Đợt C): danh sách thẻ toàn cục, lưu SharedPreferences. */
     val layoutStore = RequestLayoutStore(context, settings)
