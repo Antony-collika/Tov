@@ -11,7 +11,19 @@ package com.example.byokchat.media
  */
 
 /** Một bài trong hàng đợi: đường dẫn AI dùng + URI để mở + tên hiển thị. */
-data class QueueTrack(val displayPath: String, val uri: String, val name: String)
+data class QueueTrack(
+    val displayPath: String,
+    val uri: String,
+    val name: String,
+    /**
+     * Khóa để phát lại bài này từ "Recently played", không cần URI cũ:
+     * đường dẫn playground (local), video ID (YouTube), song key (NCT),
+     * link track (SoundCloud). Null = bài này không ghi vào lịch sử phát
+     * lại được (chỉ các tool phát nhạc mới đặt hai trường này).
+     */
+    val replaySource: PlayedSource? = null,
+    val replayKey: String? = null,
+)
 
 class MediaQueue(val tracks: List<QueueTrack>, val index: Int = 0) {
     val current: QueueTrack? get() = tracks.getOrNull(index)
