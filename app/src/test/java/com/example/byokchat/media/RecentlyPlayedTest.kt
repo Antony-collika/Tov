@@ -28,7 +28,7 @@ class RecentlyPlayedTest {
         store.record("conv", track("song-a"))
         assertEquals(listOf("song-a"), store.list("conv").map { it.name })
         // Cùng tên nhưng khác nguồn/khóa thì không phải trùng: ghi thêm.
-        store.record("conv", track("song-a", PlayedSource.NCT, "other-key"))
+        store.record("conv", track("song-a", PlayedSource.LOCAL, "other-key"))
         assertEquals(2, store.list("conv").size)
     }
 

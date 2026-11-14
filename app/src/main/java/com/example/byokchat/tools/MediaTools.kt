@@ -9,12 +9,6 @@ import com.example.byokchat.media.PlayedSource
 import com.example.byokchat.media.PlayedTrack
 import com.example.byokchat.media.QueueTrack
 import com.example.byokchat.media.formatMediaTime
-import com.example.byokchat.nct.NctApi
-import com.example.byokchat.nct.isSignedUrlExpired
-import com.example.byokchat.nct.parseNctSongKey
-import com.example.byokchat.nct.selectStream
-import com.example.byokchat.soundcloud.SoundCloudExtractor
-import com.example.byokchat.soundcloud.parseSoundCloudLink
 import com.example.byokchat.youtube.YouTubeExtractor
 import com.example.byokchat.youtube.parseVideoId
 import kotlinx.serialization.json.JsonObject
@@ -31,11 +25,9 @@ fun mediaTool(
 ) = Tool(uid, ToolGroup.MEDIA, risk, name, description, schema, needsWorkspace, previewFn = preview, run = run)
 
 /**
- * Nhóm 5: mở nhạc. Bốn tool, một player:
+ * Nhóm 5: mở nhạc. Hai tool, một player:
  * - local.media.play (tên cũ: media.play / play_music): file nhạc local trong playground.
  * - youtube.media.play: audio của video YouTube, không lưu file.
- * - nct.media.play: audio của bài hát NhacCuaTui, không lưu file.
- * - soundcloud.media.play: audio của track SoundCloud, không lưu file.
  * Không có tool dừng/tạm dừng cho AI — muốn dừng thì user bấm nút X trên
  * thanh mini-player (hoặc nút dừng trong thông báo nhạc).
  */
@@ -82,51 +74,6 @@ object MediaTools {
             playTracks(env, tracks)
         },
 
-        mediaTool(
-            "nct.media.play", Risk.READ, "nct_media_play",
-            "Play the audio of one or more NhacCuaTui songs right away, in sequence, in the background, with the mini-player like local.media.play. Audio only, no video. This tool does not search: to play something, search with nct_search first, choose a song, then call this tool with the song key or link of the chosen song. The app fetches a fresh stream link for each song when it plays. A VIP-only song cannot be played — the tool will say so clearly. To play a local music file in the Playground, use local.media.play, not this tool.",
-            schema { strArray("songs", "NCT song keys or full song links from nct_search, e.g. ['PgrxRcNASk', 'https://www.nhaccuatui.com/song/...']. At least one.", required = true) },
-            needsWorkspace = false,
-            preview = { _, a ->
-                val songs = a.strList("songs").orEmpty()
-                if (songs.isEmpty()) "Play NCT audio: (no songs given)"
-                else "Phát audio NCT: " + songs.joinToString(", ")
-            },
-        ) { env, a ->
-            val songs = a.strList("songs").orEmpty()
-            if (songs.isEmpty()) throw ToolException("Give at least one NCT song key or link to play.")
-            // Resolve every song's fresh stream link before playing any of them,
-            // so one bad or VIP-only song does not leave the player half-started.
-            val tracks = songs.map { input ->
-                val key = parseNctSongKey(input)
-                    ?: throw ToolException("'$input' is not an NCT song key or link.")
-                resolveNctTrack(key)
-            }
-            playTracks(env, tracks)
-        },
-
-        mediaTool(
-            "soundcloud.media.play", Risk.READ, "soundcloud_media_play",
-            "Play the audio of one or more SoundCloud tracks right away, in sequence, in the background, with the mini-player like local.media.play. Audio only. This tool does not search: to play something, search with soundcloud_search first, choose a track, then call this tool with the SoundCloud link of the chosen track. To play a local music file in the Playground, use local.media.play, not this tool.",
-            schema { strArray("tracks", "SoundCloud track links from soundcloud_search, e.g. ['https://soundcloud.com/artist/track']. At least one.", required = true) },
-            needsWorkspace = false,
-            preview = { _, a ->
-                val tracks = a.strList("tracks").orEmpty()
-                if (tracks.isEmpty()) "Play SoundCloud audio: (no tracks given)"
-                else "Phát audio SoundCloud: " + tracks.joinToString(", ")
-            },
-        ) { env, a ->
-            val tracks = a.strList("tracks").orEmpty()
-            if (tracks.isEmpty()) throw ToolException("Give at least one SoundCloud track link to play.")
-            // Resolve every track's audio stream before playing any of them,
-            // so one bad track does not leave the player half-started.
-            val queue = tracks.map { input ->
-                val url = parseSoundCloudLink(input)
-                    ?: throw ToolException("'$input' is not a SoundCloud track link.")
-                resolveSoundCloudTrack(url)
-            }
-            playTracks(env, queue)
-        },
     )
 
     private suspend fun playTracks(env: ToolEnv, tracks: List<QueueTrack>): String {
@@ -157,8 +104,8 @@ object MediaTools {
     /**
      * Resolve một bài thành QueueTrack, dùng chung cho tool phát nhạc và
      * cho phát lại từ "Recently played". Mỗi lần gọi đều resolve lại link
-     * stream mới — không bao giờ dùng lại link cũ đã lưu (link YouTube/NCT
-     * có hạn dùng, NCT ~7 ngày). Lỗi nào cũng ném ToolException với câu
+     * stream mới — không bao giờ dùng lại link cũ đã lưu (link YouTube
+     * có hạn dùng). Lỗi nào cũng ném ToolException với câu
      * báo rõ, không bao giờ tự đổi sang bài khác.
      */
     private suspend fun resolveLocalTrack(fs: WorkspaceFs, path: String): QueueTrack {
@@ -176,40 +123,10 @@ object MediaTools {
         return QueueTrack(name, stream.content, name, PlayedSource.YOUTUBE, videoId)
     }
 
-    private suspend fun resolveNctTrack(key: String): QueueTrack {
-        val song = NctApi().songByKey(key)
-        val stream = selectStream(song, null)
-            ?: if (song.onlyVip) {
-                throw ToolException(
-                    "Song '${song.title}' by ${song.artistName} is VIP-only on NhacCuaTui, " +
-                        "so it cannot be played.",
-                )
-            } else {
-                throw ToolException("Song '${song.title}' has no audio stream to play.")
-            }
-        if (isSignedUrlExpired(stream.streamUrl)) {
-            throw ToolException(
-                "NhacCuaTui gave a stream link for '${song.title}' that is already expired. Try again.",
-            )
-        }
-        val display = if (song.artistName.isBlank()) song.title.ifBlank { key }
-        else "${song.title.ifBlank { key }} - ${song.artistName}"
-        return QueueTrack(display, stream.streamUrl, display, PlayedSource.NCT, key)
-    }
-
-    private suspend fun resolveSoundCloudTrack(url: String): QueueTrack {
-        val resolved = SoundCloudExtractor.fetch(url)
-        val stream = YouTubeExtractor.bestAudioStream(resolved.audioStreams)
-            ?: throw ToolException("Track '${resolved.track.title.ifBlank { url }}' has no audio stream to play.")
-        val display = if (resolved.track.artist.isBlank()) resolved.track.title.ifBlank { url }
-        else "${resolved.track.title.ifBlank { url }} - ${resolved.track.artist}"
-        return QueueTrack(display, stream.content, display, PlayedSource.SOUNDCLOUD, url)
-    }
-
     /**
      * Phát lại một bài từ "Recently played": resolve lại stream mới từ khóa
      * rồi phát như tool phát nhạc. Trả về câu "đang phát" cho UI; lỗi (file
-     * đã xóa, video không còn, bài VIP) thì ném Exception với câu báo rõ
+     * đã xóa, video không còn) thì ném Exception với câu báo rõ
      * để UI hiện lên, không phát bài khác thay thế. Phát lại thành công
      * cũng ghi vào lịch sử (bài đó lại thành mới nhất).
      */
@@ -217,8 +134,6 @@ object MediaTools {
         val queueTrack = when (track.source) {
             PlayedSource.LOCAL -> resolveLocalTrack(container.fs, track.key)
             PlayedSource.YOUTUBE -> resolveYouTubeTrack(track.key)
-            PlayedSource.NCT -> resolveNctTrack(track.key)
-            PlayedSource.SOUNDCLOUD -> resolveSoundCloudTrack(track.key)
         }
         val durationMs = try {
             container.media.play(listOf(queueTrack))

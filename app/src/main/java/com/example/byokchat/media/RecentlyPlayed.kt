@@ -12,7 +12,7 @@ package com.example.byokchat.media
  *
  * Luật:
  * - Một mục ghi: nguồn phát + khóa phát lại + tên hiển thị. KHÔNG BAO GIỜ
- *   lưu stream URL: link stream của YouTube/NCT có hạn dùng (NCT ~7 ngày),
+ *   lưu stream URL: link stream của YouTube có hạn dùng,
  *   nên phát lại phải resolve lại link mới từ khóa (xem MediaTools).
  * - Mới nhất lên đầu. Một batch ghi theo thứ tự phát (bài đang phát lên
  *   đầu, rồi tới các bài sau trong batch).
@@ -23,13 +23,13 @@ package com.example.byokchat.media
  *   mở lại thì danh sách trống. Đây là giới hạn đã biết, không phải lỗi.
  */
 enum class PlayedSource {
-    LOCAL, YOUTUBE, NCT, SOUNDCLOUD,
+    LOCAL, YOUTUBE,
 }
 
 /** Một bài đã phát: đủ thông tin để phát lại mà không cần link stream cũ. */
 data class PlayedTrack(
     val source: PlayedSource,
-    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube), song key (NCT), link track (SoundCloud). */
+    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube). */
     val key: String,
     val name: String,
 )

@@ -48,8 +48,6 @@ fun RecentlyPlayedDialog(
                                 when (track.source) {
                                     PlayedSource.LOCAL -> "Local"
                                     PlayedSource.YOUTUBE -> "YouTube"
-                                    PlayedSource.NCT -> "NhacCuaTui"
-                                    PlayedSource.SOUNDCLOUD -> "SoundCloud"
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,

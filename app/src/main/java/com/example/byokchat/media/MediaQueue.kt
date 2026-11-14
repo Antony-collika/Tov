@@ -17,8 +17,8 @@ data class QueueTrack(
     val name: String,
     /**
      * Khóa để phát lại bài này từ "Recently played", không cần URI cũ:
-     * đường dẫn playground (local), video ID (YouTube), song key (NCT),
-     * link track (SoundCloud). Null = bài này không ghi vào lịch sử phát
+     * đường dẫn playground (local), video ID (YouTube). Null = bài này
+     * không ghi vào lịch sử phát
      * lại được (chỉ các tool phát nhạc mới đặt hai trường này).
      */
     val replaySource: PlayedSource? = null,
