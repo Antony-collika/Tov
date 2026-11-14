@@ -22,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,14 +83,21 @@ class ChatEngine(
     private val callsSer = ListSerializer(AiToolCall.serializer())
 
     fun start(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
-        if (jobs[conversationId]?.isActive == true) return
+        // A new turn supersedes the running one (send while generating):
+        // cancel it, but do not wait — the old turn's network calls are
+        // abandoned and its late results are discarded (see run()).
+        jobs[conversationId]?.cancel()
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 run(conversationId, turnId, repair)
             } finally {
                 tools.endTurn(turnId)
-                jobs.remove(conversationId)
-                _active.update { it - conversationId }
+                // Only the job that still owns the conversation clears the
+                // active flag; a superseded job must not switch the UI back
+                // to Send while the new turn is still running.
+                if (jobs.remove(conversationId, job)) {
+                    _active.update { it - conversationId }
+                }
             }
         }
         jobs[conversationId] = job
@@ -103,6 +111,9 @@ class ChatEngine(
 
     private suspend fun run(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
         val msgDao = db.messages()
+        // The job running this turn: late writes check it, so a turn that
+        // was superseded by a send never writes into the new turn.
+        val myJob = currentCoroutineContext()[Job]
         // Đợt 4: tin assistant và kết quả tool dùng chung số lượt của tin user
         // cùng lượt (đã gán khi gửi). Tạo lại (regenerate) giữ nguyên số cũ.
         val turnNo = msgDao.getTurn(conversationId, turnId)
@@ -333,6 +344,10 @@ class ChatEngine(
                     writeInterruptedResults(msgDao, conversationId, turnId, turnNo, calls, calls.indexOf(call))
                     throw e
                 }
+                // Superseded by a send while this turn was running: the new
+                // turn owns the conversation now, so this result is dropped
+                // instead of landing in the new turn's history.
+                if (jobs[conversationId] !== myJob) return
                 msgDao.upsert(
                     MessageEntity(
                         id = UUID.randomUUID().toString(),

@@ -160,10 +160,9 @@ internal fun InputBar(
                             FilledIconButton(onClick = onStop) {
                                 Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp)))
                             }
-                        } else {
-                            FilledIconButton(onClick = onSend, enabled = draft.isNotBlank() || images.isNotEmpty()) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                            }
+                        }
+                        FilledIconButton(onClick = onSend, enabled = draft.isNotBlank() || images.isNotEmpty()) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                         }
                     }
                 }
