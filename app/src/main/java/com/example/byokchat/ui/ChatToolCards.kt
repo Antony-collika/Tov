@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.AiToolCall
+import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.container
 import com.example.byokchat.data.MessageEntity
 import kotlinx.serialization.builtins.ListSerializer
@@ -66,6 +68,10 @@ internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boole
         val summary = remember(c.uid, c.argsJson, toolName) { toolSummary(c.uid, toolName, c.argsJson) }
         val waiting = res == null && generating && pending.any { it.uid == c.uid }
         val running = res == null && generating && !waiting
+        // The user stopped the turn while this call was running (or before
+        // it ran): the result says so, and the card must say so too — never
+        // "No result" and never "Failed or denied".
+        val interrupted = res != null && res.text == ModelFacingText.INTERRUPTED
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(12.dp),
@@ -76,6 +82,7 @@ internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boole
                     when {
                         running || waiting -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         res == null -> Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                        interrupted -> Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                         res.toolIsError -> Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                         else -> Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
@@ -88,6 +95,7 @@ internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boole
                             waiting -> "Waiting for your approval\u2026" to MaterialTheme.colorScheme.tertiary
                             running -> (progress?.label() ?: "Running\u2026") to MaterialTheme.colorScheme.onSurfaceVariant
                             res == null -> "No result" to MaterialTheme.colorScheme.onSurfaceVariant
+                            interrupted -> "Interrupted" to MaterialTheme.colorScheme.onSurfaceVariant
                             res.toolIsError -> "Failed or denied" to MaterialTheme.colorScheme.error
                             else -> "Done" to MaterialTheme.colorScheme.primary
                         }

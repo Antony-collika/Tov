@@ -7,6 +7,7 @@ import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.data.AppDatabase
+import com.example.byokchat.data.MessageDao
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.ProviderType
@@ -321,7 +322,17 @@ class ChatEngine(
                 return
             }
             for (call in calls) {
-                val outcome = tools.execute(call, turnId, exposed, conversationId)
+                val outcome = try {
+                    tools.execute(call, turnId, exposed, conversationId)
+                } catch (e: CancellationException) {
+                    // The user stopped the turn mid-tool: mark every call of
+                    // this round that has no result yet as Interrupted, so
+                    // the next request stays valid and the model knows it was
+                    // interrupted, not failed. Calls that already have a
+                    // result are left alone.
+                    writeInterruptedResults(msgDao, conversationId, turnId, turnNo, calls, calls.indexOf(call))
+                    throw e
+                }
                 msgDao.upsert(
                     MessageEntity(
                         id = UUID.randomUUID().toString(),
@@ -340,6 +351,65 @@ class ChatEngine(
                 )
             }
         }
+    }
+
+    /**
+     * Write "Interrupted by the user." tool results for the calls of a round
+     * that have none yet (Stop press mid-tool, or a send that superseded the
+     * turn). Skips calls that already have a result, so the marker is never
+     * written twice for one call.
+     */
+    private suspend fun writeInterruptedResults(
+        msgDao: MessageDao,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        calls: List<AiToolCall>,
+        fromIndex: Int,
+    ) {
+        if (calls.isEmpty()) return
+        val existing = msgDao.getAll(conversationId)
+            .filter { it.role == "tool" }
+            .mapNotNull { it.toolCallId }
+            .toSet()
+        for (call in calls.subList(fromIndex.coerceIn(0, calls.size), calls.size)) {
+            if (call.id in existing) continue
+            msgDao.upsert(
+                MessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversationId,
+                    turnId = turnId,
+                    turnNo = turnNo,
+                    seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                    role = "tool",
+                    text = ModelFacingText.INTERRUPTED,
+                    toolCallId = call.id,
+                    toolUid = call.uid,
+                    toolName = call.name,
+                    toolIsError = false,
+                    createdAt = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
+    /**
+     * Mark the latest turn's tool calls as Interrupted, for the calls that
+     * have no result yet. Called synchronously by a send that supersedes the
+     * running turn, so the new turn's history is well-formed before it
+     * starts. Does nothing when the latest turn called no tools, or when
+     * every call already has a result.
+     */
+    suspend fun markCurrentTurnInterrupted(conversationId: String) {
+        val msgDao = db.messages()
+        val rows = msgDao.getAll(conversationId)
+        val lastTurnId = rows.map { it.turnId }.distinct().lastOrNull() ?: return
+        val turnRows = rows.filter { it.turnId == lastTurnId }
+        val turnNo = turnRows.firstOrNull { it.role == "assistant" }?.turnNo ?: return
+        val calls = turnRows.filter { it.role == "assistant" }.flatMap { m ->
+            runCatching { json.decodeFromString(callsSer, m.toolCallsJson ?: "[]") }.getOrDefault(emptyList())
+        }
+        writeInterruptedResults(msgDao, conversationId, lastTurnId, turnNo, calls, 0)
     }
 
     /** Báo cho người dùng khi AI trả lời xong (hoặc lỗi) mà app không đang hiện. Không gọi khi người dùng bấm Dừng. */

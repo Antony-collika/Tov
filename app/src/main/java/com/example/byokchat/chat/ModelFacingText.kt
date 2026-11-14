@@ -13,6 +13,9 @@ object ModelFacingText {
     /** Kết quả tool khi user từ chối cho chạy (ToolRegistry.execute, mode ASK). */
     const val DENIED_ACTION = "The user denied this action. Do not try again unless they ask you to."
 
+    /** Kết quả tool khi user bấm Dừng (hoặc gửi lượt mới) giữa lúc tool đang chạy (ChatEngine). Không phải lỗi: model chỉ cần biết là user ngắt, để làm tiếp theo câu mới của user. */
+    const val INTERRUPTED = "Interrupted by the user."
+
     /** Ghi chú khi kết quả tool bị cắt ngắn (cap, tối đa 30 000 ký tự). */
     fun truncatedNote(moreChars: Int): String = "\n…[truncated, $moreChars more characters]"
 
