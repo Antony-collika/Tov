@@ -221,6 +221,12 @@ object YouTubeTools {
         var doc = env.fs.childByName(parent, name)
         if (doc != null && env.fs.isDir(doc)) throw ToolException("'$target' is a folder.")
         if (doc == null) doc = env.fs.createFileNamed(parent, name)
-        env.fs.openOut(doc).use { out -> YouTubeExtractor.downloadTo(url, out) }
+        // Live progress for the tool card ("Running. Progress 42%"): reported
+        // through the call's progress scope, never into the result text.
+        env.fs.openOut(doc).use { out ->
+            YouTubeExtractor.downloadTo(url, out) { downloaded, total ->
+                env.reportProgress(downloaded, total)
+            }
+        }
     }
 }

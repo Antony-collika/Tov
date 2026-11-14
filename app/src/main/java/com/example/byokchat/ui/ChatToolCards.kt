@@ -55,6 +55,7 @@ data class ToolResults(val byCallId: Map<String, MessageEntity>)
 internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boolean) {
     val container = LocalContext.current.container
     val pending by container.confirmations.pending.collectAsState()
+    val progressMap by container.toolProgress.progress.collectAsState()
     val calls = remember(m.toolCallsJson) {
         runCatching { Json.decodeFromString(callsSer, m.toolCallsJson ?: "[]") }.getOrDefault(emptyList())
     }
@@ -80,9 +81,12 @@ internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boole
                     }
                     Column(Modifier.padding(start = 8.dp).weight(1f)) {
                         Text(summary, style = MaterialTheme.typography.labelLarge, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+                        // A running download reports live progress: "Running. Progress 42%".
+                        // No total (chunked / no Content-Length) -> downloaded size instead, never a made-up %.
+                        val progress = if (running) progressMap[c.id] else null
                         val (label, color) = when {
                             waiting -> "Waiting for your approval\u2026" to MaterialTheme.colorScheme.tertiary
-                            running -> "Running\u2026" to MaterialTheme.colorScheme.onSurfaceVariant
+                            running -> (progress?.label() ?: "Running\u2026") to MaterialTheme.colorScheme.onSurfaceVariant
                             res == null -> "No result" to MaterialTheme.colorScheme.onSurfaceVariant
                             res.toolIsError -> "Failed or denied" to MaterialTheme.colorScheme.error
                             else -> "Done" to MaterialTheme.colorScheme.primary

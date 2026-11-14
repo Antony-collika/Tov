@@ -156,6 +156,11 @@ object YouTubeExtractor {
         else -> "mp4"
     }
 
+    private const val DOWNLOAD_BUFFER_BYTES = 8192
+
+    /** At most one progress report per interval, so the tool card is not recomposed on every buffer. */
+    private const val PROGRESS_REPORT_INTERVAL_MS = 250L
+
     /** Fetch small text (a subtitle file) over HTTP. */
     suspend fun fetchText(url: String): String = withContext(Dispatchers.IO) {
         val req = okhttp3.Request.Builder().url(url)
@@ -170,15 +175,43 @@ object YouTubeExtractor {
         }
     }
 
-    /** Stream a media URL straight into an open output stream (no whole file in memory). */
-    suspend fun downloadTo(url: String, out: OutputStream) = withContext(Dispatchers.IO) {
+    /**
+     * Stream a media URL straight into an open output stream (no whole file in memory).
+     * [onProgress] is called with (downloaded bytes, total bytes) as the bytes
+     * stream in — throttled to ~250ms so the UI is not recomposed on every
+     * buffer. Total is null when the server sent no Content-Length; callers
+     * must show downloaded size then, never invent a %.
+     */
+    suspend fun downloadTo(
+        url: String,
+        out: OutputStream,
+        onProgress: (suspend (downloadedBytes: Long, totalBytes: Long?) -> Unit)? = null,
+    ) = withContext(Dispatchers.IO) {
         val req = okhttp3.Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Android) ByokChat").build()
         try {
             Http.client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) throw ToolException("Could not download the file (HTTP ${resp.code}). Try again.")
+                val total = resp.body?.contentLength()?.takeIf { it > 0 }
                 val source = resp.body?.byteStream() ?: throw ToolException("The download returned no data. Try again.")
-                source.use { input -> input.copyTo(out) }
+                var downloaded = 0L
+                var lastReportMs = 0L
+                val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
+                onProgress?.invoke(0, total)
+                source.use { input ->
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        out.write(buffer, 0, read)
+                        downloaded += read
+                        val now = System.currentTimeMillis()
+                        if (now - lastReportMs >= PROGRESS_REPORT_INTERVAL_MS || downloaded == total) {
+                            lastReportMs = now
+                            onProgress?.invoke(downloaded, total)
+                        }
+                    }
+                }
+                onProgress?.invoke(downloaded, total)
             }
         } catch (e: IOException) {
             throw ToolException("Could not download the file: ${e.message}. Try again.")
