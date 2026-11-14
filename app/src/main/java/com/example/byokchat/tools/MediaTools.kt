@@ -10,6 +10,8 @@ import com.example.byokchat.nct.NctApi
 import com.example.byokchat.nct.isSignedUrlExpired
 import com.example.byokchat.nct.parseNctSongKey
 import com.example.byokchat.nct.selectStream
+import com.example.byokchat.soundcloud.SoundCloudExtractor
+import com.example.byokchat.soundcloud.parseSoundCloudLink
 import com.example.byokchat.youtube.YouTubeExtractor
 import com.example.byokchat.youtube.parseVideoId
 import kotlinx.serialization.json.JsonObject
@@ -26,10 +28,11 @@ fun mediaTool(
 ) = Tool(uid, ToolGroup.MEDIA, risk, name, description, schema, needsWorkspace, previewFn = preview, run = run)
 
 /**
- * Nhóm 5: mở nhạc. Ba tool, một player:
+ * Nhóm 5: mở nhạc. Bốn tool, một player:
  * - local.media.play (tên cũ: media.play / play_music): file nhạc local trong playground.
  * - youtube.media.play: audio của video YouTube, không lưu file.
  * - nct.media.play: audio của bài hát NhacCuaTui, không lưu file.
+ * - soundcloud.media.play: audio của track SoundCloud, không lưu file.
  * Không có tool dừng/tạm dừng cho AI — muốn dừng thì user bấm nút X trên
  * thanh mini-player (hoặc nút dừng trong thông báo nhạc).
  */
@@ -126,6 +129,34 @@ object MediaTools {
                 QueueTrack(displayPath = display, uri = stream.streamUrl, name = display)
             }
             playTracks(env, tracks)
+        },
+
+        mediaTool(
+            "soundcloud.media.play", Risk.READ, "soundcloud_media_play",
+            "Play the audio of one or more SoundCloud tracks right away, in sequence, in the background, with the mini-player like local.media.play. Audio only. This tool does not search: to play something, search with soundcloud_search first, choose a track, then call this tool with the SoundCloud link of the chosen track. To play a local music file in the Playground, use local.media.play, not this tool.",
+            schema { strArray("tracks", "SoundCloud track links from soundcloud_search, e.g. ['https://soundcloud.com/artist/track']. At least one.", required = true) },
+            needsWorkspace = false,
+            preview = { _, a ->
+                val tracks = a.strList("tracks").orEmpty()
+                if (tracks.isEmpty()) "Play SoundCloud audio: (no tracks given)"
+                else "Phát audio SoundCloud: " + tracks.joinToString(", ")
+            },
+        ) { env, a ->
+            val tracks = a.strList("tracks").orEmpty()
+            if (tracks.isEmpty()) throw ToolException("Give at least one SoundCloud track link to play.")
+            // Resolve every track's audio stream before playing any of them,
+            // so one bad track does not leave the player half-started.
+            val queue = tracks.map { input ->
+                val url = parseSoundCloudLink(input)
+                    ?: throw ToolException("'$input' is not a SoundCloud track link.")
+                val resolved = SoundCloudExtractor.fetch(url)
+                val stream = YouTubeExtractor.bestAudioStream(resolved.audioStreams)
+                    ?: throw ToolException("Track '${resolved.track.title.ifBlank { url }}' has no audio stream to play.")
+                val display = if (resolved.track.artist.isBlank()) resolved.track.title.ifBlank { url }
+                else "${resolved.track.title.ifBlank { url }} - ${resolved.track.artist}"
+                QueueTrack(displayPath = display, uri = stream.content, name = display)
+            }
+            playTracks(env, queue)
         },
     )
 

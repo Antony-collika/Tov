@@ -64,7 +64,7 @@ class MediaQueueTest {
     @Test
     fun mediaToolDefinition() {
         val tools = MediaTools.build()
-        assertEquals(listOf("local.media.play", "youtube.media.play", "nct.media.play"), tools.map { it.uid })
+        assertEquals(listOf("local.media.play", "youtube.media.play", "nct.media.play", "soundcloud.media.play"), tools.map { it.uid })
         val tool = tools[0]
         assertEquals(ToolGroup.MEDIA, tool.group)
         assertEquals(Risk.READ, tool.risk)
@@ -90,6 +90,13 @@ class MediaQueueTest {
         val nctProps = nct.schema["properties"] as JsonObject
         assertTrue(nctProps.containsKey("songs"))
         assertTrue(nct.defaultDescription.contains("nct_search"))
+        // soundcloud.media.play: same shape, SoundCloud track links.
+        val sc = tools[3]
+        assertEquals("soundcloud_media_play", sc.defaultName)
+        assertFalse(sc.needsWorkspace)
+        val scProps = sc.schema["properties"] as JsonObject
+        assertTrue(scProps.containsKey("tracks"))
+        assertTrue(sc.defaultDescription.contains("soundcloud_search"))
     }
 
     @Test
@@ -99,12 +106,14 @@ class MediaQueueTest {
         assertTrue(template.contains("## local.media.play"))
         assertTrue(template.contains("## youtube.media.play"))
         assertTrue(template.contains("## nct.media.play"))
+        assertTrue(template.contains("## soundcloud.media.play"))
         val origins = tools.associate { it.uid to it.defaultDescription }
         val parsed = ToolsMdParser.parse(template, origins)
-        assertEquals(listOf("local.media.play", "youtube.media.play", "nct.media.play"), parsed.map { it.uid })
+        assertEquals(listOf("local.media.play", "youtube.media.play", "nct.media.play", "soundcloud.media.play"), parsed.map { it.uid })
         assertEquals("local_media_play", parsed[0].name)
         assertEquals("youtube_media_play", parsed[1].name)
         assertEquals("nct_media_play", parsed[2].name)
+        assertEquals("soundcloud_media_play", parsed[3].name)
     }
 
     @Test
