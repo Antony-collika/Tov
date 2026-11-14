@@ -33,7 +33,10 @@ class SoundCloudExtractorTest {
         assertEquals("https://soundcloud.com/some-artist/some-track", track?.url)
         assertEquals("Some Track", track?.title)
         assertEquals("Some Artist", track?.artist)
-        assertEquals(204, track?.durationSeconds)
+        // 204L, not 204: track?.durationSeconds is Long?, so the int literal
+        // would resolve to the assertEquals(Object, Object) overload and
+        // compare Integer(204) with Long(204) — always unequal.
+        assertEquals(204L, track?.durationSeconds)
     }
 
     @Test
