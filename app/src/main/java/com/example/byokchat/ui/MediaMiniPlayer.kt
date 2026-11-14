@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -100,9 +101,13 @@ fun MediaMiniPlayerBar(
             IconButton(onClick = onPrevious) {
                 Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous track")
             }
-            IconButton(onClick = onToggle) {
-                // Đang phát thì hiện pause, đang dừng tạm thì hiện play (bấm để phát tiếp).
-                if (state.playing) {
+            IconButton(onClick = onToggle, enabled = !state.buffering) {
+                // Đang chờ mạng (mở stream, tua trong stream, mạng chậm):
+                // nút pause biến thành vòng xoay đang tải, bấm vào không làm gì.
+                // Hết buffering thì về lại pause/play như cũ.
+                if (state.buffering) {
+                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                } else if (state.playing) {
                     Icon(Icons.Filled.Pause, contentDescription = "Pause")
                 } else {
                     Icon(Icons.Filled.PlayArrow, contentDescription = "Play")

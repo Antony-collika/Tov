@@ -38,6 +38,8 @@ data class MediaState(
     val playing: Boolean = false,
     val positionMs: Int = 0,
     val durationMs: Int = 0,
+    /** Waiting on the network (opening a stream, seeking in a stream, rebuffering). */
+    val buffering: Boolean = false,
 ) {
     val current: QueueTrack? get() = queue.getOrNull(index)
 
@@ -136,7 +138,12 @@ class MediaPlayback(private val appContext: Context) {
 
     fun pause() = scope.launch { pauseInternal() }
     fun resume() = scope.launch { resumeInternal() }
-    fun toggle() = scope.launch { if (_state.value.playing) pauseInternal() else resumeInternal() }
+
+    /** While buffering, tapping pause/play does nothing (the button shows a spinner instead). */
+    fun toggle() = scope.launch {
+        if (_state.value.buffering) return@launch
+        if (_state.value.playing) pauseInternal() else resumeInternal()
+    }
 
     /** Sang bài sau; đang ở bài cuối thì dừng (hết batch). */
     fun next() = scope.launch { advanceFrom(_state.value.index) }
@@ -176,17 +183,33 @@ class MediaPlayback(private val appContext: Context) {
                 scope.launch { stopInternal() }
                 true
             }
+            // Buffering callbacks: a stream rebuffering mid-play, or a seek
+            // waiting on the network. A BUFFERING_START arriving after the
+            // user paused must not bring the spinner back (toggle is blocked
+            // while buffering), so it only applies while playing.
+            player.setOnInfoListener { _, what, _ ->
+                when (what) {
+                    MediaPlayer.MEDIA_INFO_BUFFERING_START -> if (_state.value.playing) setBuffering(true)
+                    MediaPlayer.MEDIA_INFO_BUFFERING_END -> setBuffering(false)
+                }
+                true
+            }
+            player.setOnSeekCompleteListener { setBuffering(false) }
+            // Opening a stream can take seconds on a slow network; a local
+            // file prepares instantly, so it never shows the spinner.
+            if (track.uri.startsWith("http")) setBuffering(true)
             val prepared = CompletableDeferred<Boolean>()
             player.setOnPreparedListener { if (!prepared.isCompleted) prepared.complete(true) }
             player.prepareAsync()
             val ok = withTimeoutOrNull(PREPARE_TIMEOUT_MS) { prepared.await() } ?: false
             if (!ok || gen != generation) {
+                setBuffering(false)
                 runCatching { player.release() }
                 return false
             }
             this.player = player
             player.setVolume(if (ducked) DUCK_VOLUME else 1f, if (ducked) DUCK_VOLUME else 1f)
-            _state.update { it.copy(index = index, positionMs = 0, durationMs = player.duration, playing = true) }
+            _state.update { it.copy(index = index, positionMs = 0, durationMs = player.duration, playing = true, buffering = false) }
             player.start()
             startTicker()
             true
@@ -232,7 +255,7 @@ class MediaPlayback(private val appContext: Context) {
         if (_state.value.playing) {
             runCatching { p.pause() }
             ticker?.cancel()
-            _state.update { it.copy(playing = false, positionMs = runCatching { p.currentPosition }.getOrDefault(it.positionMs)) }
+            _state.update { it.copy(playing = false, buffering = false, positionMs = runCatching { p.currentPosition }.getOrDefault(it.positionMs)) }
         }
     }
 
@@ -250,8 +273,17 @@ class MediaPlayback(private val appContext: Context) {
     private fun seekToInternal(ms: Int) {
         val p = player ?: return
         val target = ms.coerceIn(0, _state.value.durationMs)
+        // Seeking in a stream waits on the network: show the spinner until
+        // the seek completes (OnSeekCompleteListener clears it). A local
+        // file seeks instantly, so it never shows the spinner.
+        if (_state.value.current?.uri?.startsWith("http") == true) setBuffering(true)
         runCatching { p.seekTo(target) }
         _state.update { it.copy(positionMs = target) }
+    }
+
+    /** Set the buffering flag, without emitting a new state when it did not change. */
+    private fun setBuffering(value: Boolean) {
+        _state.update { if (it.buffering == value) it else it.copy(buffering = value) }
     }
 
     private fun stopInternal() {
