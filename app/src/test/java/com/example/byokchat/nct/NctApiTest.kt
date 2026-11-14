@@ -34,7 +34,10 @@ class NctApiTest {
         }
 
         fun arr(vararg refs: Int): Int = nodes.size.also {
-            nodes += JsonArray(refs.map { JsonPrimitive(it) })
+            // add(), not += : JsonArray is both a JsonElement and a
+            // List<JsonElement>, so += is ambiguous between the element and
+            // iterable plusAssign overloads and does not compile.
+            nodes.add(JsonArray(refs.map { JsonPrimitive(it) }))
         }
 
         fun root(i: Int) {
