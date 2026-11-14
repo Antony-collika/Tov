@@ -160,7 +160,13 @@ fun ChatScreen(
     var recentlyPlayedTracks by remember { mutableStateOf<List<PlayedTrack>>(emptyList()) }
     LaunchedEffect(showRecentlyPlayed, conversationId) {
         if (showRecentlyPlayed) {
-            container.recentlyPlayed.load(conversationId)
+            try {
+                container.recentlyPlayed.load(conversationId)
+            } catch (e: Exception) {
+                // Lỗi đọc DB không được làm sập màn hình: báo rồi hiện
+                // danh sách đang có trong bộ nhớ (có thể rỗng).
+                snackbar.showSnackbar("Could not load Recently played.")
+            }
             recentlyPlayedTracks = container.recentlyPlayed.list(conversationId)
         }
     }

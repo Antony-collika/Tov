@@ -55,12 +55,25 @@ class RecentlyPlayedTest {
     }
 
     @Test
-    fun nonConsecutiveDuplicateRecordsAgain() = runBlocking {
+    fun nonConsecutiveDuplicateMovesToFrontInsteadOfDuplicating() = runBlocking {
         val store = RecentlyPlayedStore()
         store.record("conv", track("song-a"))
         store.record("conv", track("song-b"))
         store.record("conv", track("song-a"))
-        assertEquals(listOf("song-a", "song-b", "song-a"), store.list("conv").map { it.name })
+        // Ghi lại bài cũ thì bài đó lên đầu, bản cũ mất — danh sách không
+        // bao giờ có hai mục trùng (khóa LazyColumn trong hộp thoại).
+        assertEquals(listOf("song-a", "song-b"), store.list("conv").map { it.name })
+    }
+
+    @Test
+    fun loadDedupsStaleDuplicatesFromStorage() = runBlocking {
+        val storage = FakeStorage()
+        storage.saved["conv"] = listOf(track("song-a"), track("song-b"), track("song-a"))
+        val store = RecentlyPlayedStore(storage)
+        store.load("conv")
+        assertEquals(listOf("song-a", "song-b"), store.list("conv").map { it.name })
+        // Danh sách đã lọc cũng được ghi lại xuống DB để lần sau sạch hẳn.
+        assertEquals(listOf("song-a", "song-b"), storage.saved.getValue("conv").map { it.name })
     }
 
     @Test

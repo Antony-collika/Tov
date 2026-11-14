@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -37,7 +37,10 @@ fun RecentlyPlayedDialog(
                 Text("Nothing has been played yet in this conversation.")
             } else {
                 LazyColumn(Modifier.heightIn(max = 400.dp)) {
-                    items(tracks, key = { it.source.name + ":" + it.key }) { track ->
+                    // Khóa gồm cả vị trí: store đã chống trùng, nhưng khóa
+                    // vẫn phải duy nhất tuyệt đối — lỡ dữ liệu cũ còn trùng
+                    // thì UI cũng không được crash ("Key ... was already used").
+                    itemsIndexed(tracks, key = { index, track -> "$index:${track.source.name}:${track.key}" }) { _, track ->
                         Column(
                             Modifier.fillMaxWidth()
                                 .clickable { onReplay(track) }
