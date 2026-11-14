@@ -243,8 +243,8 @@ fun parseSerperResults(root: JsonObject): List<WebSearchResult> =
         WebSearchResult(title, o["link"]?.jsonPrimitive?.contentOrNull ?: "", o["snippet"]?.jsonPrimitive?.contentOrNull ?: "")
     } ?: emptyList()
 
-private val DDG_TITLE_LINK = Regex("""(?is)<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>""")
-private val DDG_SNIPPET = Regex("""(?is)<a[^>]*class="result__snippet"[^>]*>(.*?)</a>""")
+private val DDG_ANCHOR = Regex("""(?is)<a\b([^>]*)>(.*?)</a>""")
+private val DDG_HREF = Regex("""href="([^"]+)"""")
 private val DDG_UDDG = Regex("""[?&]uddg=([^&]+)""")
 private val HTML_TAG = Regex("<[^>]+>")
 private val HTML_ENTITY_DEC = Regex("&#(\\d+);")
@@ -275,15 +275,16 @@ fun decodeHtmlEntities(text: String): String {
  * //duckduckgo.com/l/?uddg=<url đã encode> nên giải mã uddg để lấy URL thật.
  */
 fun parseDuckDuckGoResults(html: String): List<WebSearchResult> {
-    val titles = DDG_TITLE_LINK.findAll(html).toList()
-    val snippets = DDG_SNIPPET.findAll(html).toList()
+    val anchors = DDG_ANCHOR.findAll(html).toList()
+    val titles = anchors.filter { it.groupValues[1].contains("result__a") }
+    val snippets = anchors.filter { it.groupValues[1].contains("result__snippet") }
     return titles.mapIndexed { i, m ->
-        val rawHref = m.groupValues[1]
+        val rawHref = DDG_HREF.find(m.groupValues[1])?.groupValues?.get(1) ?: ""
         val realUrl = DDG_UDDG.find(rawHref)?.groupValues?.get(1)?.let {
             runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull()
         } ?: rawHref.let { if (it.startsWith("//")) "https:$it" else it }
         val title = decodeHtmlEntities(stripHtmlTags(m.groupValues[2])).trim()
-        val snippet = snippets.getOrNull(i)?.let { decodeHtmlEntities(stripHtmlTags(it.groupValues[1])).trim() } ?: ""
+        val snippet = snippets.getOrNull(i)?.let { decodeHtmlEntities(stripHtmlTags(it.groupValues[2])).trim() } ?: ""
         WebSearchResult(title, realUrl, snippet)
     }.filter { it.title.isNotEmpty() }
 }
