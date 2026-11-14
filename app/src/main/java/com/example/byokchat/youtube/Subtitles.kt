@@ -10,14 +10,24 @@ package com.example.byokchat.youtube
  * are NOT returned (its source has an unused TODO for translationLanguages),
  * so the chain below only ever sees manual / auto-generated tracks.
  *
- * Selection order, done by the app (never by the AI):
+ * Selection order, done by the app (never by the AI). The app lists the
+ * tracks first, picks one by this fixed order, then downloads only the
+ * chosen track — it never picks by alphabetical order or by blind API
+ * return order (that is how an auto-translated Arabic track once came
+ * first for an English video, 2026-11-14):
  *  1. manual in the requested language (if the user named one),
  *  2. auto-generated in the requested language,
  *  3. manual in the original language,
  *  4. auto-generated in the original language,
- *  5. manual in Vietnamese, then English,
- *  6. auto-generated in Vietnamese, then English,
+ *  5. manual in English, then Vietnamese,
+ *  6. auto-generated in English, then Vietnamese,
  *  7. any manual track, then any auto-generated track (something beats nothing).
+ * English comes before Vietnamese in the fallback because English
+ * transcripts are the most common and best supported on YouTube.
+ * Auto-translated tracks are last resort only: the extractor does not
+ * return them today, so the chain above never sees one; if a source
+ * ever does return them, they must be ranked after every manual and
+ * auto-generated track, never first.
  * The extractor does not tell us the video's spoken language, so steps 3-4
  * use the tracks that are neither Vietnamese nor English, in the order
  * YouTube returned them (captionTracks list the original language first).
@@ -52,10 +62,10 @@ fun selectSubtitleTrack(tracks: List<SubtitleTrack>, preferredLanguage: String?)
     // Original language: a track that is neither Vietnamese nor English.
     manual.firstOrNull { primaryLanguage(it.languageTag) !in setOf("vi", "en") }?.let { return it }
     auto.firstOrNull { primaryLanguage(it.languageTag) !in setOf("vi", "en") }?.let { return it }
-    manual.firstOrNull { matchesLanguage(it, "vi") }?.let { return it }
     manual.firstOrNull { matchesLanguage(it, "en") }?.let { return it }
-    auto.firstOrNull { matchesLanguage(it, "vi") }?.let { return it }
+    manual.firstOrNull { matchesLanguage(it, "vi") }?.let { return it }
     auto.firstOrNull { matchesLanguage(it, "en") }?.let { return it }
+    auto.firstOrNull { matchesLanguage(it, "vi") }?.let { return it }
     return manual.firstOrNull() ?: auto.firstOrNull()
 }
 
@@ -80,12 +90,12 @@ private fun stripVttMarkup(text: String): String = text
     .trim()
 
 /**
- * WebVTT -> SRT. Skips the WEBVTT header, NOTE / STYLE / REGION blocks and
- * cue settings after the timestamps. Returns "" when no cues were found.
+ * WebVTT -> cues (start, end, text), markup already stripped. Shared by
+ * the SRT converter and the plain-text extractor so both read the same cues.
  */
-fun webVttToSrt(vtt: String): String {
-    val lines = vtt.lines()
+private fun parseVttCues(vtt: String): List<Triple<String, String, String>> {
     val cues = mutableListOf<Triple<String, String, String>>() // start, end, text
+    val lines = vtt.lines()
     var i = 0
     while (i < lines.size) {
         val line = lines[i].trim()
@@ -118,7 +128,35 @@ fun webVttToSrt(vtt: String): String {
         if (text.isNotBlank()) cues += Triple(start, end, text)
         i = j
     }
+    return cues
+}
+
+/**
+ * WebVTT -> SRT. Skips the WEBVTT header, NOTE / STYLE / REGION blocks and
+ * cue settings after the timestamps. Returns "" when no cues were found.
+ */
+fun webVttToSrt(vtt: String): String {
+    val cues = parseVttCues(vtt)
     return cues.mapIndexed { index, (start, end, text) ->
         "${index + 1}\n$start --> $end\n$text"
     }.joinToString("\n\n") + if (cues.isEmpty()) "" else "\n"
+}
+
+/**
+ * WebVTT -> plain text (txt): only the spoken text, no timestamps, no cue
+ * numbers. Timestamps roughly double the file size and are not useful when
+ * the AI reads the transcript for analysis, so txt is the default download
+ * format. Consecutive identical lines are dropped once (rolling captions
+ * repeat the previous line in the next cue). Returns "" when no cues found.
+ */
+fun webVttToPlainText(vtt: String): String {
+    val lines = parseVttCues(vtt)
+        .flatMap { (_, _, text) -> text.split("\n") }
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+    val deduped = mutableListOf<String>()
+    for (line in lines) {
+        if (deduped.lastOrNull() != line) deduped += line
+    }
+    return if (deduped.isEmpty()) "" else deduped.joinToString("\n") + "\n"
 }
