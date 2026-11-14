@@ -23,13 +23,13 @@ package com.example.byokchat.media
  *   mở lại thì danh sách trống. Đây là giới hạn đã biết, không phải lỗi.
  */
 enum class PlayedSource {
-    LOCAL, YOUTUBE,
+    LOCAL, YOUTUBE, SOUNDCLOUD,
 }
 
 /** Một bài đã phát: đủ thông tin để phát lại mà không cần link stream cũ. */
 data class PlayedTrack(
     val source: PlayedSource,
-    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube). */
+    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube), link track (SoundCloud). */
     val key: String,
     val name: String,
 )
