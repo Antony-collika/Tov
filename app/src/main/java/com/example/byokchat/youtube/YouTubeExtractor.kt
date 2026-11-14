@@ -1,8 +1,13 @@
 package com.example.byokchat.youtube
 
 import com.example.byokchat.ai.Http
+import com.example.byokchat.ai.executeCancellable
 import com.example.byokchat.tools.ToolException
+import com.example.byokchat.tools.WorkspaceFs
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.NewPipe
@@ -41,11 +46,24 @@ class OkHttpDownloader : Downloader() {
         val body = request.dataToSend()?.toRequestBody(null)
         builder.method(request.httpMethod(), body)
         val call = Http.client.newCall(builder.build())
-        call.execute().use { resp ->
-            val text = resp.body?.string().orEmpty()
-            val headers = resp.headers.toMultimap()
-            val latest = resp.request.url.toString()
-            return ExtractorResponse(resp.code, resp.message, headers, text, latest)
+        // The extractor calls this synchronously, with no coroutine in sight —
+        // but the tool run that drives it parks its Job in the cancelJob
+        // ThreadLocal (ToolRegistry), so a Stop press can still cancel the
+        // in-flight call instead of waiting for the read timeout.
+        val job = WorkspaceFs.cancelJob.get()
+        val handle = job?.invokeOnCompletion { call.cancel() }
+        try {
+            call.execute().use { resp ->
+                val text = resp.body?.string().orEmpty()
+                val headers = resp.headers.toMultimap()
+                val latest = resp.request.url.toString()
+                return ExtractorResponse(resp.code, resp.message, headers, text, latest)
+            }
+        } catch (e: IOException) {
+            if (job?.isActive == false) throw CancellationException("Cancelled")
+            throw e
+        } finally {
+            handle?.dispose()
         }
     }
 }
@@ -100,6 +118,8 @@ object YouTubeExtractor {
                 videoStreams = runCatching { extractor.videoStreams }.getOrDefault(emptyList()),
                 subtitles = subtitles,
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             throw ToolException(mapExtractorError(e))
         }
@@ -162,11 +182,11 @@ object YouTubeExtractor {
     private const val PROGRESS_REPORT_INTERVAL_MS = 250L
 
     /** Fetch small text (a subtitle file) over HTTP. */
-    suspend fun fetchText(url: String): String = withContext(Dispatchers.IO) {
+    suspend fun fetchText(url: String): String {
         val req = okhttp3.Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Android) ByokChat").build()
         try {
-            Http.client.newCall(req).execute().use { resp ->
+            return Http.client.executeCancellable(req) { resp ->
                 if (!resp.isSuccessful) throw ToolException("Could not download the subtitles (HTTP ${resp.code}). Try again.")
                 resp.body?.string().orEmpty()
             }
@@ -186,11 +206,11 @@ object YouTubeExtractor {
         url: String,
         out: OutputStream,
         onProgress: (suspend (downloadedBytes: Long, totalBytes: Long?) -> Unit)? = null,
-    ) = withContext(Dispatchers.IO) {
+    ) {
         val req = okhttp3.Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Android) ByokChat").build()
         try {
-            Http.client.newCall(req).execute().use { resp ->
+            Http.client.executeCancellable(req) { resp ->
                 if (!resp.isSuccessful) throw ToolException("Could not download the file (HTTP ${resp.code}). Try again.")
                 val total = resp.body?.contentLength()?.takeIf { it > 0 }
                 val source = resp.body?.byteStream() ?: throw ToolException("The download returned no data. Try again.")
@@ -200,6 +220,7 @@ object YouTubeExtractor {
                 onProgress?.invoke(0, total)
                 source.use { input ->
                     while (true) {
+                        currentCoroutineContext().ensureActive()
                         val read = input.read(buffer)
                         if (read < 0) break
                         out.write(buffer, 0, read)

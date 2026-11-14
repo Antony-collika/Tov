@@ -16,6 +16,7 @@ import com.example.byokchat.youtube.subtitleFileSuffix
 import com.example.byokchat.youtube.webVttToPlainText
 import com.example.byokchat.youtube.webVttToSrt
 import com.example.byokchat.util.humanSize
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 
 fun youtubeTool(
@@ -235,10 +236,16 @@ object YouTubeTools {
         if (doc == null) doc = env.fs.createFileNamed(parent, name)
         // Live progress for the tool card ("Running. Progress 42%"): reported
         // through the call's progress scope, never into the result text.
-        env.fs.openOut(doc).use { out ->
-            YouTubeExtractor.downloadTo(url, out) { downloaded, total ->
-                env.reportProgress(downloaded, total)
+        try {
+            env.fs.openOut(doc).use { out ->
+                YouTubeExtractor.downloadTo(url, out) { downloaded, total ->
+                    env.reportProgress(downloaded, total)
+                }
             }
+        } catch (e: CancellationException) {
+            // A stopped download must not leave a half-written file in the Playground.
+            runCatching { doc.delete() }
+            throw e
         }
     }
 }

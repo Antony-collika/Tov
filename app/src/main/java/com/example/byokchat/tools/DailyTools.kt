@@ -10,6 +10,7 @@ import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.text.Html
 import com.example.byokchat.ai.Http
+import com.example.byokchat.ai.executeCancellable
 import com.example.byokchat.ai.getJson
 import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.data.NoteEntity
@@ -371,7 +372,7 @@ object DailyTools {
                 throw ToolException("Invalid link.")
             }
             val (type, rawBody) = try {
-                Http.fetchClient.newCall(req).execute().use { r ->
+                Http.fetchClient.executeCancellable(req) { r ->
                     if (!r.isSuccessful) throw ToolException("The page returned error ${r.code}.")
                     val src = r.body?.source() ?: throw ToolException("The page has no content.")
                     src.request(1_500_000)
@@ -419,7 +420,7 @@ object DailyTools {
                     val url = "https://html.duckduckgo.com/html/?q=" + java.net.URLEncoder.encode(q, "UTF-8")
                     val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0 (Android) ByokChat").get().build()
                     val html = try {
-                        Http.fetchClient.newCall(req).execute().use { r ->
+                        Http.fetchClient.executeCancellable(req) { r ->
                             if (!r.isSuccessful) throw ToolException("DuckDuckGo returned error ${r.code}.")
                             r.body?.string() ?: throw ToolException("DuckDuckGo returned no content.")
                         }

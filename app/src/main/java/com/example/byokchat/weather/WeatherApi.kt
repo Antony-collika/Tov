@@ -1,9 +1,8 @@
 package com.example.byokchat.weather
 
 import com.example.byokchat.ai.Http
+import com.example.byokchat.ai.executeCancellable
 import com.example.byokchat.tools.ToolException
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -199,18 +198,18 @@ fun formatWeather(report: WeatherReport): String {
 class OpenMeteoApi(
     private val http: OkHttpClient = Http.fetchClient,
 ) {
-    private suspend fun get(url: okhttp3.HttpUrl, what: String): JsonObject = withContext(Dispatchers.IO) {
+    private suspend fun get(url: okhttp3.HttpUrl, what: String): JsonObject {
         val req = Request.Builder().url(url).get().build()
-        val (code, body) = try {
-            http.newCall(req).execute().use { resp ->
-                resp.code to (resp.body?.string().orEmpty())
+        try {
+            return http.executeCancellable(req) { resp ->
+                val body = resp.body?.string().orEmpty()
+                if (resp.code !in 200..299) throw ToolException(mapApiError(resp.code, what))
+                runCatching { json.parseToJsonElement(body).jsonObject }
+                    .getOrElse { throw ToolException("Open-Meteo returned a response that could not be read. Try again.") }
             }
         } catch (e: IOException) {
             throw ToolException("Could not reach Open-Meteo: ${e.message}. Check the network and try again.")
         }
-        if (code !in 200..299) throw ToolException(mapApiError(code, what))
-        runCatching { json.parseToJsonElement(body).jsonObject }
-            .getOrElse { throw ToolException("Open-Meteo returned a response that could not be read. Try again.") }
     }
 
     fun mapApiError(code: Int, what: String): String = when (code) {
