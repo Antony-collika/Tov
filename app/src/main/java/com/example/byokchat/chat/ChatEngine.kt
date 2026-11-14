@@ -94,8 +94,10 @@ class ChatEngine(
                 tools.endTurn(turnId)
                 // Only the job that still owns the conversation clears the
                 // active flag; a superseded job must not switch the UI back
-                // to Send while the new turn is still running.
-                if (jobs.remove(conversationId, job)) {
+                // to Send while the new turn is still running. (The job is
+                // read from this coroutine's own context: the launch result
+                // cannot be named inside its own initializer.)
+                if (jobs.remove(conversationId, currentCoroutineContext()[Job])) {
                     _active.update { it - conversationId }
                 }
             }
