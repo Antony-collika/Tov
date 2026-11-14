@@ -6,6 +6,10 @@ import com.example.byokchat.media.MediaPlayException
 import com.example.byokchat.media.MediaPlayback
 import com.example.byokchat.media.QueueTrack
 import com.example.byokchat.media.formatMediaTime
+import com.example.byokchat.nct.NctApi
+import com.example.byokchat.nct.isSignedUrlExpired
+import com.example.byokchat.nct.parseNctSongKey
+import com.example.byokchat.nct.selectStream
 import com.example.byokchat.youtube.YouTubeExtractor
 import com.example.byokchat.youtube.parseVideoId
 import kotlinx.serialization.json.JsonObject
@@ -22,9 +26,10 @@ fun mediaTool(
 ) = Tool(uid, ToolGroup.MEDIA, risk, name, description, schema, needsWorkspace, previewFn = preview, run = run)
 
 /**
- * Nhóm 5: mở nhạc. Hai tool, một player:
+ * Nhóm 5: mở nhạc. Ba tool, một player:
  * - local.media.play (tên cũ: media.play / play_music): file nhạc local trong playground.
  * - youtube.media.play: audio của video YouTube, không lưu file.
+ * - nct.media.play: audio của bài hát NhacCuaTui, không lưu file.
  * Không có tool dừng/tạm dừng cho AI — muốn dừng thì user bấm nút X trên
  * thanh mini-player (hoặc nút dừng trong thông báo nhạc).
  */
@@ -79,6 +84,46 @@ object MediaTools {
                     uri = stream.content,
                     name = resolved.title.ifBlank { videoId },
                 )
+            }
+            playTracks(env, tracks)
+        },
+
+        mediaTool(
+            "nct.media.play", Risk.READ, "nct_media_play",
+            "Play the audio of one or more NhacCuaTui songs right away, in sequence, in the background, with the mini-player like local.media.play. Audio only, no video. This tool does not search: to play something, search with nct_search first, choose a song, then call this tool with the song key or link of the chosen song. The app fetches a fresh stream link for each song when it plays. A VIP-only song cannot be played — the tool will say so clearly. To play a local music file in the Playground, use local.media.play, not this tool.",
+            schema { strArray("songs", "NCT song keys or full song links from nct_search, e.g. ['PgrxRcNASk', 'https://www.nhaccuatui.com/song/...']. At least one.", required = true) },
+            needsWorkspace = false,
+            preview = { _, a ->
+                val songs = a.strList("songs").orEmpty()
+                if (songs.isEmpty()) "Play NCT audio: (no songs given)"
+                else "Phát audio NCT: " + songs.joinToString(", ")
+            },
+        ) { env, a ->
+            val songs = a.strList("songs").orEmpty()
+            if (songs.isEmpty()) throw ToolException("Give at least one NCT song key or link to play.")
+            // Resolve every song's fresh stream link before playing any of them,
+            // so one bad or VIP-only song does not leave the player half-started.
+            val tracks = songs.map { input ->
+                val key = parseNctSongKey(input)
+                    ?: throw ToolException("'$input' is not an NCT song key or link.")
+                val song = NctApi().songByKey(key)
+                val stream = selectStream(song, null)
+                    ?: if (song.onlyVip) {
+                        throw ToolException(
+                            "Song '${song.title}' by ${song.artistName} is VIP-only on NhacCuaTui, " +
+                                "so it cannot be played.",
+                        )
+                    } else {
+                        throw ToolException("Song '${song.title}' has no audio stream to play.")
+                    }
+                if (isSignedUrlExpired(stream.streamUrl)) {
+                    throw ToolException(
+                        "NhacCuaTui gave a stream link for '${song.title}' that is already expired. Try again.",
+                    )
+                }
+                val display = if (song.artistName.isBlank()) song.title.ifBlank { key }
+                else "${song.title.ifBlank { key }} - ${song.artistName}"
+                QueueTrack(displayPath = display, uri = stream.streamUrl, name = display)
             }
             playTracks(env, tracks)
         },

@@ -64,7 +64,7 @@ class MediaQueueTest {
     @Test
     fun mediaToolDefinition() {
         val tools = MediaTools.build()
-        assertEquals(listOf("local.media.play", "youtube.media.play"), tools.map { it.uid })
+        assertEquals(listOf("local.media.play", "youtube.media.play", "nct.media.play"), tools.map { it.uid })
         val tool = tools[0]
         assertEquals(ToolGroup.MEDIA, tool.group)
         assertEquals(Risk.READ, tool.risk)
@@ -83,6 +83,13 @@ class MediaQueueTest {
         val ytProps = yt.schema["properties"] as JsonObject
         assertTrue(ytProps.containsKey("videos"))
         assertFalse(ytProps.containsKey("q"))
+        // nct.media.play: same shape, NCT song keys instead of video IDs.
+        val nct = tools[2]
+        assertEquals("nct_media_play", nct.defaultName)
+        assertFalse(nct.needsWorkspace)
+        val nctProps = nct.schema["properties"] as JsonObject
+        assertTrue(nctProps.containsKey("songs"))
+        assertTrue(nct.defaultDescription.contains("nct_search"))
     }
 
     @Test
@@ -91,11 +98,13 @@ class MediaQueueTest {
         val template = ToolsMdParser.buildTemplate(tools)
         assertTrue(template.contains("## local.media.play"))
         assertTrue(template.contains("## youtube.media.play"))
+        assertTrue(template.contains("## nct.media.play"))
         val origins = tools.associate { it.uid to it.defaultDescription }
         val parsed = ToolsMdParser.parse(template, origins)
-        assertEquals(listOf("local.media.play", "youtube.media.play"), parsed.map { it.uid })
+        assertEquals(listOf("local.media.play", "youtube.media.play", "nct.media.play"), parsed.map { it.uid })
         assertEquals("local_media_play", parsed[0].name)
         assertEquals("youtube_media_play", parsed[1].name)
+        assertEquals("nct_media_play", parsed[2].name)
     }
 
     @Test
