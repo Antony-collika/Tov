@@ -59,7 +59,7 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
         ) {
             Text("Search engine (for the web_search tool)")
-            val engines = listOf("BRAVE" to "Brave Search", "TAVILY" to "Tavily")
+            val engines = listOf("BRAVE" to "Brave", "TAVILY" to "Tavily", "DUCKDUCKGO" to "DuckDuckGo", "SERPER" to "Serper")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 engines.forEachIndexed { index, (id, label) ->
                     SegmentedButton(
@@ -77,7 +77,7 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
                 singleLine = true,
                 visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
-                supportingText = { Text("If empty, the web search tool is not offered to the AI. The key is encrypted on this device.") },
+                supportingText = { Text(if (searchProvider == "DUCKDUCKGO") "DuckDuckGo needs no API key — web search works with this field empty." else "If empty, the web search tool is not offered to the AI (unless DuckDuckGo is selected). The key is encrypted on this device.") },
                 keyboardOptions = KeyboardOptions.Default,
                 modifier = Modifier.fillMaxWidth(),
             )
