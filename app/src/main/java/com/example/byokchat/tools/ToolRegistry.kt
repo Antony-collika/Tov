@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlin.coroutines.EmptyCoroutineContext
 
 /**
  * Danh sách toàn bộ công cụ + cầu nối với vòng chat.
@@ -199,7 +200,7 @@ class ToolRegistry(
 
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
 
-    override suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>?): ToolOutcome {
+    override suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>?, conversationId: String?): ToolOutcome {
         // Mỗi lần chạy công cụ bắt đầu với bộ nhớ đệm metadata sạch (xem WorkspaceFs).
         env.fs.clearMeta()
         // Tôn trọng danh sách file (Đợt E): tên model gọi phải nằm trong file
@@ -245,12 +246,15 @@ class ToolRegistry(
         }
 
         return try {
+            // ConversationScope: cuộc trò chuyện của lần chạy này, để tool
+            // ghi những thứ theo từng cuộc trò chuyện (như "Recently played").
+            val runContext =
+                Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job]) +
+                    ToolProgressScope(call.id) +
+                    if (conversationId != null) ConversationScope(conversationId) else EmptyCoroutineContext
             ToolOutcome(
                 tool.uid,
-                withContext(
-                    Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job]) +
-                        ToolProgressScope(call.id),
-                ) { tool.run(env, args) }.cap(),
+                withContext(runContext) { tool.run(env, args) }.cap(),
                 false,
             )
         } catch (e: CancellationException) {

@@ -23,7 +23,7 @@ interface ToolRuntime {
      *   (quyết định 8, Đợt E); chỉ chặn lúc gọi trong [execute].
      */
     suspend fun definitions(exposed: List<ParsedTool>? = null): List<ToolDef>
-    suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>? = null): ToolOutcome
+    suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>? = null, conversationId: String? = null): ToolOutcome
     /** The run for this turn is over: forget turn-scoped permissions ("Allow all in this turn"). */
     fun endTurn(turnId: String)
     /** UID của tool mà model gọi bằng [name] (tên trong file nếu có, không thì tên gốc). */

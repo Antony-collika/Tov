@@ -3,7 +3,9 @@ package com.example.byokchat.tools
 import android.content.Context
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.SettingsRepository
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.serialization.json.*
+import kotlin.coroutines.CoroutineContext
 
 enum class Risk { READ, WRITE, DELETE }
 
@@ -16,6 +18,22 @@ enum class ToolGroup(val label: String) {
 }
 
 class ToolException(message: String) : Exception(message)
+
+/**
+ * Coroutine-context element carrying the conversation a running tool call
+ * belongs to. [ToolRegistry.execute] sets it around the tool's run (cùng
+ * mẫu với ToolProgressScope); một tool đọc nó để ghi những thứ theo từng
+ * cuộc trò chuyện — ví dụ lịch sử "Recently played" — mà không phải đổi
+ * chữ ký run của tool. Null ngoài một lần chạy tool.
+ */
+class ConversationScope(val conversationId: String) : CoroutineContext.Element {
+    companion object Key : CoroutineContext.Key<ConversationScope>
+
+    override val key: CoroutineContext.Key<*> get() = Key
+}
+
+/** Cuộc trò chuyện của tool call đang chạy trong coroutine này, null nếu không có. */
+suspend fun currentConversationId(): String? = currentCoroutineContext()[ConversationScope]?.conversationId
 
 class ToolEnv(
     val app: Context,

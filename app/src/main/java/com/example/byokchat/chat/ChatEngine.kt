@@ -321,7 +321,7 @@ class ChatEngine(
                 return
             }
             for (call in calls) {
-                val outcome = tools.execute(call, turnId, exposed)
+                val outcome = tools.execute(call, turnId, exposed, conversationId)
                 msgDao.upsert(
                     MessageEntity(
                         id = UUID.randomUUID().toString(),
