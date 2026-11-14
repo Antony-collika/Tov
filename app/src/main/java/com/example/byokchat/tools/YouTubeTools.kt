@@ -45,7 +45,7 @@ fun youtubeTool(
 object YouTubeTools {
     fun build(): List<Tool> = listOf(
         youtubeTool(
-            "youtube_search", ToolGroup.DAILY, Risk.READ, "youtube_search",
+            "youtube_search", ToolGroup.MEDIA, Risk.READ, "youtube_search",
             "Search YouTube by keyword, or get the details of a YouTube link the user sent, via the official YouTube Data API. Use it when the user wants something without naming a specific video, for example \"a cheerful song by singer Nguyen Van A\", or when the user sends a YouTube link, or when the user asks to check a channel or play the newest video in a channel. Each result already has everything needed to choose: link, video ID, title, channel name, description, duration, view count, like count, comment count. Return at most 50 results per page, default 20. Fetch more only if the user asks for more, using page_token. To list videos in a channel, pass its channel_id with type video and order date. No other tool is needed to get the details of a video you already found. Do not search again when you already have search results.",
             schema {
                 str("q", "Search keywords, or a full YouTube link (video, playlist or channel).", required = true)
@@ -90,7 +90,7 @@ object YouTubeTools {
         },
 
         youtubeTool(
-            "youtube_comments", ToolGroup.DAILY, Risk.READ, "youtube_comments",
+            "youtube_comments", ToolGroup.MEDIA, Risk.READ, "youtube_comments",
             "Read the comments of a YouTube video: author, text, like count, date, with up to 5 replies per thread. Default 20 threads per call, at most 100 per call. Fetch more only if the user asks for more, using page_token. Use it when the user asks what people say about a video. If comments are disabled on the video, the tool will say so clearly, do not invent comments.",
             schema {
                 str("video", "Video ID or full YouTube link.", required = true)
