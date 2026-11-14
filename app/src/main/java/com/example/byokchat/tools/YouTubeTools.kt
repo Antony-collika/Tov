@@ -13,6 +13,7 @@ import com.example.byokchat.youtube.parseYouTubeLink
 import com.example.byokchat.youtube.sanitizeFileName
 import com.example.byokchat.youtube.selectSubtitleTrack
 import com.example.byokchat.youtube.subtitleFileSuffix
+import com.example.byokchat.youtube.webVttToPlainText
 import com.example.byokchat.youtube.webVttToSrt
 import com.example.byokchat.util.humanSize
 import kotlinx.serialization.json.JsonObject
@@ -114,12 +115,13 @@ object YouTubeTools {
 
         youtubeTool(
             "youtube_download", ToolGroup.MEDIA, Risk.WRITE, "youtube_download",
-            "Download one file from one YouTube video: audio, video, or transcript, and save it to a path inside the Playground folders the user granted. The path is relative to the virtual root, and its first segment must be a granted folder name, for example \"Nhac/YouTube/\". Download one video at a time. If the target folder is not clear, ask the user which granted folder to use, do not guess. Missing subfolders are created automatically. For a transcript, if the user does not name a language, the tool picks the best available subtitle track by itself: manual in the original language first, then auto-generated in the original language, then manual and auto-generated in Vietnamese and English, and it reports which track it actually took. Use it when the user asks to save a file, for example \"download the audio of this song to Nhac\". Do not use it to listen right away without saving — use youtube.media.play. A path outside the granted folders will be refused, do not save it elsewhere instead.",
+            "Download one file from one YouTube video: audio, video, or transcript, and save it to a path inside the Playground folders the user granted. The path is relative to the virtual root, and its first segment must be a granted folder name, for example \"Nhac/YouTube/\". Download one video at a time. If the target folder is not clear, ask the user which granted folder to use, do not guess. Missing subfolders are created automatically. For a transcript, the app lists the available subtitle tracks first and picks one by itself, in this order: manual in the requested language, auto-generated in the requested language, manual in the original language, auto-generated in the original language, manual in English, manual in Vietnamese, auto-generated in English, auto-generated in Vietnamese, then any manual track, then any auto-generated track. Auto-translated tracks are used only as a last resort. The tool reports which language and type it actually took. Read the returned file first; do not call again with a different language just because the returned language differs from the video language. Transcripts are saved as plain text (txt) by default, without timestamps; pass format srt only when the user asks for timestamps. Use it when the user asks to save a file, for example \"download the audio of this song to Nhac\". Do not use it to listen right away without saving — use youtube.media.play. A path outside the granted folders will be refused, do not save it elsewhere instead.",
             schema {
                 str("video", "Video ID or full YouTube link.", required = true)
                 str("kind", "audio, video, or transcript.", required = true, enum = listOf("audio", "video", "transcript"))
                 str("path", "Destination in the Playground: a folder (the app names the file) or a full file path. The first segment must be a granted folder name.", required = true)
                 str("language", "Subtitle language for kind=transcript, e.g. vi or en. Only set it when the user names a language; otherwise the tool picks the best available track.")
+                str("format", "Transcript format for kind=transcript: txt (default, plain text without timestamps, for reading and analysis) or srt (with timestamps). Only set it when the user names a format; otherwise txt is used.", enum = listOf("txt", "srt"))
                 str("quality", "Video quality, e.g. 720p (default) or best. Audio is always the best quality.")
             },
             needsWorkspace = true,
@@ -139,7 +141,7 @@ object YouTubeTools {
             val title = resolved.title.ifBlank { videoId }
             val baseName = sanitizeFileName(title)
             when (kind) {
-                "transcript" -> downloadTranscript(env, rawPath, baseName, resolved, a.str("language"))
+                "transcript" -> downloadTranscript(env, rawPath, baseName, resolved, a.str("language"), a.str("format"))
                 "audio" -> {
                     val stream = YouTubeExtractor.bestAudioStream(resolved.audioStreams)
                         ?: throw ToolException("This video has no audio stream to download.")
@@ -199,18 +201,22 @@ object YouTubeTools {
         baseName: String,
         resolved: com.example.byokchat.youtube.ResolvedStreams,
         language: String?,
+        format: String?,
     ): String {
         val track = selectSubtitleTrack(resolved.subtitles, language)
             ?: throw ToolException("This video has no subtitles to download.")
         val vtt = YouTubeExtractor.fetchText(track.contentUrl)
-        val srt = webVttToSrt(vtt)
-        if (srt.isBlank()) throw ToolException("The subtitles for this video could not be read. Try again.")
-        val fileName = "$baseName-${subtitleFileSuffix(track)}.srt"
+        // txt is the default: plain text without timestamps, for reading and
+        // analysis. srt keeps the timestamps; only when the user asks for it.
+        val ext = if (format?.trim()?.lowercase() == "srt") "srt" else "txt"
+        val text = if (ext == "srt") webVttToSrt(vtt) else webVttToPlainText(vtt)
+        if (text.isBlank()) throw ToolException("The subtitles for this video could not be read. Try again.")
+        val fileName = "$baseName-${subtitleFileSuffix(track)}.$ext"
         val target = resolveTargetFile(env, rawPath, fileName)
-        env.fs.writeText(target, srt)
+        env.fs.writeText(target, text)
         val kind = if (track.isAutoGenerated) "auto-generated" else "manual"
         return "Saved transcript of '${resolved.title.ifBlank { resolved.videoId }}' to '$target' " +
-            "(language: ${track.languageTag}, $kind subtitles)."
+            "(language: ${track.languageTag}, $kind subtitles, format: $ext)."
     }
 
     private suspend fun downloadStreamTo(env: ToolEnv, url: String, target: String) {

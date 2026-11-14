@@ -47,9 +47,18 @@ class YouTubeToolsTest {
         val download = tools[2]
         assertTrue(download.defaultDescription.contains("youtube.media.play"))
         assertTrue(download.defaultDescription.contains("ask the user"))
+        // Transcript fix (2026-11-14): the app lists tracks first and picks
+        // one itself; the AI must read the returned file, not re-call with
+        // another language, and txt is the default format.
+        assertTrue(download.defaultDescription.contains("lists the available subtitle tracks first"))
+        assertTrue(download.defaultDescription.contains("do not call again with a different language"))
+        assertTrue(download.defaultDescription.contains("plain text (txt) by default"))
         val kind = (download.schema["properties"] as JsonObject)["kind"] as JsonObject
         val kinds = (kind["enum"] as JsonArray).map { (it as JsonPrimitive).content }
         assertEquals(listOf("audio", "video", "transcript"), kinds)
+        val format = (download.schema["properties"] as JsonObject)["format"] as JsonObject
+        val formats = (format["enum"] as JsonArray).map { (it as JsonPrimitive).content }
+        assertEquals(listOf("txt", "srt"), formats)
     }
 
     @Test
