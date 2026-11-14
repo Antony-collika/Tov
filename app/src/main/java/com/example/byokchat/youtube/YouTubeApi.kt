@@ -335,8 +335,9 @@ class YouTubeApi(
     ): SearchResults {
         val url = base("search")
             .addQueryParameter("part", "snippet")
-            .addQueryParameter("q", q)
             .addQueryParameter("maxResults", maxResults.coerceIn(1, 50).toString())
+        // q may be empty when listing a channel's videos (channelId only).
+        if (q.isNotBlank()) url.addQueryParameter("q", q)
             .addQueryParameter("order", order)
         if (!channelId.isNullOrBlank()) {
             // The API only allows channelId together with type=video.

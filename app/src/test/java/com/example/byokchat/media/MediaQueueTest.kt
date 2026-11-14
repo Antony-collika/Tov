@@ -64,11 +64,11 @@ class MediaQueueTest {
     @Test
     fun mediaToolDefinition() {
         val tools = MediaTools.build()
-        assertEquals(listOf("media.play"), tools.map { it.uid })
+        assertEquals(listOf("local.media.play", "youtube.media.play"), tools.map { it.uid })
         val tool = tools[0]
         assertEquals(ToolGroup.MEDIA, tool.group)
         assertEquals(Risk.READ, tool.risk)
-        assertEquals("play_music", tool.defaultName)
+        assertEquals("local_media_play", tool.defaultName)
         assertEquals(ToolMode.AUTO, tool.defaultMode) // READ -> AUTO: bảo bật là bật
         assertTrue(tool.needsWorkspace)
         val props = tool.schema["properties"] as JsonObject
@@ -76,17 +76,26 @@ class MediaQueueTest {
         assertEquals("array", (paths["type"] as JsonPrimitive).content)
         val required = tool.schema["required"] as JsonArray
         assertTrue(required.map { (it as JsonPrimitive).content }.contains("paths"))
+        // youtube.media.play needs no Playground folder (streams from the network).
+        val yt = tools[1]
+        assertEquals("youtube_media_play", yt.defaultName)
+        assertFalse(yt.needsWorkspace)
+        val ytProps = yt.schema["properties"] as JsonObject
+        assertTrue(ytProps.containsKey("videos"))
+        assertFalse(ytProps.containsKey("q"))
     }
 
     @Test
     fun mediaToolInToolsMdTemplateAndParsesBack() {
         val tools = MediaTools.build()
         val template = ToolsMdParser.buildTemplate(tools)
-        assertTrue(template.contains("## media.play"))
+        assertTrue(template.contains("## local.media.play"))
+        assertTrue(template.contains("## youtube.media.play"))
         val origins = tools.associate { it.uid to it.defaultDescription }
         val parsed = ToolsMdParser.parse(template, origins)
-        assertEquals(listOf("media.play"), parsed.map { it.uid })
-        assertEquals("play_music", parsed[0].name)
+        assertEquals(listOf("local.media.play", "youtube.media.play"), parsed.map { it.uid })
+        assertEquals("local_media_play", parsed[0].name)
+        assertEquals("youtube_media_play", parsed[1].name)
     }
 
     @Test

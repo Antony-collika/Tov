@@ -34,7 +34,7 @@ class ToolRegistry(
     private val prefs: ToolPrefs,
     private val confirmations: ConfirmationBroker,
 ) : ToolRuntime {
-    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + MediaTools.build()
+    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + YouTubeTools.build() + MediaTools.build()
     private val byUid = all.associateBy { it.uid }
 
     fun tool(uid: String): Tool? = byUid[uid]

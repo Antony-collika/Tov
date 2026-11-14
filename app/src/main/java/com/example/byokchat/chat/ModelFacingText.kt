@@ -65,25 +65,25 @@ object ModelFacingText {
     fun compactedToolResult(toolName: String, chars: Int, turn: Int): String =
         "[Shortened result: $toolName, $chars characters, turn T$turn. Call the tool again for the full result.]"
 
-    // ---------- Tool media.play (kế hoạch media player, Đợt 1) ----------
+    // ---------- Tool local.media.play / youtube.media.play (kế hoạch media player, Đợt 1) ----------
     // Các câu này viết bằng tiếng Việt theo đúng kế hoạch: AI đọc rồi báo
     // lại cho user bằng tiếng Việt (user nói tiếng Việt với AI).
-    /** Tool media.play: câu trả về cho AI khi bắt đầu phát batch. */
+    /** Tool phát nhạc: câu trả về cho AI khi bắt đầu phát batch. */
     fun mediaPlaying(name: String, duration: String, next: List<String>): String =
         "Đang phát: $name ($duration)" + if (next.isEmpty()) "" else ", tiếp theo: ${next.joinToString(", ")}"
 
-    /** Tool media.play: không xin được audio focus (âm thanh đang bận). */
+    /** Tool phát nhạc: không xin được audio focus (âm thanh đang bận). */
     fun mediaFocusBusy(): String = "Không phát được nhạc lúc này vì âm thanh đang bận."
 
-    /** Tool media.play: không mở được file nhạc. */
+    /** Tool phát nhạc: không mở được file nhạc. */
     fun mediaPlayFailed(name: String): String = "Không phát được file '$name'."
 
-    /** Tool media.play: không có đường dẫn nào. */
+    /** Tool phát nhạc local: không có đường dẫn nào. */
     const val MEDIA_NEED_PATHS = "Cần ít nhất một đường dẫn file nhạc."
 
-    /** Tool media.play: không tìm thấy file. */
+    /** Tool phát nhạc local: không tìm thấy file. */
     fun mediaNotFound(path: String): String = "Không tìm thấy file '$path'."
 
-    /** Tool media.play: đường dẫn là thư mục. */
+    /** Tool phát nhạc local: đường dẫn là thư mục. */
     fun mediaIsFolder(path: String): String = "'$path' là thư mục, không phải file nhạc."
 }
