@@ -254,10 +254,18 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun send() {
         val text = draft.trim()
         val images = pendingImages.toList()
-        if ((text.isEmpty() && images.isEmpty()) || generating.value) return
+        if (text.isEmpty() && images.isEmpty()) return
         draft = ""
         pendingImages.clear()
         viewModelScope.launch {
+            if (generating.value) {
+                // One tap while a turn is running: stop it (the running turn
+                // is marked Interrupted) and send the new message right
+                // away — do not wait for the old turn's network calls to
+                // finish; their late results are discarded.
+                app.engine.stop(conversationId)
+                app.engine.markCurrentTurnInterrupted(conversationId)
+            }
             val turnId = UUID.randomUUID().toString()
             // Đợt 4: số lượt ổn định — lượt mới lấy (số lớn nhất hiện có + 1),
             // chỉ tăng không giảm nên số của lượt đã xóa không dùng lại.

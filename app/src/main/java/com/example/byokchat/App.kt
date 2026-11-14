@@ -12,14 +12,18 @@ import com.example.byokchat.chat.ChatNotifier
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.GenerationService
 import com.example.byokchat.chat.ChatOps
+import com.example.byokchat.media.MediaPlayback
+import com.example.byokchat.media.RecentlyPlayedStore
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.ConversationRepository
+import com.example.byokchat.data.RoomRecentlyPlayedStorage
 import com.example.byokchat.data.RequestLayoutStore
 import com.example.byokchat.data.SettingsRepository
 import com.example.byokchat.tools.ConfirmationBroker
 import com.example.byokchat.tools.PermissionBroker
 import com.example.byokchat.tools.ToolEnv
 import com.example.byokchat.tools.ToolPrefs
+import com.example.byokchat.tools.ToolProgressBroker
 import com.example.byokchat.tools.ToolRegistry
 import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.CoroutineScope
@@ -80,9 +84,15 @@ class AppContainer(val context: Context) {
     val fs = WorkspaceFs(context, settings)
     val permissions = PermissionBroker(context)
     val confirmations = ConfirmationBroker()
+    /** Live progress of running tool calls (download %, shown in the tool card). */
+    val toolProgress = ToolProgressBroker()
     val toolPrefs = ToolPrefs(context)
-    private val env = ToolEnv(context, fs, db, settings, permissions)
+    private val env = ToolEnv(context, fs, db, settings, permissions, toolProgress)
     val registry = ToolRegistry(env, toolPrefs, confirmations)
+    /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
+    val media = MediaPlayback(context)
+    /** Những bài AI đã phát trong từng cuộc trò chuyện ("Recently played", menu ⋮): lưu vào DB (bảng recently_played) nên không mất khi app bị kill; store giữ một bản sao trong bộ nhớ để UI đọc ngay. */
+    val recentlyPlayed = RecentlyPlayedStore(RoomRecentlyPlayedStorage(db.recentlyPlayed()))
     val notifier = ChatNotifier(context)
     /** Bố cục Request panel (Đợt C): danh sách thẻ toàn cục, lưu SharedPreferences. */
     val layoutStore = RequestLayoutStore(context, settings)

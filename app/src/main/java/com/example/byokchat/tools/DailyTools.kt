@@ -10,6 +10,7 @@ import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.text.Html
 import com.example.byokchat.ai.Http
+import com.example.byokchat.ai.executeCancellable
 import com.example.byokchat.ai.getJson
 import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.data.NoteEntity
@@ -201,6 +202,94 @@ private fun htmlToText(html: String): String {
 
 private fun noteId() = UUID.randomUUID().toString().take(8)
 
+// ---------- Web search (Brave / Tavily / Serper / DuckDuckGo) ----------
+
+/** Một kết quả tìm kiếm web, dùng chung cho mọi engine. */
+data class WebSearchResult(val title: String, val url: String, val snippet: String)
+
+/** Engine nào cần key thì key trống là lỗi rõ ràng, không tự đổi engine khác. */
+private fun requireSearchKey(provider: String, key: String) {
+    if (key.isBlank()) throw ToolException("No API key for $provider. Enter it in Settings → Web search.")
+}
+
+/** Định dạng chung "• title\n  url\n  snippet" cho mọi engine. */
+fun formatWebSearchResults(query: String, results: List<WebSearchResult>): String =
+    if (results.isEmpty()) "No results for '$query'."
+    else "Search results for '$query':\n" + results.joinToString("\n") {
+        "• ${it.title}\n  ${it.url}\n  ${it.snippet.take(300)}"
+    }
+
+/** Brave: web.results[] với title/url/description (description có thể chứa HTML). */
+fun parseBraveResults(root: JsonObject): List<WebSearchResult> =
+    root["web"]?.jsonObject?.get("results")?.jsonArray?.mapNotNull { r ->
+        val o = r.jsonObject
+        val title = o["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        val desc = o["description"]?.jsonPrimitive?.contentOrNull?.let { decodeHtmlEntities(stripHtmlTags(it)) } ?: ""
+        WebSearchResult(title, o["url"]?.jsonPrimitive?.contentOrNull ?: "", desc)
+    } ?: emptyList()
+
+/** Tavily: results[] với title/url/content. */
+fun parseTavilyResults(root: JsonObject): List<WebSearchResult> =
+    root["results"]?.jsonArray?.mapNotNull { r ->
+        val o = r.jsonObject
+        val title = o["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        WebSearchResult(title, o["url"]?.jsonPrimitive?.contentOrNull ?: "", o["content"]?.jsonPrimitive?.contentOrNull ?: "")
+    } ?: emptyList()
+
+/** Serper (google.serper.dev): organic[] với title/link/snippet. */
+fun parseSerperResults(root: JsonObject): List<WebSearchResult> =
+    root["organic"]?.jsonArray?.mapNotNull { r ->
+        val o = r.jsonObject
+        val title = o["title"]?.jsonPrimitive?.contentOrNull ?: return@mapNotNull null
+        WebSearchResult(title, o["link"]?.jsonPrimitive?.contentOrNull ?: "", o["snippet"]?.jsonPrimitive?.contentOrNull ?: "")
+    } ?: emptyList()
+
+private val DDG_ANCHOR = Regex("""(?is)<a\b([^>]*)>(.*?)</a>""")
+private val DDG_HREF = Regex("""href="([^"]+)"""")
+private val DDG_UDDG = Regex("""[?&]uddg=([^&]+)""")
+private val HTML_TAG = Regex("<[^>]+>")
+private val HTML_ENTITY_DEC = Regex("&#(\\d+);")
+private val HTML_ENTITY_HEX = Regex("&#x([0-9a-fA-F]+);")
+
+/** Bỏ thẻ HTML, giữ lại text. */
+fun stripHtmlTags(html: String): String = html.replace(HTML_TAG, "")
+
+/** Giải mã HTML entities thường gặp (&amp; &lt; &gt; &quot; &#39; &#123; &#x7B;). Thuần Kotlin, không cần Android. */
+fun decodeHtmlEntities(text: String): String {
+    var out = text
+        .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+        .replace("&quot;", "\"").replace("&#39;", "'").replace("&apos;", "'")
+        .replace("&nbsp;", " ")
+    out = HTML_ENTITY_DEC.replace(out) { m ->
+        m.groupValues[1].toIntOrNull()?.toChar()?.toString() ?: m.value
+    }
+    out = HTML_ENTITY_HEX.replace(out) { m ->
+        m.groupValues[1].toIntOrNull(16)?.toChar()?.toString() ?: m.value
+    }
+    return out
+}
+
+/**
+ * DuckDuckGo (html.duckduckgo.com/html/): mỗi kết quả là một link
+ * class="result__a" (tiêu đề + href) kèm một link class="result__snippet"
+ * (mô tả), theo đúng thứ tự xuất hiện. Href thường là link chuyển hướng
+ * //duckduckgo.com/l/?uddg=<url đã encode> nên giải mã uddg để lấy URL thật.
+ */
+fun parseDuckDuckGoResults(html: String): List<WebSearchResult> {
+    val anchors = DDG_ANCHOR.findAll(html).toList()
+    val titles = anchors.filter { it.groupValues[1].contains("result__a") }
+    val snippets = anchors.filter { it.groupValues[1].contains("result__snippet") }
+    return titles.mapIndexed { i, m ->
+        val rawHref = DDG_HREF.find(m.groupValues[1])?.groupValues?.get(1) ?: ""
+        val realUrl = DDG_UDDG.find(rawHref)?.groupValues?.get(1)?.let {
+            runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrNull()
+        } ?: rawHref.let { if (it.startsWith("//")) "https:$it" else it }
+        val title = decodeHtmlEntities(stripHtmlTags(m.groupValues[2])).trim()
+        val snippet = snippets.getOrNull(i)?.let { decodeHtmlEntities(stripHtmlTags(it.groupValues[2])).trim() } ?: ""
+        WebSearchResult(title, realUrl, snippet)
+    }.filter { it.title.isNotEmpty() }
+}
+
 /** Xuất một note ra Storage/notes/<id>.md. Best-effort: Storage chưa
  * chọn hay lỗi ghi đều bỏ qua, không bao giờ làm lỗi tool. */
 private fun exportNote(env: ToolEnv, note: NoteEntity) {
@@ -283,7 +372,7 @@ object DailyTools {
                 throw ToolException("Invalid link.")
             }
             val (type, rawBody) = try {
-                Http.fetchClient.newCall(req).execute().use { r ->
+                Http.fetchClient.executeCancellable(req) { r ->
                     if (!r.isSuccessful) throw ToolException("The page returned error ${r.code}.")
                     val src = r.body?.source() ?: throw ToolException("The page has no content.")
                     src.request(1_500_000)
@@ -306,32 +395,48 @@ object DailyTools {
                 str("query", "Search keywords.", required = true)
                 int("count", "Number of results (default 5, max 10).")
             },
-            unavailableHint = "Enter your search service API key in Settings.",
-            isAvailable = { it.settings.searchApiKey.value.isNotBlank() }) { env, a ->
+            unavailableHint = "Enter your search service API key in Settings (DuckDuckGo needs no key).",
+            isAvailable = { it.settings.searchProvider.value == "DUCKDUCKGO" || it.settings.searchApiKey.value.isNotBlank() }) { env, a ->
             val q = a.reqStr("query")
             val n = (a.int("count") ?: 5).coerceIn(1, 10)
             val key = env.settings.searchApiKey.value
-            val lines = mutableListOf<String>()
-            if (env.settings.searchProvider.value == "TAVILY") {
-                val body = buildJsonObject { put("query", q); put("max_results", n) }.toString()
-                val req = Request.Builder().url("https://api.tavily.com/search").header("Authorization", "Bearer $key")
-                    .post(body.toRequestBody(Http.JSON)).build()
-                val root = Http.client.getJson(req).jsonObject
-                root["results"]?.jsonArray?.forEach { r ->
-                    val o = r.jsonObject
-                    lines.add("• ${o["title"]?.jsonPrimitive?.contentOrNull}\n  ${o["url"]?.jsonPrimitive?.contentOrNull}\n  ${o["content"]?.jsonPrimitive?.contentOrNull?.take(300)}")
+            val provider = env.settings.searchProvider.value
+            val results: List<WebSearchResult> = when (provider) {
+                "TAVILY" -> {
+                    requireSearchKey(provider, key)
+                    val body = buildJsonObject { put("query", q); put("max_results", n) }.toString()
+                    val req = Request.Builder().url("https://api.tavily.com/search").header("Authorization", "Bearer $key")
+                        .post(body.toRequestBody(Http.JSON)).build()
+                    parseTavilyResults(Http.client.getJson(req).jsonObject)
                 }
-            } else {
-                val url = "https://api.search.brave.com/res/v1/web/search?count=$n&q=" + java.net.URLEncoder.encode(q, "UTF-8")
-                val req = Request.Builder().url(url).header("Accept", "application/json").header("X-Subscription-Token", key).get().build()
-                val root = Http.client.getJson(req).jsonObject
-                root["web"]?.jsonObject?.get("results")?.jsonArray?.forEach { r ->
-                    val o = r.jsonObject
-                    val desc = o["description"]?.jsonPrimitive?.contentOrNull?.let { Html.fromHtml(it, Html.FROM_HTML_MODE_LEGACY).toString() }
-                    lines.add("• ${o["title"]?.jsonPrimitive?.contentOrNull}\n  ${o["url"]?.jsonPrimitive?.contentOrNull}\n  ${desc?.take(300)}")
+                "SERPER" -> {
+                    requireSearchKey(provider, key)
+                    val body = buildJsonObject { put("q", q); put("num", n) }.toString()
+                    val req = Request.Builder().url("https://google.serper.dev/search").header("X-API-KEY", key)
+                        .post(body.toRequestBody(Http.JSON)).build()
+                    parseSerperResults(Http.client.getJson(req).jsonObject)
+                }
+                "DUCKDUCKGO" -> {
+                    val url = "https://html.duckduckgo.com/html/?q=" + java.net.URLEncoder.encode(q, "UTF-8")
+                    val req = Request.Builder().url(url).header("User-Agent", "Mozilla/5.0 (Android) ByokChat").get().build()
+                    val html = try {
+                        Http.fetchClient.executeCancellable(req) { r ->
+                            if (!r.isSuccessful) throw ToolException("DuckDuckGo returned error ${r.code}.")
+                            r.body?.string() ?: throw ToolException("DuckDuckGo returned no content.")
+                        }
+                    } catch (e: java.io.IOException) {
+                        throw ToolException("Could not reach DuckDuckGo: ${e.message}")
+                    }
+                    parseDuckDuckGoResults(html).take(n)
+                }
+                else -> {
+                    requireSearchKey(provider, key)
+                    val url = "https://api.search.brave.com/res/v1/web/search?count=$n&q=" + java.net.URLEncoder.encode(q, "UTF-8")
+                    val req = Request.Builder().url(url).header("Accept", "application/json").header("X-Subscription-Token", key).get().build()
+                    parseBraveResults(Http.client.getJson(req).jsonObject)
                 }
             }
-            if (lines.isEmpty()) "No results for '$q'." else "Search results for '$q':\n" + lines.joinToString("\n")
+            formatWebSearchResults(q, results)
         },
 
         // ----- Ghi chú nhớ lâu -----

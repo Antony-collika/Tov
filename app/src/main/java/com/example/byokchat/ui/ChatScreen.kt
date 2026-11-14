@@ -54,6 +54,8 @@ import com.example.byokchat.chat.TurnNumbers
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
+import com.example.byokchat.media.PlayedTrack
+import com.example.byokchat.tools.MediaTools
 import com.example.byokchat.util.TextUtil
 import kotlinx.coroutines.launch
 import java.io.File
@@ -152,6 +154,22 @@ fun ChatScreen(
         if (showMemory) memoryStats = vm.computeTokenStats()
     }
     var showMenu by remember { mutableStateOf(false) }
+    var showRecentlyPlayed by remember { mutableStateOf(false) }
+    // Danh sách "Recently played" của cuộc này: nạp từ DB lần đầu mở hộp
+    // thoại trong phiên chạy (store giữ cache trong bộ nhớ sau đó).
+    var recentlyPlayedTracks by remember { mutableStateOf<List<PlayedTrack>>(emptyList()) }
+    LaunchedEffect(showRecentlyPlayed, conversationId) {
+        if (showRecentlyPlayed) {
+            try {
+                container.recentlyPlayed.load(conversationId)
+            } catch (e: Exception) {
+                // Lỗi đọc DB không được làm sập màn hình: báo rồi hiện
+                // danh sách đang có trong bộ nhớ (có thể rỗng).
+                snackbar.showSnackbar("Could not load Recently played.")
+            }
+            recentlyPlayedTracks = container.recentlyPlayed.list(conversationId)
+        }
+    }
     var editing by remember { mutableStateOf<EditState?>(null) }
     var regenPrompt by remember { mutableStateOf<RegenPrompt?>(null) }
     var deleteConfirm by remember { mutableStateOf<MessageEntity?>(null) }
@@ -400,6 +418,7 @@ fun ChatScreen(
                             }
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(text = { Text("Search") }, onClick = { showMenu = false; searchOpen = true })
+                                DropdownMenuItem(text = { Text("Recently played") }, onClick = { showMenu = false; showRecentlyPlayed = true })
                                 DropdownMenuItem(text = { Text("Context window") }, onClick = { showMenu = false; showMemory = true })
                                 DropdownMenuItem(text = { Text("Preview request") }, onClick = { showMenu = false; onOpenInspector() })
                                 DropdownMenuItem(text = { Text("Log") }, onClick = { showMenu = false; onOpenRequestLog() })
@@ -412,6 +431,9 @@ fun ChatScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // Thanh mini-player (kế hoạch media player, Đợt 3): đầu vùng nội
+            // dung chat, ngay dưới top bar; chỉ hiện khi đang có nhạc.
+            MediaMiniPlayerHost(container)
             val showBanner = remember(toolPrefs) { container.registry.hasEnabledWorkspaceTools() } && !workspaceOk
             if (showBanner) {
                 Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
@@ -430,6 +452,25 @@ fun ChatScreen(
                     title = "Folder name conflict",
                     message = "A folder named $name already exists in your AI playground. Please choose a folder with a different name.",
                     onDismiss = { conflictName = null },
+                )
+            }
+            // "Recently played" (menu ⋮, dưới Search): bấm một bài để phát
+            // lại; lỗi (file đã xóa, video không còn, bài VIP) thì báo bằng
+            // snackbar, không phát bài khác thay thế.
+            if (showRecentlyPlayed) {
+                RecentlyPlayedDialog(
+                    tracks = recentlyPlayedTracks,
+                    onDismiss = { showRecentlyPlayed = false },
+                    onReplay = { track ->
+                        showRecentlyPlayed = false
+                        scope.launch {
+                            try {
+                                MediaTools.replayPlayedTrack(container, conversationId, track)
+                            } catch (e: Exception) {
+                                snackbar.showSnackbar(e.message ?: "Could not play this track.")
+                            }
+                        }
+                    },
                 )
             }
             // Đợt fix 11/11/2026 (C2): chưa chọn data storage thì không có chỗ

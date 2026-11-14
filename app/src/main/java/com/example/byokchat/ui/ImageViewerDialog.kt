@@ -35,13 +35,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
-import java.io.File
 
 /** Xem ảnh toàn màn hình: vuốt để chuyển ảnh (khi chưa phóng), 2 ngón để phóng 1x–4x, kéo khi đang phóng. */
 @Composable
-fun ImageViewerDialog(paths: List<String>, startIndex: Int, onDismiss: () -> Unit) {
-    if (paths.isEmpty()) return
-    val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, paths.size - 1), pageCount = { paths.size })
+fun ImageViewerDialog(models: List<Any>, startIndex: Int, onDismiss: () -> Unit) {
+    if (models.isEmpty()) return
+    val pagerState = rememberPagerState(initialPage = startIndex.coerceIn(0, models.size - 1), pageCount = { models.size })
     var zoomed by remember { mutableStateOf(false) }
     Dialog(
         onDismissRequest = onDismiss,
@@ -49,7 +48,7 @@ fun ImageViewerDialog(paths: List<String>, startIndex: Int, onDismiss: () -> Uni
     ) {
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             HorizontalPager(state = pagerState, userScrollEnabled = !zoomed, modifier = Modifier.fillMaxSize()) { page ->
-                ZoomableImage(path = paths[page], onZoomChange = { zoomed = it })
+                ZoomableImage(model = models[page], onZoomChange = { zoomed = it })
             }
             IconButton(
                 onClick = onDismiss,
@@ -62,7 +61,7 @@ fun ImageViewerDialog(paths: List<String>, startIndex: Int, onDismiss: () -> Uni
 }
 
 @Composable
-private fun ZoomableImage(path: String, onZoomChange: (Boolean) -> Unit) {
+private fun ZoomableImage(model: Any, onZoomChange: (Boolean) -> Unit) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
     var size by remember { mutableStateOf(IntSize.Zero) }
@@ -98,7 +97,7 @@ private fun ZoomableImage(path: String, onZoomChange: (Boolean) -> Unit) {
             },
     ) {
         AsyncImage(
-            model = File(path),
+            model = model,
             contentDescription = "Image",
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize().graphicsLayer {
