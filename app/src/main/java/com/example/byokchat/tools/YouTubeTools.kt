@@ -47,9 +47,9 @@ object YouTubeTools {
     fun build(): List<Tool> = listOf(
         youtubeTool(
             "youtube_search", ToolGroup.MEDIA, Risk.READ, "youtube_search",
-            "Search YouTube by keyword, or get the details of a YouTube link the user sent, via the official YouTube Data API. Use it when the user wants something without naming a specific video, for example \"a cheerful song by singer Nguyen Van A\", or when the user sends a YouTube link, or when the user asks to check a channel or play the newest video in a channel. Each result already has everything needed to choose: link, video ID, title, channel name, description, duration, view count, like count, comment count. Return at most 50 results per page, default 20. Fetch more only if the user asks for more, using page_token. To list videos in a channel, pass its channel_id with type video and order date. No other tool is needed to get the details of a video you already found. Do not search again when you already have search results.",
+            "Search YouTube by keyword, or get the details of a YouTube link the user sent, via the official YouTube Data API. Use it when the user wants something without naming a specific video, for example \"a cheerful song by singer Nguyen Van A\", or when the user sends a YouTube link, or when the user asks to check a channel or play the newest video in a channel. Each result already has everything needed to choose: link, video ID, title, channel name, description, duration, view count, like count, comment count. Return at most 50 results per page, default 20. Fetch more only if the user asks for more, using page_token. If the user sends a channel or playlist link, that link alone is enough — pass it as q and nothing else. To list videos in a channel, pass its channel_id with type video and order date and no q. No other tool is needed to get the details of a video you already found. Do not search again when you already have search results.",
             schema {
-                str("q", "Search keywords, or a full YouTube link (video, playlist or channel).", required = true)
+                str("q", "Search keywords, or a full YouTube link (video, playlist or channel). Not needed when channel_id is given.")
                 str("type", "video, channel, playlist, or several joined with commas. Default: all three.")
                 str("channel_id", "Only search videos in this channel (from a previous channel search).")
                 int("max_results", "Results per page, 1-50, default 20. Fetch more only if the user asks for more.")
@@ -57,10 +57,10 @@ object YouTubeTools {
                 str("page_token", "Next page token from a previous search, only when the user asks for more.")
             },
             isAvailable = { it.settings.youtubeApiKey.value.isNotBlank() },
-            preview = { _, a -> "Search YouTube: ${a.reqStr("q")}" },
+            preview = { _, a -> "Search YouTube: ${a.str("q")?.takeIf { it.isNotBlank() } ?: a.str("channel_id")?.let { "channel $it" } ?: ""}" },
         ) { env, a ->
             val api = requireApi(env)
-            val q = a.reqStr("q").trim()
+            val q = a.str("q")?.trim().orEmpty()
             val max = (a.int("max_results") ?: 20).coerceIn(1, 50)
             val order = a.str("order") ?: "relevance"
             val pageToken = a.str("page_token")
@@ -84,8 +84,14 @@ object YouTubeTools {
                     channelResults(api, channel.channelId, max, pageToken)
                 }
                 is YouTubeLink.Unknown -> {
-                    val results = api.search(q, a.str("type"), a.str("channel_id"), max, order, pageToken)
-                    if (results.items.isEmpty()) "No results for '$q'." else formatSearchResults(results)
+                    val channelId = a.str("channel_id")
+                    if (q.isBlank() && channelId.isNullOrBlank()) {
+                        throw ToolException("Give search keywords, a YouTube link, or a channel_id to list a channel's videos.")
+                    }
+                    val results = api.search(q, a.str("type"), channelId, max, order, pageToken)
+                    if (results.items.isEmpty()) {
+                        if (q.isBlank()) "No videos found in this channel." else "No results for '$q'."
+                    } else formatSearchResults(results)
                 }
             }
         },

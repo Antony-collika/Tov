@@ -1,8 +1,14 @@
 package com.example.byokchat.youtube
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -10,6 +16,46 @@ import org.junit.Test
 class YouTubeApiTest {
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /** Fake client that records request URLs and answers every call with an empty search result. */
+    private fun capturingClient(captured: MutableList<String>): OkHttpClient =
+        OkHttpClient.Builder().addInterceptor { chain ->
+            captured += chain.request().url.toString()
+            val body = """{"items":[]}""".toResponseBody("application/json".toMediaType())
+            okhttp3.Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK")
+                .body(body)
+                .build()
+        }.build()
+
+    @Test
+    fun searchSendsOrderEvenWithEmptyQForChannelListing() = runBlocking {
+        val urls = mutableListOf<String>()
+        val api = YouTubeApi("key", capturingClient(urls))
+        val results = api.search(q = "", channelId = "UCx", order = "date")
+        assertTrue(results.items.isEmpty())
+        // One search.list call, no enrichment calls (no items).
+        assertEquals(1, urls.size)
+        val url = urls[0]
+        // order=date used to ride on the q parameter, so a channel listing
+        // (empty q) silently lost it and came back in relevance order.
+        assertTrue(url.contains("order=date"))
+        assertTrue(url.contains("channelId=UCx"))
+        assertTrue(url.contains("type=video"))
+        assertFalse(url.contains("q="))
+    }
+
+    @Test
+    fun searchSendsQAndOrderForKeywordSearch() = runBlocking {
+        val urls = mutableListOf<String>()
+        val api = YouTubeApi("key", capturingClient(urls))
+        api.search(q = "cheerful song", order = "relevance")
+        assertEquals(1, urls.size)
+        assertTrue(urls[0].contains("q=cheerful"))
+        assertTrue(urls[0].contains("order=relevance"))
+    }
 
     @Test
     fun parseVideosListReadsStatisticsAndDuration() {

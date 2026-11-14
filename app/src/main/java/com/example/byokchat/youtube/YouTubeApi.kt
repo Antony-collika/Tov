@@ -337,8 +337,11 @@ class YouTubeApi(
             .addQueryParameter("part", "snippet")
             .addQueryParameter("maxResults", maxResults.coerceIn(1, 50).toString())
         // q may be empty when listing a channel's videos (channelId only).
+        // order is always sent: it used to ride on the q call, so a channel
+        // listing (empty q) silently lost order=date and came back in
+        // relevance order instead of newest-first.
         if (q.isNotBlank()) url.addQueryParameter("q", q)
-            .addQueryParameter("order", order)
+        url.addQueryParameter("order", order)
         if (!channelId.isNullOrBlank()) {
             // The API only allows channelId together with type=video.
             url.addQueryParameter("type", "video")

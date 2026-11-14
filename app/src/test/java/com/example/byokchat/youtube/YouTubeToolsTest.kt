@@ -41,7 +41,12 @@ class YouTubeToolsTest {
         // The locked description does not name itself; it documents channel
         // listing via channel_id instead (draft FINAL, byte-identical).
         assertTrue(search.defaultDescription.contains("channel_id"))
-        assertTrue(search.schema["required"]?.let { (it as JsonArray).map { e -> (e as JsonPrimitive).content } }?.contains("q") == true)
+        // q is optional since the channel-listing fix (2026-11-14): listing
+        // a channel's videos needs only channel_id, and a channel/playlist
+        // link alone is enough — so q must NOT be required any more.
+        assertFalse(search.schema["required"]?.let { (it as JsonArray).map { e -> (e as JsonPrimitive).content } }?.contains("q") == true)
+        assertTrue(search.defaultDescription.contains("that link alone is enough"))
+        assertTrue(search.defaultDescription.contains("and no q"))
         val comments = tools[1]
         assertTrue(comments.defaultDescription.contains("Default 20 threads"))
         val download = tools[2]
