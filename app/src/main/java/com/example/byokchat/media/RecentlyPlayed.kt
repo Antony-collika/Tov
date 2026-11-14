@@ -24,13 +24,13 @@ package com.example.byokchat.media
  *   ghi đều lưu xuống DB trước khi trả về.
  */
 enum class PlayedSource {
-    LOCAL, YOUTUBE, SOUNDCLOUD,
+    LOCAL, YOUTUBE,
 }
 
 /** Một bài đã phát: đủ thông tin để phát lại mà không cần link stream cũ. */
 data class PlayedTrack(
     val source: PlayedSource,
-    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube), link track (SoundCloud). */
+    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube). */
     val key: String,
     val name: String,
 )

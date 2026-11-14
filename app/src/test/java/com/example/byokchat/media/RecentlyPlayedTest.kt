@@ -40,7 +40,7 @@ class RecentlyPlayedTest {
         store.record("conv", track("song-a"))
         assertEquals(listOf("song-a"), store.list("conv").map { it.name })
         // Cùng tên nhưng khác nguồn/khóa thì không phải trùng: ghi thêm.
-        store.record("conv", track("song-a", PlayedSource.SOUNDCLOUD, "other-key"))
+        store.record("conv", track("song-a", PlayedSource.YOUTUBE, "other-key"))
         assertEquals(2, store.list("conv").size)
     }
 

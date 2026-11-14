@@ -133,9 +133,9 @@ data class TodoEntity(
 data class RecentlyPlayedEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val conversationId: String,
-    /** Tên enum PlayedSource (LOCAL / YOUTUBE / SOUNDCLOUD). */
+    /** Tên enum PlayedSource (LOCAL / YOUTUBE). */
     val source: String,
-    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube), link track (SoundCloud). */
+    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube). */
     val replayKey: String,
     val name: String,
     /** Vị trí trong danh sách: 0 = mới nhất. */
