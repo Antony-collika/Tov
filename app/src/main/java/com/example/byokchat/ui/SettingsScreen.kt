@@ -96,8 +96,17 @@ fun SettingsScreen(
             )
             SettingsCard(
                 title = "Web search",
-                summary = (if (searchProvider == "TAVILY") "Tavily" else "Brave Search") +
-                    if (searchKey.isBlank()) " · No API key — web search is not offered" else " · API key saved" +
+                summary = (when (searchProvider) {
+                    "TAVILY" -> "Tavily"
+                    "DUCKDUCKGO" -> "DuckDuckGo"
+                    "SERPER" -> "Serper"
+                    else -> "Brave Search"
+                }) +
+                    when {
+                        searchProvider == "DUCKDUCKGO" -> " · No API key needed"
+                        searchKey.isBlank() -> " · No API key — web search is not offered"
+                        else -> " · API key saved"
+                    } +
                     if (youtubeKey.isBlank()) " · No YouTube key" else " · YouTube key saved",
                 onClick = onWebSearch,
             )

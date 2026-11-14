@@ -140,17 +140,42 @@ class SettingsRepository(context: Context) {
     val searchProvider: StateFlow<String> = _searchProvider.asStateFlow()
 
     fun setSearchProvider(p: String) {
-        _searchProvider.value = p
-        plain.edit().putString("search_provider", p).apply()
+        ensureSecureLoaded() // không ghi đè key cũ khi chưa đọc xong
+        val old = _searchProvider.value
+        if (old != p) {
+            // Cất key của engine cũ vào ngăn của nó, rồi lấy key của engine
+            // mới ra — ô Key trên màn hình đổi theo engine đang chọn.
+            if (old in searchKeys) {
+                searchKeys[old] = _searchKey.value
+                secure.edit().putString("search_key_${old.lowercase()}", _searchKey.value).apply()
+            }
+            _searchProvider.value = p
+            plain.edit().putString("search_provider", p).apply()
+            _searchKey.value = searchKeys[p] ?: ""
+        }
     }
+
+    /**
+     * API key tìm kiếm web, MỖI ENGINE MỘT KEY (2026-11-14): Brave, Tavily
+     * và Serper là ba dịch vụ khác nhau nên không dùng chung một key được
+     * (key Tavily gửi sang Serper sẽ lỗi). DuckDuckGo không cần key.
+     * `_searchKey` / [searchApiKey] luôn là key của engine ĐANG CHỌN nên
+     * mọi chỗ đọc cũ (web_search, tóm tắt Settings) không phải đổi.
+     */
+    private val searchKeys = mutableMapOf<String, String>()
 
     private val _searchKey = MutableStateFlow("")
     val searchApiKey: StateFlow<String> = _searchKey.asStateFlow()
 
     fun setSearchApiKey(k: String) {
         ensureSecureLoaded() // không ghi đè khi chưa đọc xong
-        _searchKey.value = k
-        secure.edit().putString("search_key", k).apply()
+        val provider = _searchProvider.value
+        if (provider in searchKeys) {
+            searchKeys[provider] = k
+            secure.edit().putString("search_key_${provider.lowercase()}", k).apply()
+            _searchKey.value = k
+        }
+        // DuckDuckGo không có ngăn key: ô nhập bị ẩn nên không gọi tới đây.
     }
 
     /**
@@ -344,7 +369,22 @@ class SettingsRepository(context: Context) {
     private fun ensureSecureLoaded() {
         if (_ready.value) return
         _providers.value = migrateIncludeUsage(loadProviders())
-        _searchKey.value = secure.getString("search_key", "") ?: ""
+        // Key tìm kiếm web theo từng engine (2026-11-14): key cũ dùng chung
+        // "search_key" chuyển một lần vào ngăn của engine đang chọn (key đó
+        // nhập lúc đang dùng engine này), rồi xóa key cũ.
+        val legacyKey = secure.getString("search_key", "") ?: ""
+        for (engine in listOf("BRAVE", "TAVILY", "SERPER")) {
+            searchKeys[engine] = secure.getString("search_key_${engine.lowercase()}", "") ?: ""
+        }
+        if (legacyKey.isNotBlank() && searchKeys.values.all { it.isBlank() }) {
+            val current = _searchProvider.value
+            if (current in searchKeys) {
+                searchKeys[current] = legacyKey
+                secure.edit().putString("search_key_${current.lowercase()}", legacyKey).apply()
+            }
+        }
+        if (secure.contains("search_key")) secure.edit().remove("search_key").apply()
+        _searchKey.value = searchKeys[_searchProvider.value] ?: ""
         _youtubeKey.value = secure.getString("youtube_key", "") ?: ""
         // Đợt bỏ provider 12/11/2026 (xem loadProviders): danh sách đã
         // migrate thì ghi đè xuống kho; lựa chọn model toàn cục / provider
