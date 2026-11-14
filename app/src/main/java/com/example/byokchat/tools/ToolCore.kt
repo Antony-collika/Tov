@@ -23,6 +23,8 @@ class ToolEnv(
     val db: AppDatabase,
     val settings: SettingsRepository,
     val permissions: PermissionBroker,
+    /** Live progress of running tool calls, shown in the chat card (see ToolProgress). */
+    val progress: ToolProgressBroker = ToolProgressBroker(),
 )
 
 class Tool(

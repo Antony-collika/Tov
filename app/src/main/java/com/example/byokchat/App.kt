@@ -21,6 +21,7 @@ import com.example.byokchat.tools.ConfirmationBroker
 import com.example.byokchat.tools.PermissionBroker
 import com.example.byokchat.tools.ToolEnv
 import com.example.byokchat.tools.ToolPrefs
+import com.example.byokchat.tools.ToolProgressBroker
 import com.example.byokchat.tools.ToolRegistry
 import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.CoroutineScope
@@ -81,8 +82,10 @@ class AppContainer(val context: Context) {
     val fs = WorkspaceFs(context, settings)
     val permissions = PermissionBroker(context)
     val confirmations = ConfirmationBroker()
+    /** Live progress of running tool calls (download %, shown in the tool card). */
+    val toolProgress = ToolProgressBroker()
     val toolPrefs = ToolPrefs(context)
-    private val env = ToolEnv(context, fs, db, settings, permissions)
+    private val env = ToolEnv(context, fs, db, settings, permissions, toolProgress)
     val registry = ToolRegistry(env, toolPrefs, confirmations)
     /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
     val media = MediaPlayback(context)

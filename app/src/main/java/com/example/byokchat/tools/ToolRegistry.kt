@@ -247,7 +247,10 @@ class ToolRegistry(
         return try {
             ToolOutcome(
                 tool.uid,
-                withContext(Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job])) { tool.run(env, args) }.cap(),
+                withContext(
+                    Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job]) +
+                        ToolProgressScope(call.id),
+                ) { tool.run(env, args) }.cap(),
                 false,
             )
         } catch (e: CancellationException) {
@@ -256,6 +259,9 @@ class ToolRegistry(
             ToolOutcome(tool.uid, e.message ?: "Unknown error.", true)
         } catch (e: Exception) {
             ToolOutcome(tool.uid, ModelFacingText.toolError(e.message ?: e.javaClass.simpleName), true)
+        } finally {
+            // The call ended: its progress must not linger on the card.
+            env.progress.clear(call.id)
         }
     }
 }
