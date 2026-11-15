@@ -6,6 +6,7 @@ import com.example.byokchat.tools.ToolMode
 import com.example.byokchat.tools.ToolsMdParser
 import com.example.byokchat.tools.WeatherTools
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,7 +31,10 @@ class WeatherToolsTest {
     fun schemaRequiresPlaceAndDescriptionNamesNoKey() {
         val tool = WeatherTools.build()[0]
         assertTrue(tool.defaultDescription.contains("no API key"))
-        assertTrue(tool.defaultDescription.contains("lat,lon"))
+        // Coordinates are documented on the place parameter now
+        // (descriptions are neutral technical wording since 2026-11-15).
+        val props = tool.schema["properties"] as JsonObject
+        assertTrue(((props["place"] as JsonObject)["description"] as JsonPrimitive).content.contains("lat,lon"))
         assertTrue(tool.defaultDescription.contains("at most 7"))
         val required = (tool.schema["required"] as JsonArray).map { (it as JsonPrimitive).content }
         assertEquals(listOf("place"), required)

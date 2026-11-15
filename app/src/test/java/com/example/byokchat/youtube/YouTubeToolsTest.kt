@@ -38,25 +38,23 @@ class YouTubeToolsTest {
         val tools = YouTubeTools.build()
         val search = tools[0]
         assertTrue(search.defaultDescription.contains("default 20"))
-        // The locked description does not name itself; it documents channel
-        // listing via channel_id instead (draft FINAL, byte-identical).
-        assertTrue(search.defaultDescription.contains("channel_id"))
-        // q is optional since the channel-listing fix (2026-11-14): listing
-        // a channel's videos needs only channel_id, and a channel/playlist
-        // link alone is enough — so q must NOT be required any more.
+        // Channel listing lives in the parameter descriptions now
+        // (descriptions are neutral technical wording since 2026-11-15, no
+        // instructions): q is not needed when channel_id is given, and a
+        // channel/playlist link alone is enough — so q must NOT be required
+        // any more.
+        val searchProps = search.schema["properties"] as JsonObject
+        assertTrue(((searchProps["q"] as JsonObject)["description"] as JsonPrimitive).content.contains("Not needed when channel_id is given"))
+        assertTrue(((searchProps["channel_id"] as JsonObject)["description"] as JsonPrimitive).content.contains("Only search videos in this channel"))
         assertFalse(search.schema["required"]?.let { (it as JsonArray).map { e -> (e as JsonPrimitive).content } }?.contains("q") == true)
-        assertTrue(search.defaultDescription.contains("that link alone is enough"))
-        assertTrue(search.defaultDescription.contains("and no q"))
+        assertTrue(search.defaultDescription.contains("from a YouTube link"))
         val comments = tools[1]
         assertTrue(comments.defaultDescription.contains("Default 20 threads"))
         val download = tools[2]
-        assertTrue(download.defaultDescription.contains("youtube.media.play"))
-        assertTrue(download.defaultDescription.contains("ask the user"))
-        // Transcript fix (2026-11-14): the app lists tracks first and picks
-        // one itself; the AI must read the returned file, not re-call with
-        // another language, and txt is the default format.
-        assertTrue(download.defaultDescription.contains("lists the available subtitle tracks first"))
-        assertTrue(download.defaultDescription.contains("do not call again with a different language"))
+        // Transcript (2026-11-14): the app lists tracks and picks one
+        // itself, and txt is the default format. The "do not re-call with
+        // another language" guidance is instructions now, not description.
+        assertTrue(download.defaultDescription.contains("lists the available subtitle tracks and picks one by itself"))
         assertTrue(download.defaultDescription.contains("plain text (txt) by default"))
         val kind = (download.schema["properties"] as JsonObject)["kind"] as JsonObject
         val kinds = (kind["enum"] as JsonArray).map { (it as JsonPrimitive).content }
