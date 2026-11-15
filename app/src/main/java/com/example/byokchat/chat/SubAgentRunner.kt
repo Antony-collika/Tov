@@ -145,6 +145,9 @@ class SubAgentRunner(
         // still stops the sub), cancelled alone by stopSub.
         val subJob = Job(parent = currentCoroutineContext()[Job])
         subJobs.update { it + (conversationId to subJob) }
+        // A stop pressed while no sub was running leaves a stale flag; a
+        // later Main stop must not be mistaken for a per-sub stop.
+        stopRequested.remove(conversationId)
         try {
             // The sub greets the user when called in (scripted by Main; the
             // agent's default when Main passes none).
