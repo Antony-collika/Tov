@@ -450,4 +450,21 @@ class RequestAssemblerTest {
         val out = assembleLayout(layout, rows)
         assertEquals(listOf("q", "boom", "next"), out.sentMessages.map { it.text })
     }
+
+    @Test
+    fun subAgentMessageReachesMainWithSenderNamePrefix() {
+        val out = RequestAssembler.assemble(
+            systemPrompt = "Be helpful",
+            rows = listOf(
+                row("u1", "t1", 1, "user", "Find something."),
+                row("a1", "t1", 2, "assistant", "Done — found 5 sources.").copy(sender = "research"),
+            ),
+            toolDefs = emptyList(),
+            budget = 100_000,
+            nameForUid = ::noRename,
+        )
+        val sent = out.sentMessages
+        assertEquals(Role.ASSISTANT, sent.last().role)
+        assertEquals("[Research] Done — found 5 sources.", sent.last().text)
+    }
 }

@@ -162,4 +162,26 @@ class HistoryMdParserTest {
         assertEquals(101L, meta.messages.getValue("m1").createdAt)
         assertEquals(200L, meta.messages.getValue("m2").createdAt)
     }
+
+    @Test
+    fun parsesAssistantHeadingWithSenderName() {
+        val md = """
+            ---
+            session: 591577e3
+            title: "Hi"
+            created: 2026-11-10T17:26:12Z
+            ---
+
+            ## T1 user
+            {"id":"11111111-1111-1111-1111-111111111111"}
+            Hi
+
+            ## T1 assistant (Research)
+            {"id":"22222222-2222-2222-2222-222222222222"}
+            Looking into it.
+        """.trimIndent()
+        val parsed = HistoryMdParser.parseMd(md)
+        assertEquals(null, parsed.messages[0].sender)
+        assertEquals("Research", parsed.messages[1].sender)
+    }
 }

@@ -3,6 +3,7 @@ package com.example.byokchat.chat
 import com.example.byokchat.ai.AiEvent
 import com.example.byokchat.ai.AiMessage
 import com.example.byokchat.ai.AiRequest
+import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.ai.Role
@@ -78,11 +79,12 @@ class SubAgentRunner(
         var status = SubRunStatus.DONE
         var error: String? = null
         var finalText = ""
+        var cancelled = false
         _activeSubs.update { it + (conversationId to ActiveSubRun(agent.id, agent.name, brief, startedAt)) }
-        // The sub greets the user when called in (scripted by Main; the
-        // agent's default when Main passes none).
-        writeSubMessage(conversationId, turnId, turnNo, agent, greeting ?: agent.defaultGreeting)
         try {
+            // The sub greets the user when called in (scripted by Main; the
+            // agent's default when Main passes none).
+            writeSubMessage(conversationId, turnId, turnNo, agent, greeting ?: agent.defaultGreeting)
             val cfg = settings.currentModelProvider()
             val model = settings.currentModel.value.orEmpty()
             if (cfg == null) {
@@ -125,7 +127,7 @@ class SubAgentRunner(
                         sessionId = conversationId, turnNo = turnNo,
                     )
                     val text = StringBuilder()
-                    var calls: List<com.example.byokchat.ai.AiToolCall> = emptyList()
+                    var calls: List<AiToolCall> = emptyList()
                     // Thought signature / reasoning of this round (same
                     // handling as the main engine): kept on the assistant
                     // message so the next round stays valid for Gemini.
@@ -166,19 +168,66 @@ class SubAgentRunner(
                 }
             }
         } catch (e: CancellationException) {
-            // Stop pressed mid-run: record the interruption, then let the
-            // cancellation propagate so Main's turn settles as interrupted.
+            // Stop pressed mid-run: the run is recorded as interrupted, then
+            // the cancellation propagates so Main's turn settles as
+            // interrupted.
+            cancelled = true
             status = SubRunStatus.FAILED
             error = "Interrupted by the user."
-            withContext(NonCancellable) {
-                finish(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls)
-            }
+        } catch (e: Exception) {
+            // A provider/network error must not leave the sub stuck as
+            // "Working" with no report: the run ends as failed, with the
+            // brief telling the user what happened.
+            status = SubRunStatus.FAILED
+            error = e.message ?: e.toString()
+        } finally {
             _activeSubs.update { it - conversationId }
-            throw e
         }
-        val result = finish(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls)
-        _activeSubs.update { it - conversationId }
+        // End the run: brief message + meta record. On cancellation this
+        // must still land, so it runs NonCancellable; a write failure never
+        // hides the original outcome (finishOrFallback always returns a
+        // result).
+        val result = if (cancelled) {
+            withContext(NonCancellable) {
+                finishOrFallback(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls)
+            }
+        } else {
+            finishOrFallback(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls)
+        }
+        if (cancelled) throw CancellationException("Interrupted by the user.")
         return result
+    }
+
+    /**
+     * End a run, best-effort: if writing the brief message or the meta
+     * record fails, still return a result so the caller can report it.
+     */
+    private suspend fun finishOrFallback(
+        agent: SubAgentConfig,
+        brief: String,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        startedAt: Long,
+        status: SubRunStatus,
+        error: String?,
+        finalText: String,
+        rounds: Int,
+        tokensUsed: Int,
+        toolCalls: List<String>,
+    ): SubRunResult {
+        return try {
+            finish(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls)
+        } catch (e: Exception) {
+            SubRunResult(
+                agentId = agent.id, agentName = agent.name,
+                brief = "${agent.name} couldn't finish: ${error ?: "unknown error"}",
+                detailed = "Sub-agent ${agent.name} finished: ${status.name.lowercase()}.",
+                status = status, rounds = rounds, tokensUsed = tokensUsed,
+                toolCalls = toolCalls.toList(), startedAt = startedAt,
+                finishedAt = System.currentTimeMillis(), error = error,
+            )
+        }
     }
 
     /**

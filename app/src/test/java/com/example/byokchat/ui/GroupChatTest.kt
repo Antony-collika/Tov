@@ -9,10 +9,10 @@ class GroupChatTest {
     private fun member(id: String, status: MemberStatus) =
         GroupMember(id = id, name = id, role = "agent", status = status)
 
-    private fun msg(id: String, turnId: String, seq: Long, role: String) =
+    private fun msg(id: String, turnId: String, seq: Long, role: String, sender: String? = null) =
         MessageEntity(
             id = id, conversationId = "c1", turnId = turnId,
-            seq = seq, role = role, text = "x", createdAt = seq,
+            seq = seq, role = role, text = "x", sender = sender, createdAt = seq,
         )
 
     @Test fun headerOnlyOnFirstAssistantMessageOfEachTurn() {
@@ -78,5 +78,26 @@ class GroupChatTest {
         assertEquals("Waiting", memberStatusLabel(MemberStatus.WAITING))
         assertEquals("Done", memberStatusLabel(MemberStatus.DONE))
         assertEquals("Needs you", memberStatusLabel(MemberStatus.NEEDS_INPUT))
+    }
+
+    @Test fun headerSkipsSubAgentMessages() {
+        val rows = listOf(
+            msg("u1", "t1", 1, "user"),
+            msg("a1", "t1", 2, "assistant"),
+            msg("s1", "t1", 3, "assistant", sender = "research"),
+            msg("a2", "t1", 4, "assistant"),
+        )
+        assertEquals(setOf("a1"), firstAssistantMessageIds(rows))
+    }
+
+    @Test fun subAgentMemberUsesConfigForKnownAgent() {
+        val m = subAgentMember("research")
+        assertEquals("research", m.id)
+        assertEquals("Research", m.name)
+    }
+
+    @Test fun subAgentMemberFallsBackToRawSenderForUnknownAgent() {
+        val m = subAgentMember("ghost")
+        assertEquals("ghost", m.name)
     }
 }

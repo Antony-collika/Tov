@@ -178,4 +178,26 @@ class HistoryExporterTest {
         assertTrue(out.contains("## T5 user\n{\"id\":\"m3\"}\nFifth turn"))
         assertTrue(!out.contains("## T1 "))
     }
+
+    @Test
+    fun subAgentMessageHeadingCarriesSenderName() {
+        val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
+        val rows = listOf(
+            msg("m1", "t1", 1, "user", "Find something about X."),
+            msg("m2", "t1", 2, "assistant", "Hi, I'm Research.", { copy(sender = "research") }),
+            msg("m3", "t1", 3, "assistant", "Done — found 5 sources.", { copy(sender = "research") }),
+            msg("m4", "t1", 4, "assistant", "Here is the summary."),
+        )
+        val out = HistoryExporter.renderHistory(conv, rows)
+
+        assertTrue(out.contains("## T1 assistant (Research)\n{\"id\":\"m2\"}\nHi, I'm Research."))
+        assertTrue(out.contains("## T1 assistant (Research)\n{\"id\":\"m3\"}\nDone — found 5 sources."))
+        assertTrue(out.contains("## T1 assistant\n{\"id\":\"m4\"}\nHere is the summary."))
+        // Round-trip: the parser reads the sender name back.
+        val parsed = HistoryMdParser.parseMd(out)
+        assertEquals(null, parsed.messages[0].sender)
+        assertEquals("Research", parsed.messages[1].sender)
+        assertEquals("Research", parsed.messages[2].sender)
+        assertEquals(null, parsed.messages[3].sender)
+    }
 }
