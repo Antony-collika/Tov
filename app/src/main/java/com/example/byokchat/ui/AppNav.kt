@@ -124,6 +124,7 @@ fun AppNav() {
                         onInspector = { nav.navigate("inspector/$id") },
                         onRequestLog = { nav.navigate("request-log?id=$id") },
                         onOpenMessages = { nav.navigate("messages/$id") },
+                        onOpenMembers = { nav.navigate("members/$id") },
                         onPanel = { nav.navigate("panel?id=$id") },
                         onOpenStorage = { nav.navigate("settings-storage") },
                     )
@@ -186,6 +187,12 @@ fun AppNav() {
                     // Back quay về Request panel, không dừng ở màn sửa thẻ
                     // History (như FPilot): pop màn Messages rồi pop card-edit.
                     onBack = { nav.popBackStack(); nav.popBackStack() },
+                )
+            }
+            composable("members/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                MembersScreen(
+                    conversationId = entry.arguments?.getString("id") ?: "",
+                    onBack = { nav.popBackStack() },
                 )
             }
             composable("tools") {
