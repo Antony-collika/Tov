@@ -30,6 +30,14 @@ data class ConversationEntity(
     val parentId: String? = null,
     /** Pinned conversations are listed first. */
     @ColumnInfo(defaultValue = "0") val pinned: Boolean = false,
+    /**
+     * Nhánh history hiện tại của cuộc trò chuyện (fork khi regenerate,
+     * quyết định 15/11/2026): 0 = file gốc history.md, N ≥ 1 = file
+     * history_(NN).md + history.meta_(NN).json. File cũ giữ nguyên bản
+     * cũ thay vì bị ghi đè; mọi đường đọc/ghi đều đi qua nhánh này nên
+     * không bao giờ parse nhầm tên file. Cuộc nhánh mới bắt đầu từ 0.
+     */
+    @ColumnInfo(defaultValue = "0") val historyBranch: Int = 0,
 )
 
 /**

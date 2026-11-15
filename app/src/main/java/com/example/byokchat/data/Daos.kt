@@ -45,6 +45,10 @@ interface ConversationDao {
     @Query("UPDATE conversations SET pinned = :pinned WHERE id = :id")
     suspend fun setPinned(id: String, pinned: Boolean)
 
+    /** Chuyển con trỏ sang nhánh history khác (fork khi regenerate). */
+    @Query("UPDATE conversations SET historyBranch = :branch WHERE id = :id")
+    suspend fun setHistoryBranch(id: String, branch: Int)
+
     @Query("DELETE FROM conversations WHERE id = :id")
     suspend fun delete(id: String)
 }
