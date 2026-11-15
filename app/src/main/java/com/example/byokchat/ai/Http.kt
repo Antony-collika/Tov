@@ -1,5 +1,6 @@
 package com.example.byokchat.ai
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
@@ -18,6 +19,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -89,10 +91,36 @@ fun OkHttpClient.sseFlow(
     }
 }.flowOn(Dispatchers.IO)
 
+/**
+ * Execute an OkHttp call so that cancelling the coroutine also cancels the
+ * call — the same pattern sseFlow uses for the chat stream. The response is
+ * consumed inside [block], so a cancelled read is cut short too. An
+ * IOException caused by cancellation surfaces as CancellationException,
+ * never as a network error, so a Stop press is seen as a stop, not a failure.
+ */
+suspend fun <T> OkHttpClient.executeCancellable(request: Request, block: suspend (Response) -> T): T =
+    withContext(Dispatchers.IO) {
+        val call = newCall(request)
+        val handle = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
+        try {
+            val resp = call.execute()
+            try {
+                block(resp)
+            } finally {
+                resp.close()
+            }
+        } catch (e: IOException) {
+            if (!currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+            throw e
+        } finally {
+            handle?.dispose()
+        }
+    }
+
 /** Gửi một yêu cầu thường (không streaming) và trả về JSON. */
-suspend fun OkHttpClient.getJson(request: Request): JsonElement = withContext(Dispatchers.IO) {
+suspend fun OkHttpClient.getJson(request: Request): JsonElement {
     try {
-        newCall(request).execute().use { resp ->
+        return executeCancellable(request) { resp ->
             val body = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw AiException(errorMessage(resp.code, body))
             Json.parseToJsonElement(body)

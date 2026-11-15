@@ -113,6 +113,35 @@ data class TodoEntity(
     val createdAt: Long,
 )
 
+/**
+ * Một bài trong "Recently played" của một cuộc trò chuyện (2026-11-14):
+ * chỉ lưu nguồn + khóa phát lại + tên hiển thị — KHÔNG BAO GIỜ lưu stream
+ * URL (link YouTube có hạn dùng, phát lại phải resolve lại link mới từ khóa).
+ * `position`: 0 = mới nhất; đọc theo position tăng dần.
+ * Xóa cuộc trò chuyện thì các hàng này xóa theo (CASCADE).
+ */
+@Entity(
+    tableName = "recently_played",
+    foreignKeys = [ForeignKey(
+        entity = ConversationEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["conversationId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("conversationId")],
+)
+data class RecentlyPlayedEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val conversationId: String,
+    /** Tên enum PlayedSource (LOCAL / YOUTUBE). */
+    val source: String,
+    /** Khóa phát lại: đường dẫn playground (local), video ID (YouTube). */
+    val replayKey: String,
+    val name: String,
+    /** Vị trí trong danh sách: 0 = mới nhất. */
+    val position: Int,
+)
+
 private val listSer = ListSerializer(String.serializer())
 
 /** Giải mã danh sách đường dẫn ảnh (dạng JSON) thành List; lỗi thì trả về rỗng. */

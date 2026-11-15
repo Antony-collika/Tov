@@ -10,9 +10,11 @@ import android.util.LruCache
 import android.util.TypedValue
 import android.view.MotionEvent
 import android.widget.TextView
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,14 +24,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import coil.compose.AsyncImage
 import com.example.byokchat.util.TextUtil
 import io.noties.markwon.Markwon
 import io.noties.markwon.ext.latex.JLatexMathPlugin
@@ -363,10 +368,13 @@ fun MarkdownBody(
         return
     }
     val segs = remember(text) { parseMarkdownSegments(text) }
-    if (segs.none { it is MdSegment.Code }) {
+    if (segs.none { it is MdSegment.Code || it is MdSegment.Image }) {
         MarkdownText(text, color, modifier, onLongPress = onLongPress, anchorCoordinates = anchorCoordinates, streaming = streaming)
         return
     }
+    // Ảnh trong tin nhắn: bấm để xem toàn màn hình (dùng chung ImageViewerDialog với ảnh đính kèm).
+    val imageUrls = segs.filterIsInstance<MdSegment.Image>().map { it.url }
+    var viewerIndex by remember { mutableStateOf<Int?>(null) }
     // Chỉ đoạn chữ cuối cùng còn đang được viết; các đoạn trước đã xong.
     val lastText = segs.indexOfLast { it is MdSegment.Text }
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -379,7 +387,19 @@ fun MarkdownBody(
                     streaming = streaming && i == lastText,
                 )
                 is MdSegment.Code -> CodeBlock(seg.language, seg.code)
+                is MdSegment.Image -> {
+                    val idx = segs.take(i).count { it is MdSegment.Image }
+                    AsyncImage(
+                        model = seg.url,
+                        contentDescription = "Image",
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { viewerIndex = idx },
+                    )
+                }
             }
         }
     }
+    viewerIndex?.let { idx -> ImageViewerDialog(imageUrls, idx) { viewerIndex = null } }
 }

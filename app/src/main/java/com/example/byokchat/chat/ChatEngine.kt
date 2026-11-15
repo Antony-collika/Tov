@@ -7,6 +7,7 @@ import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.data.AppDatabase
+import com.example.byokchat.data.MessageDao
 import com.example.byokchat.data.displayTitle
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.ProviderType
@@ -21,11 +22,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -68,6 +72,19 @@ class ChatEngine(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
+    // Serializes Interrupted-marker writes: a Stop press, a superseding
+    // send and the unwinding old job can all write markers for the same
+    // turn at once (see writeInterruptedResults).
+    private val interruptedWriteMutex = Mutex()
+    // The turn a stop abandoned, per conversation: stop() / start() capture
+    // it so the settle targets exactly that turn, even if a new turn starts
+    // right after. Cleared when the turn's job ends (same conditional
+    // remove as jobs).
+    private val turnIds = ConcurrentHashMap<String, String>()
+    // Serializes settles with each other and with the unwind fallback (see
+    // settleTurn): a settle must never interleave with a delete of the same
+    // message. Always acquired before interruptedWriteMutex, never after.
+    private val settleMutex = Mutex()
     private val _active = MutableStateFlow<Set<String>>(emptySet())
     val activeConversations: StateFlow<Set<String>> = _active.asStateFlow()
 
@@ -81,27 +98,72 @@ class ChatEngine(
     private val callsSer = ListSerializer(AiToolCall.serializer())
 
     fun start(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
-        if (jobs[conversationId]?.isActive == true) return
+        // A new turn supersedes the running one (send while generating):
+        // cancel it, but do not wait — the old turn's network calls are
+        // abandoned and its late results are discarded (see run()).
+        // Whoever supersedes also settles the old turn (Interrupted markers,
+        // no lingering spinner): stop() does this when it runs first, and
+        // start() does it when a turn is superseded without a stop (a
+        // regenerate or retry that slipped past its guard). Only the caller
+        // that removes the turn id settles it, so it is never settled twice.
+        val oldTurnId = turnIds.remove(conversationId)
+        jobs[conversationId]?.cancel()
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 run(conversationId, turnId, repair)
             } finally {
                 tools.endTurn(turnId)
-                jobs.remove(conversationId)
-                _active.update { it - conversationId }
+                turnIds.remove(conversationId, turnId)
+                // Only the job that still owns the conversation clears the
+                // active flag; a superseded job must not switch the UI back
+                // to Send while the new turn is still running. (The job is
+                // read from this coroutine's own context: the launch result
+                // cannot be named inside its own initializer.)
+                if (jobs.remove(conversationId, currentCoroutineContext()[Job])) {
+                    _active.update { it - conversationId }
+                }
             }
         }
         jobs[conversationId] = job
+        turnIds[conversationId] = turnId
         _active.update { it + conversationId }
         job.start()
+        if (oldTurnId != null) scope.launch { settleTurn(conversationId, oldTurnId) }
     }
 
+    /** Whether this conversation has a live turn right now. Read directly from the flag — no flow lag, so the guards that decide "is a turn running" (send, regenerate, retry) never act on a stale value. */
+    fun isActive(conversationId: String): Boolean = conversationId in _active.value
+
     fun stop(conversationId: String) {
-        jobs[conversationId]?.cancel()
+        // Courier model: stopping abandons the running turn at once. Drop
+        // it from the map and clear the active flag right now, so the
+        // button flips back to Send immediately — even while the old
+        // turn's network call is still stuck in connect. The cancelled job
+        // unwinds in the background; its late results are discarded (see
+        // the jobs[conversationId] !== myJob guard in run()).
+        //
+        // The turn is also settled right away, in the background: its
+        // pending tool calls get Interrupted markers and its streaming
+        // placeholder is removed (or kept with the partial text), so no
+        // spinner may outlive the Stop press. The settle targets the turn
+        // captured here, never "the latest turn", so a new turn started
+        // right after the stop is never touched by it.
+        val turnId = turnIds.remove(conversationId)
+        jobs.remove(conversationId)?.cancel()
+        _active.update { it - conversationId }
+        if (turnId != null) scope.launch { settleTurn(conversationId, turnId) }
+    }
+
+    /** Wait for any settle launched by a Stop press (or a supersede) to finish. A send right after a stop uses this so the next request is assembled only after the old turn's Interrupted markers are in the database. */
+    suspend fun awaitSettled() {
+        settleMutex.withLock { }
     }
 
     private suspend fun run(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
         val msgDao = db.messages()
+        // The job running this turn: late writes check it, so a turn that
+        // was superseded by a send never writes into the new turn.
+        val myJob = currentCoroutineContext()[Job]
         // Đợt 4: tin assistant và kết quả tool dùng chung số lượt của tin user
         // cùng lượt (đã gán khi gửi). Tạo lại (regenerate) giữ nguyên số cũ.
         val turnNo = msgDao.getTurn(conversationId, turnId)
@@ -267,34 +329,56 @@ class ChatEngine(
             calls = calls.map { it.copy(uid = tools.uidForName(it.name, exposed)) }
 
             withContext(NonCancellable) {
-                // Show the complete text right away, then persist it and drop the in-memory copy.
-                if (text.isNotEmpty()) _live.update { it + (assistantId to text.toString()) }
-                when {
-                    error != null -> msgDao.upsert(base.copy(text = text.toString(), status = "error", error = error))
-                    text.isEmpty() && calls.isEmpty() ->
-                        if (cancelled != null) msgDao.deleteById(assistantId)
-                        else msgDao.upsert(base.copy(status = "error", error = "The AI returned no content."))
-                    else -> msgDao.upsert(
-                        base.copy(
-                            text = text.toString(),
-                            toolCallsJson = if (calls.isEmpty()) null else json.encodeToString(callsSer, calls),
-                            thoughtSignature = textSignature,
-                            // Đợt provider 12/11/2026: chỉ gắn hãng khi thật
-                            // sự có suy luận/replay (tin không có suy luận thì
-                            // để null như tin cũ).
-                            reasoningText = reasoning.toString().takeIf { it.isNotBlank() },
-                            reasoningReplay = replayJson,
-                            reasoningProvider = if (reasoning.isNotBlank() || replayJson != null) reasoningProvider else null,
-                            status = "done",
+                // A stopped or superseded turn was already settled by
+                // settleTurn when the user pressed Stop (or sent the next
+                // message): its answer must not be written again here, or
+                // the deleted placeholder would come back as an error
+                // bubble. Only the job that still owns the conversation
+                // persists its answer.
+                if (jobs[conversationId] === myJob) {
+                    // Show the complete text right away, then persist it and drop the in-memory copy.
+                    if (text.isNotEmpty()) _live.update { it + (assistantId to text.toString()) }
+                    when {
+                        error != null -> msgDao.upsert(base.copy(text = text.toString(), status = "error", error = error))
+                        text.isEmpty() && calls.isEmpty() ->
+                            if (cancelled != null) msgDao.deleteById(assistantId)
+                            else msgDao.upsert(base.copy(status = "error", error = "The AI returned no content."))
+                        else -> msgDao.upsert(
+                            base.copy(
+                                text = text.toString(),
+                                toolCallsJson = if (calls.isEmpty()) null else json.encodeToString(callsSer, calls),
+                                thoughtSignature = textSignature,
+                                // Đợt provider 12/11/2026: chỉ gắn hãng khi thật
+                                // sự có suy luận/replay (tin không có suy luận thì
+                                // để null như tin cũ).
+                                reasoningText = reasoning.toString().takeIf { it.isNotBlank() },
+                                reasoningReplay = replayJson,
+                                reasoningProvider = if (reasoning.isNotBlank() || replayJson != null) reasoningProvider else null,
+                                status = "done",
+                            )
                         )
-                    )
+                    }
+                } else if (text.isEmpty() && calls.isEmpty()) {
+                    // The settle was missed or is still running (Stop pressed
+                    // a moment ago): never resurrect anything here, but do
+                    // not leave a bare streaming placeholder spinning
+                    // forever either — drop it if it is still streaming.
+                    // Serialized with settleTurn so a settle that is about
+                    // to keep this message cannot be undone by this delete.
+                    settleMutex.withLock {
+                        val cur = msgDao.getAll(conversationId).firstOrNull { it.id == assistantId }
+                        if (cur?.status == "streaming" && cur.text.isBlank()) msgDao.deleteById(assistantId)
+                    }
                 }
                 db.conversations().touch(conversationId, System.currentTimeMillis())
                 _live.update { it - assistantId }
             }
             cancelled?.let { throw it }
             if (error != null || calls.isEmpty()) {
-                notifyFinished(conversationId, displayTitle(conv.title), success = error == null && text.isNotEmpty(), answer = text.toString())
+                // No "finished" notification for a turn the user stopped or
+                // superseded — only the job that still owns the conversation
+                // reports its finish.
+                if (jobs[conversationId] === myJob) notifyFinished(conversationId, displayTitle(conv.title), success = error == null && text.isNotEmpty(), answer = text.toString())
                 // Ghi file ở nền (Đợt fix 12/11/2026 — nút gửi): trả quyền cho
                 // user ngay, không chờ ghi history.md xong mới tắt nút gửi.
                 exportHistoryInBackground(conversationId, turnNo)
@@ -321,7 +405,21 @@ class ChatEngine(
                 return
             }
             for (call in calls) {
-                val outcome = tools.execute(call, turnId, exposed)
+                val outcome = try {
+                    tools.execute(call, turnId, exposed, conversationId)
+                } catch (e: CancellationException) {
+                    // The user stopped the turn mid-tool: mark every call of
+                    // this round that has no result yet as Interrupted, so
+                    // the next request stays valid and the model knows it was
+                    // interrupted, not failed. Calls that already have a
+                    // result are left alone.
+                    writeInterruptedResults(msgDao, conversationId, turnId, turnNo, calls, calls.indexOf(call))
+                    throw e
+                }
+                // Superseded by a send while this turn was running: the new
+                // turn owns the conversation now, so this result is dropped
+                // instead of landing in the new turn's history.
+                if (jobs[conversationId] !== myJob) return
                 msgDao.upsert(
                     MessageEntity(
                         id = UUID.randomUUID().toString(),
@@ -339,6 +437,116 @@ class ChatEngine(
                     )
                 )
             }
+        }
+    }
+
+    /**
+     * Write "Interrupted by the user." tool results for the calls of a round
+     * that have none yet (Stop press mid-tool, or a send that superseded the
+     * turn). Skips calls that already have a result, so the marker is never
+     * written twice for one call.
+     *
+     * The check-then-write is serialized: a Stop press, a superseding send
+     * and the unwinding old job can all write markers for the same turn at
+     * once, and without the lock two of them could read the same "existing"
+     * set and write the same marker twice. The write runs NonCancellable
+     * so a cancelled job still lands its markers instead of dropping them.
+     */
+    private suspend fun writeInterruptedResults(
+        msgDao: MessageDao,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        calls: List<AiToolCall>,
+        fromIndex: Int,
+    ) = withContext(NonCancellable) {
+        interruptedWriteMutex.withLock {
+            writeInterruptedResultsLocked(msgDao, conversationId, turnId, turnNo, calls, fromIndex)
+        }
+    }
+
+    private suspend fun writeInterruptedResultsLocked(
+        msgDao: MessageDao,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        calls: List<AiToolCall>,
+        fromIndex: Int,
+    ) {
+        if (calls.isEmpty()) return
+        val existing = msgDao.getAll(conversationId)
+            .filter { it.role == "tool" }
+            .mapNotNull { it.toolCallId }
+            .toSet()
+        for (call in calls.subList(fromIndex.coerceIn(0, calls.size), calls.size)) {
+            if (call.id in existing) continue
+            msgDao.upsert(
+                MessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversationId,
+                    turnId = turnId,
+                    turnNo = turnNo,
+                    seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                    role = "tool",
+                    text = ModelFacingText.INTERRUPTED,
+                    toolCallId = call.id,
+                    toolUid = call.uid,
+                    toolName = call.name,
+                    toolIsError = false,
+                    createdAt = System.currentTimeMillis(),
+                )
+            )
+        }
+    }
+
+    /**
+     * Settle a turn the user stopped (or that a send superseded), right away
+     * instead of waiting for its stuck network call to unwind: pending tool
+     * calls get Interrupted markers, and a streaming placeholder with no
+     * text disappears — or, if text already arrived, it stays as a finished
+     * answer with that partial text. Nothing is shown as an error and no
+     * spinner outlives the Stop press. Targets exactly [turnId], so a new
+     * turn started right after the stop is never touched. Idempotent: safe
+     * to run for a turn that was already settled (or deleted by a
+     * regenerate).
+     */
+    private suspend fun settleTurn(conversationId: String, turnId: String) {
+        settleMutex.withLock {
+            markTurnInterrupted(conversationId, turnId)
+            settleStreamingMessages(conversationId, turnId)
+        }
+    }
+
+    /** Interrupted markers for one turn's tool calls that have no result yet. Does nothing when the turn called no tools, or when every call already has a result. */
+    private suspend fun markTurnInterrupted(conversationId: String, turnId: String) {
+        val msgDao = db.messages()
+        val turnRows = msgDao.getAll(conversationId).filter { it.turnId == turnId }
+        val turnNo = turnRows.firstOrNull { it.role == "assistant" }?.turnNo ?: return
+        val calls = turnRows.filter { it.role == "assistant" }.flatMap { m ->
+            runCatching { json.decodeFromString(callsSer, m.toolCallsJson ?: "[]") }.getOrDefault(emptyList())
+        }
+        writeInterruptedResults(msgDao, conversationId, turnId, turnNo, calls, 0)
+    }
+
+    /**
+     * The streaming placeholder of a stopped turn: gone when nothing arrived
+     * yet, kept as a finished answer with the partial text otherwise. The
+     * in-memory live text is dropped either way — the database now holds the
+     * final state, so the message stops being a spinner and starts being
+     * its content (or nothing at all).
+     */
+    private suspend fun settleStreamingMessages(conversationId: String, turnId: String) {
+        val msgDao = db.messages()
+        val live = _live.value
+        for (m in msgDao.getAll(conversationId).filter { it.turnId == turnId && it.role == "assistant" && it.status == "streaming" }) {
+            val text = live[m.id]?.takeIf { it.isNotBlank() } ?: m.text
+            val calls = runCatching { json.decodeFromString(callsSer, m.toolCallsJson ?: "[]") }.getOrDefault(emptyList())
+            if (text.isBlank() && calls.isEmpty()) {
+                msgDao.deleteById(m.id)
+            } else {
+                msgDao.upsert(m.copy(text = text, status = "done"))
+            }
+            _live.update { it - m.id }
         }
     }
 

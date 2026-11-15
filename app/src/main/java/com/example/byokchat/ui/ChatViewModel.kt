@@ -254,10 +254,20 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     fun send() {
         val text = draft.trim()
         val images = pendingImages.toList()
-        if ((text.isEmpty() && images.isEmpty()) || generating.value) return
+        if (text.isEmpty() && images.isEmpty()) return
         draft = ""
         pendingImages.clear()
         viewModelScope.launch {
+            if (app.engine.isActive(conversationId)) {
+                // One tap while a turn is running: stop it and send the new
+                // message right away — do not wait for the old turn's
+                // network calls to finish; their late results are discarded.
+                // The stop settles the old turn (Interrupted markers, no
+                // lingering spinner); wait for that settle so the new
+                // request is assembled with the markers already in place.
+                app.engine.stop(conversationId)
+                app.engine.awaitSettled()
+            }
             val turnId = UUID.randomUUID().toString()
             // Đợt 4: số lượt ổn định — lượt mới lấy (số lớn nhất hiện có + 1),
             // chỉ tăng không giảm nên số của lượt đã xóa không dùng lại.
@@ -285,7 +295,11 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         }
     }
 
-    fun stop() = app.engine.stop(conversationId)
+    fun stop() {
+        // The engine settles the stopped turn itself (Interrupted markers,
+        // no lingering spinner), in the background.
+        app.engine.stop(conversationId)
+    }
 
     // ---------- Cài đặt cuộc trò chuyện ----------
 
@@ -352,7 +366,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Edit message: chỉ lưu nội dung đã sửa, từ lần gửi sau dùng nội dung đó. */
     fun saveEdit(messageId: String, text: String) {
-        if (generating.value) return
+        if (app.engine.isActive(conversationId)) return
         viewModelScope.launch {
             app.ops.editMessage(messageId, text)
             app.engine.exportHistory(conversationId)
@@ -361,7 +375,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Delete: xóa cả lượt (cặp hỏi-đáp), có thể Hoàn tác. */
     fun deleteTurn(turnId: String) {
-        if (generating.value) return
+        if (app.engine.isActive(conversationId)) return
         viewModelScope.launch {
             val backup = app.ops.deleteTurn(conversationId, turnId)
             app.engine.exportHistory(conversationId)
@@ -380,7 +394,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Tạo lại ngay trong cuộc hiện tại (các lượt phía sau, nếu có, bị xóa). */
     fun regenerateHere(turnId: String, newUserText: String?) {
-        if (generating.value) return
+        if (app.engine.isActive(conversationId)) return
         viewModelScope.launch {
             // Đợt E: xung đột khi regenerate — file đổi ngoài app thì giữ bản
             // sửa ngoài, hủy việc tạo lại, báo lỗi.
@@ -395,7 +409,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Tạo lại ở cuộc mới; cuộc gốc giữ nguyên. */
     fun regenerateInBranch(turnId: String, newUserText: String?) {
-        if (generating.value) return
+        if (app.engine.isActive(conversationId)) return
         viewModelScope.launch {
             // Đợt E: xung đột khi regenerate — như regenerateHere.
             if (app.historySync?.hasExternalChange(conversationId) == true) {
@@ -427,7 +441,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
      * lỗi thì lượt được ghi nhớ để bong bóng lỗi thêm nút mở cuộc mới.
      */
     fun retryTurn(turnId: String, repair: RepairMode = RepairMode.NONE) {
-        if (generating.value) return
+        if (app.engine.isActive(conversationId)) return
         viewModelScope.launch {
             // Lượt lỗi mà còn lượt mới hơn phía sau thì không Retry thẳng
             // (sẽ xóa các lượt đó): bảo user dùng Regenerate trong menu —
@@ -449,7 +463,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     /** Branch: tạo cuộc mới, sao chép từ đầu đến tin nhắn được chọn. */
     fun branchAt(messageId: String) {
-        if (generating.value) return
+        if (app.engine.isActive(conversationId)) return
         viewModelScope.launch {
             try {
                 val r = app.ops.branchAt(conversationId, messageId)

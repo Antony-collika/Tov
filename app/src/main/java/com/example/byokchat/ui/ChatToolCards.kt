@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.AiToolCall
+import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.container
 import com.example.byokchat.data.MessageEntity
 import kotlinx.serialization.builtins.ListSerializer
@@ -55,6 +57,7 @@ data class ToolResults(val byCallId: Map<String, MessageEntity>)
 internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boolean) {
     val container = LocalContext.current.container
     val pending by container.confirmations.pending.collectAsState()
+    val progressMap by container.toolProgress.progress.collectAsState()
     val calls = remember(m.toolCallsJson) {
         runCatching { Json.decodeFromString(callsSer, m.toolCallsJson ?: "[]") }.getOrDefault(emptyList())
     }
@@ -65,6 +68,10 @@ internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boole
         val summary = remember(c.uid, c.argsJson, toolName) { toolSummary(c.uid, toolName, c.argsJson) }
         val waiting = res == null && generating && pending.any { it.uid == c.uid }
         val running = res == null && generating && !waiting
+        // The user stopped the turn while this call was running (or before
+        // it ran): the result says so, and the card must say so too — never
+        // "No result" and never "Failed or denied".
+        val interrupted = res != null && res.text == ModelFacingText.INTERRUPTED
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(12.dp),
@@ -75,15 +82,20 @@ internal fun ToolCards(m: MessageEntity, results: ToolResults, generating: Boole
                     when {
                         running || waiting -> CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         res == null -> Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                        interrupted -> Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                         res.toolIsError -> Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                         else -> Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     }
                     Column(Modifier.padding(start = 8.dp).weight(1f)) {
                         Text(summary, style = MaterialTheme.typography.labelLarge, maxLines = if (expanded) Int.MAX_VALUE else 2, overflow = TextOverflow.Ellipsis)
+                        // A running download reports live progress: "Running. Progress 42%".
+                        // No total (chunked / no Content-Length) -> downloaded size instead, never a made-up %.
+                        val progress = if (running) progressMap[c.id] else null
                         val (label, color) = when {
                             waiting -> "Waiting for your approval\u2026" to MaterialTheme.colorScheme.tertiary
-                            running -> "Running\u2026" to MaterialTheme.colorScheme.onSurfaceVariant
+                            running -> (progress?.label() ?: "Running\u2026") to MaterialTheme.colorScheme.onSurfaceVariant
                             res == null -> "No result" to MaterialTheme.colorScheme.onSurfaceVariant
+                            interrupted -> "Interrupted" to MaterialTheme.colorScheme.onSurfaceVariant
                             res.toolIsError -> "Failed or denied" to MaterialTheme.colorScheme.error
                             else -> "Done" to MaterialTheme.colorScheme.primary
                         }

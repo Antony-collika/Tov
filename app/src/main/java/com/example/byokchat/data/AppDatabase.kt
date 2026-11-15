@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class],
-    version = 7,
+    entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class, RecentlyPlayedEntity::class],
+    version = 8,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -17,6 +17,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messages(): MessageDao
     abstract fun notes(): NoteDao
     abstract fun todos(): TodoDao
+    abstract fun recentlyPlayed(): RecentlyPlayedDao
 
     companion object {
         /** v1 -> v2: branch parent and pinned flag on conversations (existing data is kept). */
@@ -80,9 +81,35 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v7 -> v8 (2026-11-14): bảng `recently_played` — "Recently played"
+         * lưu vào DB để không mất khi app bị kill (trước đây chỉ giữ trong
+         * bộ nhớ của phiên chạy). Không có dữ liệu cũ để chuyển (chưa từng lưu).
+         * Xóa cuộc trò chuyện thì các hàng này xóa theo (CASCADE).
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `recently_played` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`conversationId` TEXT NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`replayKey` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`position` INTEGER NOT NULL, " +
+                        "FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_recently_played_conversationId` " +
+                        "ON `recently_played` (`conversationId`)",
+                )
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "byokchat.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 // Không còn fallbackToDestructiveMigration(): từ v5 trở đi mọi
                 // thay đổi cấu trúc đều phải có migration thật (quy tắc kế hoạch
                 // Glassbox, mục 6 Đợt E). v2 -> v3 (bỏ systemPrompt) và v3 -> v4

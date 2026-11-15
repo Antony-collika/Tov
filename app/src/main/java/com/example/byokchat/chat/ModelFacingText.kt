@@ -13,6 +13,9 @@ object ModelFacingText {
     /** Kết quả tool khi user từ chối cho chạy (ToolRegistry.execute, mode ASK). */
     const val DENIED_ACTION = "The user denied this action. Do not try again unless they ask you to."
 
+    /** Kết quả tool khi user bấm Dừng (hoặc gửi lượt mới) giữa lúc tool đang chạy (ChatEngine). Không phải lỗi: model chỉ cần biết là user ngắt, để làm tiếp theo câu mới của user. */
+    const val INTERRUPTED = "Interrupted by the user."
+
     /** Ghi chú khi kết quả tool bị cắt ngắn (cap, tối đa 30 000 ký tự). */
     fun truncatedNote(moreChars: Int): String = "\n…[truncated, $moreChars more characters]"
 
@@ -64,4 +67,26 @@ object ModelFacingText {
     /** Kết quả tool cũ trong lịch sử đã rút gọn thành một dòng (thẻ History, Đợt C). */
     fun compactedToolResult(toolName: String, chars: Int, turn: Int): String =
         "[Shortened result: $toolName, $chars characters, turn T$turn. Call the tool again for the full result.]"
+
+    // ---------- Tool local.media.play / youtube.media.play (kế hoạch media player, Đợt 1) ----------
+    // Các câu này viết bằng tiếng Việt theo đúng kế hoạch: AI đọc rồi báo
+    // lại cho user bằng tiếng Việt (user nói tiếng Việt với AI).
+    /** Tool phát nhạc: câu trả về cho AI khi bắt đầu phát batch. */
+    fun mediaPlaying(name: String, duration: String, next: List<String>): String =
+        "Đang phát: $name ($duration)" + if (next.isEmpty()) "" else ", tiếp theo: ${next.joinToString(", ")}"
+
+    /** Tool phát nhạc: không xin được audio focus (âm thanh đang bận). */
+    fun mediaFocusBusy(): String = "Không phát được nhạc lúc này vì âm thanh đang bận."
+
+    /** Tool phát nhạc: không mở được file nhạc. */
+    fun mediaPlayFailed(name: String): String = "Không phát được file '$name'."
+
+    /** Tool phát nhạc local: không có đường dẫn nào. */
+    const val MEDIA_NEED_PATHS = "Cần ít nhất một đường dẫn file nhạc."
+
+    /** Tool phát nhạc local: không tìm thấy file. */
+    fun mediaNotFound(path: String): String = "Không tìm thấy file '$path'."
+
+    /** Tool phát nhạc local: đường dẫn là thư mục. */
+    fun mediaIsFolder(path: String): String = "'$path' là thư mục, không phải file nhạc."
 }

@@ -129,6 +129,7 @@ class ChatNotifier(private val context: Context) {
 
         const val CHANNEL_ANSWERS = "answers"
         const val CHANNEL_RUNNING = "running"
+        const val CHANNEL_MEDIA = "media"
         const val EXTRA_CONVERSATION_ID = "conversationId"
 
         /** Tạo hai kênh thông báo (an toàn khi gọi nhiều lần). minSdk = 26 nên luôn có kênh. */
@@ -144,6 +145,11 @@ class ChatNotifier(private val context: Context) {
             )
             nm.createNotificationChannel(
                 NotificationChannel(CHANNEL_CONFIRM, "Permission requests", NotificationManager.IMPORTANCE_HIGH)
+            )
+            nm.createNotificationChannel(
+                NotificationChannel(CHANNEL_MEDIA, "Music", NotificationManager.IMPORTANCE_LOW).apply {
+                    setSound(null, null)
+                }
             )
         }
     }

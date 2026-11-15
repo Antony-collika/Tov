@@ -121,4 +121,60 @@ class MarkdownSegmentsTest {
         val src = "dong 1\n\ndong 3 co ** dam **"
         assertEquals(listOf(MdSegment.Text(src)), parseMarkdownSegments(src))
     }
+
+    @Test
+    fun bareImageUrlBecomesImageSegmentAfterText() {
+        val url = "https://images.dog.ceo/breeds/pekinese/n02086079_6620.jpg"
+        val src = "Kết quả ảnh cún:\n○ $url"
+        assertEquals(
+            listOf(MdSegment.Text(src), MdSegment.Image(url)),
+            parseMarkdownSegments(src),
+        )
+    }
+
+    @Test
+    fun markdownImageSyntaxBecomesImageSegment() {
+        val r = parseMarkdownSegments("Xem này: ![cún](https://x.com/dog.png) nhé")
+        assertEquals(
+            listOf(
+                MdSegment.Text("Xem này: "),
+                MdSegment.Image("https://x.com/dog.png"),
+                MdSegment.Text(" nhé"),
+            ),
+            r,
+        )
+    }
+
+    @Test
+    fun imageUrlInCodeBlockStaysCode() {
+        val r = parseMarkdownSegments("$f\nhttps://x.com/a.jpg\n$f")
+        assertEquals(listOf(MdSegment.Code("", "https://x.com/a.jpg", true)), r)
+    }
+
+    @Test
+    fun imageUrlInInlineCodeStaysText() {
+        val src = "dùng `https://x.com/a.jpg` nhé"
+        assertEquals(listOf(MdSegment.Text(src)), parseMarkdownSegments(src))
+    }
+
+    @Test
+    fun normalLinkToImageStaysText() {
+        val src = "xem [ảnh này](https://x.com/a.jpg) nhé"
+        assertEquals(listOf(MdSegment.Text(src)), parseMarkdownSegments(src))
+    }
+
+    @Test
+    fun nonImageBareUrlStaysText() {
+        val src = "xem https://dog.ceo/api/breeds/image/random nhé"
+        assertEquals(listOf(MdSegment.Text(src)), parseMarkdownSegments(src))
+    }
+
+    @Test
+    fun imageUrlWithQueryParams() {
+        val url = "https://x.com/a.png?size=large"
+        assertEquals(
+            listOf(MdSegment.Text("ảnh: $url"), MdSegment.Image(url)),
+            parseMarkdownSegments("ảnh: $url"),
+        )
+    }
 }

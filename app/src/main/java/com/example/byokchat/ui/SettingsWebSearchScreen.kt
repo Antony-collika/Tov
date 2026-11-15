@@ -39,8 +39,13 @@ import com.example.byokchat.container
 fun SettingsWebSearchScreen(onBack: () -> Unit) {
     val settings = LocalContext.current.container.settings
     val searchProvider by settings.searchProvider.collectAsState()
-    var searchKey by remember { mutableStateOf(settings.searchApiKey.value) }
+    // Ô Key đọc thẳng từ flow key của engine đang chọn (không giữ bản sao
+    // local): đổi engine là ô đổi theo — key Tavily không còn hiện khi
+    // đang ở DuckDuckGo hay Serper nữa.
+    val searchKey by settings.searchApiKey.collectAsState()
     var showKey by remember { mutableStateOf(false) }
+    var youtubeKey by remember { mutableStateOf(settings.youtubeApiKey.value) }
+    var showYoutubeKey by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -57,7 +62,7 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
         ) {
             Text("Search engine (for the web_search tool)")
-            val engines = listOf("BRAVE" to "Brave Search", "TAVILY" to "Tavily")
+            val engines = listOf("BRAVE" to "Brave", "TAVILY" to "Tavily", "DUCKDUCKGO" to "DuckGo", "SERPER" to "Serper")
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                 engines.forEachIndexed { index, (id, label) ->
                     SegmentedButton(
@@ -68,14 +73,35 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
                     )
                 }
             }
+            if (searchProvider == "DUCKDUCKGO") {
+                // DuckDuckGo không cần key nên không hiện ô nhập (key của
+                // engine khác không hiện ở đây nữa).
+                Text(
+                    "DuckDuckGo needs no API key — web search works with no key saved.",
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            } else {
+                OutlinedTextField(
+                    value = searchKey,
+                    onValueChange = { settings.setSearchApiKey(it.trim()) },
+                    label = { Text("Your search service API key") },
+                    singleLine = true,
+                    visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
+                    supportingText = { Text("If empty, the web search tool is not offered to the AI (unless DuckDuckGo is selected). The key is encrypted on this device.") },
+                    keyboardOptions = KeyboardOptions.Default,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Text("YouTube Data API v3 key (for the YouTube tools)", modifier = Modifier.padding(top = 16.dp))
             OutlinedTextField(
-                value = searchKey,
-                onValueChange = { searchKey = it; settings.setSearchApiKey(it.trim()) },
-                label = { Text("Your search service API key") },
+                value = youtubeKey,
+                onValueChange = { youtubeKey = it; settings.setYoutubeApiKey(it.trim()) },
+                label = { Text("Your YouTube Data API v3 key") },
                 singleLine = true,
-                visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-                trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
-                supportingText = { Text("If empty, the web search tool is not offered to the AI. The key is encrypted on this device.") },
+                visualTransformation = if (showYoutubeKey) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = { TextButton(onClick = { showYoutubeKey = !showYoutubeKey }) { Text(if (showYoutubeKey) "Hide" else "Show") } },
+                supportingText = { Text("If empty, YouTube search and comments are not offered to the AI. Downloads and audio playback do not need this key. The key is encrypted on this device.") },
                 keyboardOptions = KeyboardOptions.Default,
                 modifier = Modifier.fillMaxWidth(),
             )

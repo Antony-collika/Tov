@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -165,4 +166,24 @@ interface TodoDao {
 
     @Query("DELETE FROM todos WHERE id = :id")
     suspend fun delete(id: String)
+}
+
+/** "Recently played": lịch sử phát lại theo từng cuộc trò chuyện (2026-11-14). */
+@Dao
+interface RecentlyPlayedDao {
+    @Query("SELECT * FROM recently_played WHERE conversationId = :cid ORDER BY position ASC")
+    suspend fun getAll(cid: String): List<RecentlyPlayedEntity>
+
+    @Insert
+    suspend fun insertAll(rows: List<RecentlyPlayedEntity>)
+
+    @Query("DELETE FROM recently_played WHERE conversationId = :cid")
+    suspend fun deleteAll(cid: String)
+
+    /** Ghi đè toàn bộ lịch sử của một cuộc (store đã cắt đúng luật 50 mục). */
+    @Transaction
+    suspend fun replaceAll(cid: String, rows: List<RecentlyPlayedEntity>) {
+        deleteAll(cid)
+        if (rows.isNotEmpty()) insertAll(rows)
+    }
 }

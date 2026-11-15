@@ -156,7 +156,12 @@ internal fun InputBar(
                                 modifier = Modifier.widthIn(max = 260.dp),
                             )
                         }
-                        if (generating) {
+                        // One button, toggling state: while generating with
+                        // nothing typed it is Stop; as soon as there is a
+                        // draft (or images) it becomes Send, and sending
+                        // while generating stops the old turn and sends the
+                        // new message in the same tap.
+                        if (generating && draft.isBlank() && images.isEmpty()) {
                             FilledIconButton(onClick = onStop) {
                                 Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp)))
                             }
@@ -170,5 +175,5 @@ internal fun InputBar(
             }
         }
     }
-    viewerIndex?.let { idx -> ImageViewerDialog(images, idx) { viewerIndex = null } }
+    viewerIndex?.let { idx -> ImageViewerDialog(images.map { File(it) }, idx) { viewerIndex = null } }
 }
