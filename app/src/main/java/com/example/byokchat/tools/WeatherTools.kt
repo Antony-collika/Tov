@@ -19,7 +19,7 @@ object WeatherTools {
             group = ToolGroup.DAILY,
             risk = Risk.READ,
             defaultName = "weather_forecast",
-            defaultDescription = "Get the current weather and a forecast for a place, from Open-Meteo (free, no API key or sign-up needed). Give a place name, e.g. 'Ha Noi' or 'Da Lat', or coordinates as 'lat,lon', e.g. '21.02,105.85'. Returns the current temperature, feels-like temperature, humidity, wind speed and condition, plus one line per day with the high/low temperature, rain probability and condition. Default 3 days, at most 7. If the place name is not found, the tool says so clearly instead of guessing another place.",
+            defaultDescription = "Get the current weather and a forecast for a place, from Open-Meteo (free, no API key or sign-up needed). Returns the current temperature, feels-like temperature, humidity, wind speed and condition, plus one line per day with the high/low temperature, rain probability and condition. Default 3 days, at most 7. If the place name is not found, the tool says so.",
             schema = schema {
                 str("place", "Place name, e.g. 'Ha Noi' or 'Da Lat', or coordinates as 'lat,lon', e.g. '21.02,105.85'.", required = true)
                 int("days", "Forecast days, 1-7, default 3.")

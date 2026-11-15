@@ -441,7 +441,7 @@ object DailyTools {
 
         // ----- Ghi chú nhớ lâu -----
         dailyTool("note.save", Risk.WRITE, "save_note",
-            "Save a long-term note (persists across conversations). Use it for information the user wants you to remember.",
+            "Save a long-term note (persists across conversations).",
             schema {
                 str("title", "Short title.", required = true)
                 str("content", "Note content.", required = true)

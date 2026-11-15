@@ -35,7 +35,7 @@ object MediaTools {
     fun build(): List<Tool> = listOf(
         mediaTool(
             "local.media.play", Risk.READ, "local_media_play",
-            "Play local music files from the AI playground. Give one or more file paths; they play in order, one after another. Playback keeps going in the background, and the chat shows a small player bar (previous / pause / next / time / progress bar / close).",
+            "Play local music files from the AI playground, in order, in the background. The chat shows a small player bar (previous / pause / next / time / progress bar / close).",
             schema { strArray("paths", "Music file paths in the playground, e.g. ['Music/song A.mp3', 'Music/song B.mp3'].", required = true) },
             preview = { _, a ->
                 val paths = a.strList("paths").orEmpty()
@@ -53,7 +53,7 @@ object MediaTools {
 
         mediaTool(
             "youtube.media.play", Risk.READ, "youtube_media_play",
-            "Play the audio of one or more YouTube videos right away, in sequence, in the background, with the mini-player like local.media.play. Audio only, no video. This tool does not search: to play something, search with youtube_search first, choose a video, then call this tool with the video ID or link of the chosen video. Use it when the user asks to play music or listen to a video. To play a local music file in the Playground, use local.media.play, not this tool.",
+            "Play the audio of one or more YouTube videos, in sequence, in the background, with the mini-player. Audio only, no video. It plays the video IDs or links it is given; it does not search.",
             schema { strArray("videos", "Video IDs or full YouTube links, e.g. ['dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=...']. At least one.", required = true) },
             needsWorkspace = false,
             preview = { _, a ->

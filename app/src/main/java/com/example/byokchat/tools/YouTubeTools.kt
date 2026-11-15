@@ -48,14 +48,14 @@ object YouTubeTools {
     fun build(): List<Tool> = listOf(
         youtubeTool(
             "youtube_search", ToolGroup.MEDIA, Risk.READ, "youtube_search",
-            "Search YouTube by keyword, or get the details of a YouTube link the user sent, via the official YouTube Data API. Use it when the user wants something without naming a specific video, for example \"a cheerful song by singer Nguyen Van A\", or when the user sends a YouTube link, or when the user asks to check a channel or play the newest video in a channel. Each result already has everything needed to choose: link, video ID, title, channel name, description, duration, view count, like count, comment count. Return at most 50 results per page, default 20. Fetch more only if the user asks for more, using page_token. If the user sends a channel or playlist link, that link alone is enough — pass it as q and nothing else. To list videos in a channel, pass its channel_id with type video and order date and no q. No other tool is needed to get the details of a video you already found. Do not search again when you already have search results.",
+            "Search YouTube via the official YouTube Data API v3, by keyword or from a YouTube link (video, playlist or channel). Each result has a link, video ID, title, channel name, description, duration, view count, like count and comment count. At most 50 results per page, default 20.",
             schema {
                 str("q", "Search keywords, or a full YouTube link (video, playlist or channel). Not needed when channel_id is given.")
                 str("type", "video, channel, playlist, or several joined with commas. Default: all three.")
-                str("channel_id", "Only search videos in this channel (from a previous channel search).")
-                int("max_results", "Results per page, 1-50, default 20. Fetch more only if the user asks for more.")
+                str("channel_id", "Only search videos in this channel.")
+                int("max_results", "Results per page, 1-50, default 20.")
                 str("order", "relevance (default), date, viewCount, rating, title, videoCount.", enum = listOf("relevance", "date", "viewCount", "rating", "title", "videoCount"))
-                str("page_token", "Next page token from a previous search, only when the user asks for more.")
+                str("page_token", "Next page token from a previous search.")
             },
             isAvailable = { it.settings.youtubeApiKey.value.isNotBlank() },
             preview = { _, a -> "Search YouTube: ${a.str("q")?.takeIf { it.isNotBlank() } ?: a.str("channel_id")?.let { "channel $it" } ?: ""}" },
@@ -99,12 +99,12 @@ object YouTubeTools {
 
         youtubeTool(
             "youtube_comments", ToolGroup.MEDIA, Risk.READ, "youtube_comments",
-            "Read the comments of a YouTube video: author, text, like count, date, with up to 5 replies per thread. Default 20 threads per call, at most 100 per call. Fetch more only if the user asks for more, using page_token. Use it when the user asks what people say about a video. If comments are disabled on the video, the tool will say so clearly, do not invent comments.",
+            "Read the comments of a YouTube video: author, text, like count, date, with up to 5 replies per thread. Default 20 threads per call, at most 100. If comments are disabled on the video, the tool says so.",
             schema {
                 str("video", "Video ID or full YouTube link.", required = true)
-                int("max_results", "Comment threads per call, 1-100, default 20. Fetch more only if the user asks for more.")
+                int("max_results", "Comment threads per call, 1-100, default 20.")
                 str("order", "relevance (best comments, default) or time (newest).", enum = listOf("relevance", "time"))
-                str("page_token", "Next page token from a previous call, only when the user asks for more.")
+                str("page_token", "Next page token from a previous call.")
                 str("search_terms", "Only show comments containing this text.")
             },
             isAvailable = { it.settings.youtubeApiKey.value.isNotBlank() },
@@ -122,13 +122,13 @@ object YouTubeTools {
 
         youtubeTool(
             "youtube_download", ToolGroup.MEDIA, Risk.WRITE, "youtube_download",
-            "Download one file from one YouTube video: audio, video, or transcript, and save it to a path inside the Playground folders the user granted. The path is relative to the virtual root, and its first segment must be a granted folder name, for example \"Nhac/YouTube/\". Download one video at a time. If the target folder is not clear, ask the user which granted folder to use, do not guess. Missing subfolders are created automatically. For a transcript, the app lists the available subtitle tracks first and picks one by itself, in this order: manual in the requested language, auto-generated in the requested language, manual in the original language, auto-generated in the original language, manual in English, manual in Vietnamese, auto-generated in English, auto-generated in Vietnamese, then any manual track, then any auto-generated track. Auto-translated tracks are used only as a last resort. The tool reports which language and type it actually took. Read the returned file first; do not call again with a different language just because the returned language differs from the video language. Transcripts are saved as plain text (txt) by default, without timestamps; pass format srt only when the user asks for timestamps. Use it when the user asks to save a file, for example \"download the audio of this song to Nhac\". Do not use it to listen right away without saving — use youtube.media.play. A path outside the granted folders will be refused, do not save it elsewhere instead.",
+            "Download one file from one YouTube video — audio, video, or transcript — to a path inside the Playground folders the user granted. The path is relative to the virtual root and its first segment must be a granted folder name, for example \"Nhac/YouTube/\". Missing subfolders are created automatically; paths outside the granted folders are refused. For a transcript, the app lists the available subtitle tracks and picks one by itself, and reports which language and type it actually took. Transcripts are plain text (txt) by default, without timestamps; srt keeps timestamps.",
             schema {
                 str("video", "Video ID or full YouTube link.", required = true)
                 str("kind", "audio, video, or transcript.", required = true, enum = listOf("audio", "video", "transcript"))
                 str("path", "Destination in the Playground: a folder (the app names the file) or a full file path. The first segment must be a granted folder name.", required = true)
-                str("language", "Subtitle language for kind=transcript, e.g. vi or en. Only set it when the user names a language; otherwise the tool picks the best available track.")
-                str("format", "Transcript format for kind=transcript: txt (default, plain text without timestamps, for reading and analysis) or srt (with timestamps). Only set it when the user names a format; otherwise txt is used.", enum = listOf("txt", "srt"))
+                str("language", "Subtitle language for kind=transcript, e.g. vi or en. If empty, the tool picks the best available track.")
+                str("format", "Transcript format for kind=transcript: txt (default, plain text without timestamps) or srt (with timestamps).", enum = listOf("txt", "srt"))
                 str("quality", "Video quality, e.g. 720p (default) or best. Audio is always the best quality.")
             },
             needsWorkspace = true,
