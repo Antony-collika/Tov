@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -70,6 +72,10 @@ class ChatEngine(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
+    // Serializes Interrupted-marker writes: a Stop press, a superseding
+    // send and the unwinding old job can all write markers for the same
+    // turn at once (see writeInterruptedResults).
+    private val interruptedWriteMutex = Mutex()
     private val _active = MutableStateFlow<Set<String>>(emptySet())
     val activeConversations: StateFlow<Set<String>> = _active.asStateFlow()
 
@@ -108,7 +114,14 @@ class ChatEngine(
     }
 
     fun stop(conversationId: String) {
-        jobs[conversationId]?.cancel()
+        // Courier model: stopping abandons the running turn at once. Drop
+        // it from the map and clear the active flag right now, so the
+        // button flips back to Send immediately — even while the old
+        // turn's network call is still stuck in connect. The cancelled job
+        // unwinds in the background; its late results are discarded (see
+        // the jobs[conversationId] !== myJob guard in run()).
+        jobs.remove(conversationId)?.cancel()
+        _active.update { it - conversationId }
     }
 
     private suspend fun run(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
@@ -375,8 +388,27 @@ class ChatEngine(
      * that have none yet (Stop press mid-tool, or a send that superseded the
      * turn). Skips calls that already have a result, so the marker is never
      * written twice for one call.
+     *
+     * The check-then-write is serialized: a Stop press, a superseding send
+     * and the unwinding old job can all write markers for the same turn at
+     * once, and without the lock two of them could read the same "existing"
+     * set and write the same marker twice. The write runs NonCancellable
+     * so a cancelled job still lands its markers instead of dropping them.
      */
     private suspend fun writeInterruptedResults(
+        msgDao: MessageDao,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        calls: List<AiToolCall>,
+        fromIndex: Int,
+    ) = withContext(NonCancellable) {
+        interruptedWriteMutex.withLock {
+            writeInterruptedResultsLocked(msgDao, conversationId, turnId, turnNo, calls, fromIndex)
+        }
+    }
+
+    private suspend fun writeInterruptedResultsLocked(
         msgDao: MessageDao,
         conversationId: String,
         turnId: String,

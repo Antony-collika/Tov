@@ -293,7 +293,15 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         }
     }
 
-    fun stop() = app.engine.stop(conversationId)
+    fun stop() {
+        app.engine.stop(conversationId)
+        // Mark the turn Interrupted right away, so the chat shows it even
+        // while the old turn's network call is still unwinding in the
+        // background. The engine writes the same markers when the job
+        // unwinds; both paths skip calls that already have a result, so
+        // the marker is never written twice for one call.
+        viewModelScope.launch { app.engine.markCurrentTurnInterrupted(conversationId) }
+    }
 
     // ---------- Cài đặt cuộc trò chuyện ----------
 
