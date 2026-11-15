@@ -11,12 +11,14 @@ import com.example.byokchat.AppContainer
 import com.example.byokchat.ai.ImageStore
 import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.ProviderFactory
+import com.example.byokchat.chat.ActiveSubRun
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.HistoryExporter
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.chat.RequestAssembler
+import com.example.byokchat.chat.SubAgentTeam
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
@@ -162,7 +164,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         app.subRunner.activeSubs,
         app.subRunner.sessionSubTokens,
         app.agentStore.team,
-    ) { conv, msgs, peak, subs, subTokens, team ->
+    ) { conv: ConversationEntity?, msgs: List<MessageEntity>, peak: Int, subs: Map<String, ActiveSubRun>, subTokens: Map<String, Int>, team: SubAgentTeam ->
         if (conv == null) null else buildSessionInfo(
             conversationId = conv.id,
             startedAt = conv.createdAt,

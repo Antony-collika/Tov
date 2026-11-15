@@ -73,7 +73,7 @@ class SubAgentStore(private val file: File) {
     private fun writeFile(team: SubAgentTeam) {
         file.parentFile?.mkdirs()
         val tmp = File(file.parentFile, "${file.name}.tmp")
-        tmp.writeText(json.encodeToString(team))
+        tmp.writeText(json.encodeToString(SubAgentTeam.serializer(), team))
         if (!tmp.renameTo(file)) {
             file.writeText(tmp.readText())
             tmp.delete()

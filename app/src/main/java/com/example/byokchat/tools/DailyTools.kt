@@ -46,7 +46,7 @@ fun dailyTool(
     isAvailable: (ToolEnv) -> Boolean = { true },
     preview: (suspend (ToolEnv, JsonObject) -> String)? = null,
     run: suspend (ToolEnv, JsonObject) -> String,
-) = Tool(uid, ToolGroup.DAILY, risk, name, description, schema, false, unavailableHint, isAvailable, preview, run)
+) = Tool(uid, ToolGroup.DAILY, risk, name, description, schema, false, unavailableHint, isAvailable, preview, null, run)
 
 // ---------- Máy tính ----------
 private class Calc(private val s: String) {

@@ -30,7 +30,7 @@ fun youtubeTool(
     isAvailable: (ToolEnv) -> Boolean = { true },
     preview: (suspend (ToolEnv, JsonObject) -> String)? = null,
     run: suspend (ToolEnv, JsonObject) -> String,
-) = Tool(uid, group, risk, name, description, schema, needsWorkspace, null, isAvailable, preview, run)
+) = Tool(uid, group, risk, name, description, schema, needsWorkspace, null, isAvailable, preview, null, run)
 
 /**
  * YouTube tools (2026-11-13, FINAL design). Four new tools only:
