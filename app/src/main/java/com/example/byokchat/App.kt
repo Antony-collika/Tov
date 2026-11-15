@@ -90,8 +90,6 @@ class AppContainer(val context: Context) {
     val toolPrefs = ToolPrefs(context)
     private val env = ToolEnv(context, fs, db, settings, permissions, toolProgress)
     val registry = ToolRegistry(env, toolPrefs, confirmations)
-    /** Sub-agent runner (Phase 2): runs a sub synchronously inside Main's turn; the delegate tool calls it through the registry. */
-    val subRunner = SubAgentRunner(settings, db, registry, fs, requestLog)
     /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
     val media = MediaPlayback(context)
     /** Những bài AI đã phát trong từng cuộc trò chuyện ("Recently played", menu ⋮): lưu vào DB (bảng recently_played) nên không mất khi app bị kill; store giữ một bản sao trong bộ nhớ để UI đọc ngay. */
@@ -101,6 +99,8 @@ class AppContainer(val context: Context) {
     val layoutStore = RequestLayoutStore(context, settings)
     /** Nhật ký request/response (Đợt B): ghi ra file trong bộ nhớ riêng của app. */
     val requestLog = RequestLog(java.io.File(context.filesDir, "request-log"), enabled = { settings.requestLogEnabled.value })
+    /** Sub-agent runner (Phase 2): runs a sub synchronously inside Main's turn; the delegate tool calls it through the registry. Declared after requestLog because it takes requestLog as a constructor argument. */
+    val subRunner = SubAgentRunner(settings, db, registry, fs, requestLog)
     /** Đồng bộ hai chiều history.md (Đợt E): hash + parse khi mở chat + ghi ra ngay khi sửa trong app. */
     val historySync = HistorySync(context, db, fs)
     val engine = ChatEngine(db, settings, registry, notifier, requestLog, layoutStore, fs, historySync)
