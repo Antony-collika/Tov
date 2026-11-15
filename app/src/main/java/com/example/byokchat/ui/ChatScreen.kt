@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
@@ -416,6 +417,10 @@ fun ChatScreen(
                         IconButton(onClick = onOpenDrawer) { Icon(Icons.Default.Menu, contentDescription = "Conversations") }
                     },
                     actions = {
+                        // Group chat (Phase 1 fix): the members strip is gone
+                        // (it wasted space when the mini-player shows); this
+                        // group icon opens the Members screen instead.
+                        IconButton(onClick = onOpenMembers) { Icon(Icons.Default.Group, contentDescription = "Members") }
                         // Đợt fix 11/11/2026 (H2): Request panel và New chat
                         // thành nút trên thanh trên cùng (thứ tự: panel – new
                         // chat – menu); Search chuyển vào trong menu.
@@ -441,29 +446,6 @@ fun ChatScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            // Group chat members strip (Phase 1): avatars with status dots
-            // under the top bar; tap it to open the Members screen.
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenMembers() }
-                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                members.forEach { member ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        MemberAvatar(member, size = 24.dp)
-                        Text(member.name, style = MaterialTheme.typography.labelMedium)
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    "${members.size} members",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             // Thanh mini-player (kế hoạch media player, Đợt 3): đầu vùng nội
             // dung chat, ngay dưới top bar; chỉ hiện khi đang có nhạc.
             MediaMiniPlayerHost(container)
