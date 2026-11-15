@@ -100,6 +100,23 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         app.engine.activeConversations.map { conversationId in it }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    /**
+     * Group chat members (Phase 1: UI shell): every chat starts with 2
+     * members — you and Main. Main shows as Working while the engine is
+     * answering this conversation, Available otherwise; sub-agents join this
+     * same list in a later phase.
+     */
+    val members: StateFlow<List<GroupMember>> = generating.map { gen ->
+        listOf(
+            GroupMember(id = "you", name = "You", role = "You", status = MemberStatus.IDLE, isUser = true),
+            GroupMember(
+                id = "main", name = "Main", role = "Main agent",
+                status = if (gen) MemberStatus.WORKING else MemberStatus.IDLE,
+                currentTask = if (gen) "Answering…" else null,
+            ),
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), defaultMembers())
+
     val providers: StateFlow<List<ProviderConfig>> = app.settings.providers
 
     /** Lựa chọn mô hình toàn cục: mọi cuộc trò chuyện đều dùng mô hình này. */
