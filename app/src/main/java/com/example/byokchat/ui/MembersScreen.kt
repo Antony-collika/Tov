@@ -131,17 +131,20 @@ fun MembersScreen(conversationId: String, onBack: () -> Unit) {
  * Stub entry point for an agent's settings (Phase 1): the fields are shown
  * (folder / tools / role, per the group-chat design) but not editable yet —
  * editing arrives with the agent settings screen in a later phase.
+ * Phase 2: a known sub-agent shows its real folder and tools; Main still
+ * shows "—" (its settings live elsewhere).
  */
 @Composable
 private fun AgentSettingsStubDialog(member: GroupMember, onDismiss: () -> Unit) {
+    val agent = com.example.byokchat.chat.SubAgents.byId(member.id)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(member.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Role: ${member.role}", style = MaterialTheme.typography.bodyMedium)
-                Text("Workspace folder: —", style = MaterialTheme.typography.bodyMedium)
-                Text("Tools: —", style = MaterialTheme.typography.bodyMedium)
+                Text("Workspace folder: ${agent?.workspaceFolder ?: "—"}", style = MaterialTheme.typography.bodyMedium)
+                Text("Tools: ${agent?.toolUids?.joinToString(", ") ?: "—"}", style = MaterialTheme.typography.bodyMedium)
                 Text(
                     "Agent settings editing arrives in a later phase.",
                     style = MaterialTheme.typography.bodySmall,

@@ -62,16 +62,28 @@ fun defaultMembers(): List<GroupMember> = listOf(
 /**
  * Ids of the assistant messages that start a turn: the first assistant
  * message of each turn (in chronological order) carries the "Main" sender
- * header; later tool rounds in the same turn do not repeat it. [messages]
+ * header; later tool rounds in the same turn do not repeat it. Messages
+ * sent by a sub-agent (sender != null) never carry Main's header. [messages]
  * is the chat list in chronological order (the same list the screen renders,
  * before it is reversed for display).
  */
 fun firstAssistantMessageIds(messages: List<MessageEntity>): Set<String> {
     val seenTurns = mutableSetOf<String>()
     return messages
-        .filter { it.role == "assistant" && seenTurns.add(it.turnId) }
+        .filter { it.role == "assistant" && it.sender == null && seenTurns.add(it.turnId) }
         .map { it.id }
         .toSet()
+}
+
+/** Display member for a sub-agent message (sender is the agent id stored in Room). Unknown senders fall back to the raw string, so old messages still render. */
+fun subAgentMember(sender: String): GroupMember {
+    val agent = com.example.byokchat.chat.SubAgents.byId(sender)
+        ?: com.example.byokchat.chat.SubAgents.byName(sender)
+    return if (agent != null) {
+        GroupMember(id = agent.id, name = agent.name, role = agent.role, status = MemberStatus.IDLE)
+    } else {
+        GroupMember(id = sender, name = sender, role = "Sub-agent", status = MemberStatus.IDLE)
+    }
 }
 
 /** One section of the Members screen: a title and the members in it. */
@@ -168,21 +180,18 @@ fun MemberAvatar(
     }
 }
 
-/** "Main is typing…" bubble, shown while an agent is working but has no visible message yet. */
+/** "<name> is typing…" bubble, shown while an agent is working but has no visible message yet. */
 @Composable
-fun TypingIndicatorRow(name: String, modifier: Modifier = Modifier) {
+fun TypingIndicatorRow(member: GroupMember, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        MemberAvatar(
-            GroupMember(id = "main", name = name, role = "Main agent", status = MemberStatus.WORKING),
-            size = 28.dp,
-        )
+        MemberAvatar(member.copy(status = MemberStatus.WORKING), size = 28.dp)
         Surface(
             color = MaterialTheme.colorScheme.surfaceVariant,
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.padding(start = 8.dp),
         ) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("$name is typing", style = MaterialTheme.typography.bodyMedium)
+                Text("${member.name} is typing", style = MaterialTheme.typography.bodyMedium)
                 AnimatedDots()
             }
         }

@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -101,13 +102,17 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     /**
-     * Group chat members (Phase 1: UI shell): every chat starts with 2
-     * members — you and Main. Main shows as Working while the engine is
-     * answering this conversation, Available otherwise; sub-agents join this
-     * same list in a later phase.
+     * Group chat members (Phase 2): every chat starts with 2 members — you
+     * and Main. Main shows as Working while the engine is answering this
+     * conversation, Available otherwise; a sub-agent joins this same list
+     * while it runs (Working, with its brief as the current task) and
+     * leaves when its task is done.
      */
-    val members: StateFlow<List<GroupMember>> = generating.map { gen ->
-        listOf(
+    val members: StateFlow<List<GroupMember>> = combine(
+        generating,
+        app.subRunner.activeSubs,
+    ) { gen, subs ->
+        val base = listOf(
             GroupMember(id = "you", name = "You", role = "You", status = MemberStatus.IDLE, isUser = true),
             GroupMember(
                 id = "main", name = "Main", role = "Main agent",
@@ -115,6 +120,15 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 currentTask = if (gen) "Answering…" else null,
             ),
         )
+        val running = subs[conversationId]?.let { sub ->
+            GroupMember(
+                id = sub.agentId, name = sub.name,
+                role = com.example.byokchat.chat.SubAgents.byId(sub.agentId)?.role ?: "Sub-agent",
+                status = MemberStatus.WORKING,
+                currentTask = sub.brief.take(60),
+            )
+        }
+        if (running != null) base + running else base
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), defaultMembers())
 
     val providers: StateFlow<List<ProviderConfig>> = app.settings.providers

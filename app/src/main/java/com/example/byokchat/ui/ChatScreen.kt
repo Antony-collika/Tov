@@ -521,14 +521,18 @@ fun ChatScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    // Typing indicator (Phase 1): Main is working but has no
-                    // visible message yet — before the first streaming row
-                    // appears, or between tool rounds. The streaming row
-                    // itself keeps its own spinner (unchanged).
+                    // Typing indicator (Phase 2): while a sub-agent runs, the
+                    // indicator names the sub ("Research is typing…");
+                    // otherwise Main is working but has no visible message yet
+                    // — before the first streaming row appears, or between tool
+                    // rounds. The streaming row itself keeps its own spinner
+                    // (unchanged).
                     val newest = visible.firstOrNull()
-                    val showTyping = generating && (newest == null || newest.role != "assistant" || newest.status != "streaming")
-                    if (showTyping) {
-                        item { TypingIndicatorRow("Main") }
+                    val runningSub = members.firstOrNull { it.status == MemberStatus.WORKING && it.id != "main" }
+                    val showTyping = generating && (runningSub != null || (newest == null || newest.role != "assistant" || newest.status != "streaming"))
+                    val typingMember = runningSub ?: mainMember
+                    if (showTyping && typingMember != null) {
+                        item { TypingIndicatorRow(typingMember) }
                     }
                     items(visible, key = { it.id }, contentType = { it.role }) { m ->
                         val cur = matches.getOrNull(currentIdx)
@@ -549,16 +553,18 @@ fun ChatScreen(
                         } else {
                             val fix = if (m.status == "error") errorFix(m.error, provider, modelName) else null
                             val help = if (m.status == "error") apiErrorHelp(m.error, provider, metadata.keepThoughtSignature) else null
-                            // Group chat sender header (Phase 1): the first
-                            // assistant message of a turn carries Main's avatar
-                            // and name; later tool rounds in the same turn do
-                            // not repeat it.
+                            // Group chat sender header (Phase 2): a message
+                            // sent by a sub-agent carries that agent's avatar
+                            // and name; Main's messages carry Main's header
+                            // once per turn (first assistant message only).
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                val senderMember = m.sender?.let { subAgentMember(it) }
                                 val mm = mainMember
-                                if (mm != null && m.id in firstAssistantOfTurn) {
+                                val headerMember = senderMember ?: mm?.takeIf { m.id in firstAssistantOfTurn }
+                                if (headerMember != null) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        MemberAvatar(mm, size = 24.dp)
-                                        Text("Main", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        MemberAvatar(headerMember, size = 24.dp)
+                                        Text(headerMember.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                                 AssistantMessage(
