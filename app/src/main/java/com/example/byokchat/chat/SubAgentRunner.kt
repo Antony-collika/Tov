@@ -18,7 +18,9 @@ import com.example.byokchat.tools.WorkspaceFs
 import com.example.byokchat.tools.schema
 import com.example.byokchat.tools.str
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,13 +31,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
-/** A sub-agent run currently in progress in a conversation (members list + typing indicator read this). */
+/** A sub-agent run currently in progress in a conversation (members list + typing indicator read this). Live progress (rounds, tokens) is updated every round, so the Members screen can show whether a run is moving or stuck. */
 data class ActiveSubRun(
     val agentId: String,
     val name: String,
     val brief: String,
     val startedAt: Long,
+    val rounds: Int = 0,
+    val roundCap: Int = SubAgentConfig.DEFAULT_ROUND_CAP,
+    val tokensUsed: Int = 0,
+    val tokenBudget: Int = SubAgentConfig.DEFAULT_TOKEN_BUDGET,
 )
 
 /**
@@ -58,7 +65,10 @@ data class ActiveSubRun(
  *
  * Stop: the run shares Main's turn, so stopping Main stops the sub too
  * (the cancellation propagates through the provider stream); the run is
- * still recorded as interrupted.
+ * still recorded as interrupted. Stopping ONE sub from the Members screen
+ * ([stopSub]) is different: it cancels only that sub's job, the run ends
+ * as INTERRUPTED, and the result returns to Main through the delegate
+ * tool — Main's turn continues.
  */
 class SubAgentRunner(
     private val settings: SettingsRepository,
@@ -81,6 +91,26 @@ class SubAgentRunner(
 
     private val _activeSubs = MutableStateFlow<Map<String, ActiveSubRun>>(emptyMap())
     val activeSubs: StateFlow<Map<String, ActiveSubRun>> = _activeSubs.asStateFlow()
+
+    /** Tokens used by finished sub runs, per conversation — the session token bar on the Members screen. */
+    private val _sessionSubTokens = MutableStateFlow<Map<String, Int>>(emptyMap())
+    val sessionSubTokens: StateFlow<Map<String, Int>> = _sessionSubTokens.asStateFlow()
+
+    /** One job per running sub (Phase 3): a child of Main's turn job, so
+     *  stopping Main still stops the sub, but [stopSub] can cancel the
+     *  sub alone. */
+    private val subJobs = MutableStateFlow<Map<String, Job>>(emptyMap())
+
+    /** Conversations whose sub was stopped from the Members screen (set by [stopSub], read by the run's catch). */
+    private val stopRequested = ConcurrentHashMap.newKeySet<String>()
+
+    /** Stop only this conversation's sub run. Main's turn keeps going: the
+     *  run ends as INTERRUPTED and its result returns through the delegate
+     *  tool. No-op when no sub is running here. */
+    fun stopSub(conversationId: String) {
+        stopRequested.add(conversationId)
+        subJobs.value[conversationId]?.cancel()
+    }
 
     /** Serializes sub_runs.meta.json writes (one file per session; runs are sequential per conversation, but two conversations could write at once). */
     private val metaMutex = Mutex()
@@ -108,7 +138,13 @@ class SubAgentRunner(
         var error: String? = null
         var finalText = ""
         var cancelled = false
-        _activeSubs.update { it + (conversationId to ActiveSubRun(agent.id, agent.name, brief, startedAt)) }
+        _activeSubs.update {
+            it + (conversationId to ActiveSubRun(agent.id, agent.name, brief, startedAt, roundCap = agent.roundCap, tokenBudget = agent.tokenBudget))
+        }
+        // The sub's own job: a child of Main's turn job (stopping Main
+        // still stops the sub), cancelled alone by stopSub.
+        val subJob = Job(parent = currentCoroutineContext()[Job])
+        subJobs.update { it + (conversationId to subJob) }
         try {
             // The sub greets the user when called in (scripted by Main; the
             // agent's default when Main passes none).
@@ -154,13 +190,18 @@ class SubAgentRunner(
                     ProviderType.CUSTOM -> "custom"
                     else -> null
                 }
-                while (true) {
+                // The loop runs under the sub's own job, so stopSub can
+                // cancel it without touching Main's turn. finish() below
+                // runs outside it, in Main's context.
+                withContext(subJob) {
+                    while (true) {
                     // Token budget (rough estimate, like the main engine's
                     // budget): stop before a round that would pass it.
                     val estimate = TokenEstimator.text(system) +
                         subMessages.sumOf { TokenEstimator.message(it) } +
                         toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) }
                     tokensUsed = maxOf(tokensUsed, estimate)
+                    updateActive(conversationId, agent, rounds, tokensUsed)
                     if (estimate > agent.tokenBudget) {
                         status = SubRunStatus.BUDGET_EXCEEDED
                         error = "Stopped: the estimated request ($estimate tokens) passed this agent's token budget (${agent.tokenBudget})."
@@ -200,6 +241,7 @@ class SubAgentRunner(
                         break
                     }
                     rounds++
+                    updateActive(conversationId, agent, rounds, tokensUsed)
                     subMessages += AiMessage(
                         Role.ASSISTANT, text = text.toString(), toolCalls = calls,
                         thoughtSignature = textSignature,
@@ -219,15 +261,25 @@ class SubAgentRunner(
                             toolCallId = call.id, toolName = call.name, isError = outcome.isError,
                         )
                     }
+                    }
                 }
             }
         } catch (e: CancellationException) {
-            // Stop pressed mid-run: the run is recorded as interrupted, then
-            // the cancellation propagates so Main's turn settles as
-            // interrupted.
-            cancelled = true
-            status = SubRunStatus.FAILED
-            error = "Interrupted by the user."
+            if (stopRequested.remove(conversationId)) {
+                // Per-sub stop from the Members screen: the run ends as
+                // interrupted and its result returns to Main through the
+                // delegate tool — Main's turn continues (cancelled stays
+                // false, so nothing is rethrown below).
+                status = SubRunStatus.INTERRUPTED
+                error = "Stopped from the Members screen."
+            } else {
+                // Stop pressed mid-run: the run is recorded as interrupted, then
+                // the cancellation propagates so Main's turn settles as
+                // interrupted.
+                cancelled = true
+                status = SubRunStatus.FAILED
+                error = "Interrupted by the user."
+            }
         } catch (e: Exception) {
             // A provider/network error must not leave the sub stuck as
             // "Working" with no report: the run ends as failed, with the
@@ -236,6 +288,7 @@ class SubAgentRunner(
             error = e.message ?: e.toString()
         } finally {
             _activeSubs.update { it - conversationId }
+            subJobs.update { it - conversationId }
         }
         // End the run: brief message + meta record. On cancellation this
         // must still land, so it runs NonCancellable; a write failure never
@@ -248,8 +301,22 @@ class SubAgentRunner(
         } else {
             finishOrFallback(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser)
         }
+        _sessionSubTokens.update { it + (conversationId to (it[conversationId] ?: 0) + result.tokensUsed) }
         if (cancelled) throw CancellationException("Interrupted by the user.")
         return result
+    }
+
+    /** Refresh the live run shown on the Members screen (rounds, tokens). No-op once the run is gone. */
+    private fun updateActive(
+        conversationId: String,
+        agent: SubAgentConfig,
+        rounds: Int,
+        tokensUsed: Int,
+    ) {
+        _activeSubs.update { current ->
+            val active = current[conversationId] ?: return@update current
+            current + (conversationId to active.copy(rounds = rounds, roundCap = agent.roundCap, tokensUsed = tokensUsed, tokenBudget = agent.tokenBudget))
+        }
     }
 
     /** The send_message tool, offered to every sub: user → chat at once, main → collected for the detailed report. */

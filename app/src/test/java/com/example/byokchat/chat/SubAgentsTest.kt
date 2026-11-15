@@ -63,6 +63,14 @@ class SubAgentsTest {
         assertTrue(team.copy(agents = listOf(defaultResearchAgent().copy(enabled = false))).enabledAgents().isEmpty())
     }
 
+    @Test fun activeSubRunCarriesLiveProgressDefaults() {
+        val run = ActiveSubRun(agentId = "research", name = "Research", brief = "Find X", startedAt = 1000)
+        assertEquals(0, run.rounds)
+        assertEquals(10, run.roundCap)
+        assertEquals(0, run.tokensUsed)
+        assertEquals(32_000, run.tokenBudget)
+    }
+
     @Test fun subRunRecordRoundTripsAsJson() {
         val json = Json { ignoreUnknownKeys = true }
         val record = SubRunRecord(
