@@ -31,6 +31,8 @@ interface ToolRuntime {
     /** Tên model thấy của tool [uid] (tên trong file nếu có, không thì tên gốc). */
     fun nameForUid(uid: String, exposed: List<ParsedTool>? = null): String?
     fun estimateToolTokens(): Int
+    /** Tool definitions for the given uids (default name/description/schema), for a sub-agent's own tool set. Only tools that are available are returned. */
+    fun definitionsForUids(uids: List<String>): List<Pair<String, ToolDef>>
     /** uid -> mô tả gốc của mọi tool, để parse tools.md đối chiếu origin_description. */
     fun originDescriptions(): Map<String, String>
 }

@@ -14,19 +14,21 @@ enum class ToolMode(val label: String) {
 }
 
 enum class ToolGroup(val label: String) {
-    FILES("Files & folders"), TEXT("Text files"), DAILY("Daily tools"), MEDIA("Media")
+    FILES("Files & folders"), TEXT("Text files"), DAILY("Daily tools"), MEDIA("Media"), AGENTS("Agents")
 }
 
 class ToolException(message: String) : Exception(message)
 
 /**
  * Coroutine-context element carrying the conversation a running tool call
- * belongs to. [ToolRegistry.execute] sets it around the tool's run (cùng
- * mẫu với ToolProgressScope); một tool đọc nó để ghi những thứ theo từng
- * cuộc trò chuyện — ví dụ lịch sử "Recently played" — mà không phải đổi
- * chữ ký run của tool. Null ngoài một lần chạy tool.
+ * belongs to, plus the turn it belongs to (the delegate tool needs the turn
+ * so the sub-agent's messages land in Main's turn). [ToolRegistry.execute]
+ * sets it around the tool's run (cùng mẫu với ToolProgressScope); một tool
+ * đọc nó để ghi những thứ theo từng cuộc trò chuyện — ví dụ lịch sử
+ * "Recently played" — mà không phải đổi chữ ký run của tool. Null ngoài
+ * một lần chạy tool.
  */
-class ConversationScope(val conversationId: String) : CoroutineContext.Element {
+class ConversationScope(val conversationId: String, val turnId: String? = null) : CoroutineContext.Element {
     companion object Key : CoroutineContext.Key<ConversationScope>
 
     override val key: CoroutineContext.Key<*> get() = Key
@@ -34,6 +36,9 @@ class ConversationScope(val conversationId: String) : CoroutineContext.Element {
 
 /** Cuộc trò chuyện của tool call đang chạy trong coroutine này, null nếu không có. */
 suspend fun currentConversationId(): String? = currentCoroutineContext()[ConversationScope]?.conversationId
+
+/** Lượt của tool call đang chạy trong coroutine này, null nếu không có. */
+suspend fun currentTurnId(): String? = currentCoroutineContext()[ConversationScope]?.turnId
 
 class ToolEnv(
     val app: Context,

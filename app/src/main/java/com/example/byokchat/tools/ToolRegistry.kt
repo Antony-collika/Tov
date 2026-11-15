@@ -35,7 +35,10 @@ class ToolRegistry(
     private val prefs: ToolPrefs,
     private val confirmations: ConfirmationBroker,
 ) : ToolRuntime {
-    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build()
+    /** Set by AppContainer after the sub-agent runner is built (it needs this registry for the sub's own tools). */
+    var subRunner: com.example.byokchat.chat.SubAgentRunner? = null
+
+    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build { subRunner }
     private val byUid = all.associateBy { it.uid }
 
     fun tool(uid: String): Tool? = byUid[uid]
@@ -126,6 +129,13 @@ class ToolRegistry(
 
     override fun originDescriptions(): Map<String, String> =
         all.associate { it.uid to it.defaultDescription }
+
+    override fun definitionsForUids(uids: List<String>): List<Pair<String, ToolDef>> =
+        uids.mapNotNull { uid ->
+            byUid[uid]?.takeIf { isAvailable(it) }?.let { tool ->
+                uid to ToolDef(tool.defaultName, tool.defaultDescription, tool.schema)
+            }
+        }
 
     override fun estimateToolTokens(): Int =
         all.filter { isAvailable(it) }
@@ -251,7 +261,7 @@ class ToolRegistry(
             val runContext =
                 Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job]) +
                     ToolProgressScope(call.id) +
-                    if (conversationId != null) ConversationScope(conversationId) else EmptyCoroutineContext
+                    if (conversationId != null) ConversationScope(conversationId, turnId) else EmptyCoroutineContext
             ToolOutcome(
                 tool.uid,
                 withContext(runContext) { tool.run(env, args) }.cap(),

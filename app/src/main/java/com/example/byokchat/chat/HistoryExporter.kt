@@ -112,6 +112,9 @@ object HistoryExporter {
 
     fun metaPath(conversation: ConversationEntity): String = "${sessionDir(conversation)}/history.meta.json"
 
+    /** Sub-run journal: sub_runs.meta.json in the session folder (Phase 2) — one JSONL line per sub run, next to history.md/history.meta.json. */
+    fun subRunsPath(conversation: ConversationEntity): String = "${sessionDir(conversation)}/sub_runs.meta.json"
+
     /**
      * Các lượt đã xong, kèm số lượt ổn định (Đợt 4): một lượt chỉ "xong" khi
      * có ít nhất một tin assistant không còn ở trạng thái streaming (tin lỗi
