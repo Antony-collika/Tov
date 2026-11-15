@@ -10,6 +10,7 @@ import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.chat.ChatEngine
 import com.example.byokchat.chat.ChatNotifier
 import com.example.byokchat.chat.HistorySync
+import com.example.byokchat.chat.SubAgentRunner
 import com.example.byokchat.chat.GenerationService
 import com.example.byokchat.chat.ChatOps
 import com.example.byokchat.media.MediaPlayback
@@ -89,6 +90,8 @@ class AppContainer(val context: Context) {
     val toolPrefs = ToolPrefs(context)
     private val env = ToolEnv(context, fs, db, settings, permissions, toolProgress)
     val registry = ToolRegistry(env, toolPrefs, confirmations)
+    /** Sub-agent runner (Phase 2): runs a sub synchronously inside Main's turn; the delegate tool calls it through the registry. */
+    val subRunner = SubAgentRunner(settings, db, registry, fs, requestLog)
     /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
     val media = MediaPlayback(context)
     /** Những bài AI đã phát trong từng cuộc trò chuyện ("Recently played", menu ⋮): lưu vào DB (bảng recently_played) nên không mất khi app bị kill; store giữ một bản sao trong bộ nhớ để UI đọc ngay. */
@@ -114,6 +117,10 @@ class AppContainer(val context: Context) {
     val ops = ChatOps(db)
 
     init {
+        // The delegate tool runs the sub through this runner (the runner
+        // needs the registry for the sub's own tools, so it is set here,
+        // after both are built).
+        registry.subRunner = subRunner
         // A tool is waiting for confirmation: if the app is not on screen, tell the user with a notification.
         confirmations.onRequested = { req -> if (!AppVisibility.inForeground) notifier.notifyConfirmation(req) }
         confirmations.onFinished = { req -> notifier.cancelConfirmation(req.id) }
