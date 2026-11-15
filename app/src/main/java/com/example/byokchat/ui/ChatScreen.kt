@@ -86,6 +86,8 @@ fun ChatScreen(
     onOpenInspector: () -> Unit,
     /** Opens the Messages screen (chat history) for this chat. */
     onOpenMessages: () -> Unit,
+    /** Opens the Members screen (group chat members and status) for this chat. */
+    onOpenMembers: () -> Unit,
     /** Opens the request log. */
     onOpenRequestLog: () -> Unit,
     /** Opens the Request panel for this chat. */
@@ -119,6 +121,9 @@ fun ChatScreen(
     val conv by vm.conversation.collectAsState()
     val messages by vm.messages.collectAsState()
     val generating by vm.generating.collectAsState()
+    // Group chat members (Phase 1): You + Main; Main's status follows `generating`.
+    val members by vm.members.collectAsState()
+    val mainMember = members.firstOrNull { it.id == "main" }
     // Đợt bỏ provider 12/11/2026: các lượt đã Retry một lần mà vẫn lỗi —
     // bong bóng lỗi của lượt đó thêm nút "Start a new chat".
     val retriedTurns by vm.retriedTurns.collectAsState()
@@ -419,6 +424,7 @@ fun ChatScreen(
                             DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                                 DropdownMenuItem(text = { Text("Search") }, onClick = { showMenu = false; searchOpen = true })
                                 DropdownMenuItem(text = { Text("Recently played") }, onClick = { showMenu = false; showRecentlyPlayed = true })
+                                DropdownMenuItem(text = { Text("Members") }, onClick = { showMenu = false; onOpenMembers() })
                                 DropdownMenuItem(text = { Text("Context window") }, onClick = { showMenu = false; showMemory = true })
                                 DropdownMenuItem(text = { Text("Preview request") }, onClick = { showMenu = false; onOpenInspector() })
                                 DropdownMenuItem(text = { Text("Log") }, onClick = { showMenu = false; onOpenRequestLog() })
@@ -431,6 +437,29 @@ fun ChatScreen(
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // Group chat members strip (Phase 1): avatars with status dots
+            // under the top bar; tap it to open the Members screen.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenMembers() }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                members.forEach { member ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        MemberAvatar(member, size = 24.dp)
+                        Text(member.name, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "${members.size} members",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             // Thanh mini-player (kế hoạch media player, Đợt 3): đầu vùng nội
             // dung chat, ngay dưới top bar; chỉ hiện khi đang có nhạc.
             MediaMiniPlayerHost(container)
@@ -506,6 +535,15 @@ fun ChatScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
+                    // Typing indicator (Phase 1): Main is working but has no
+                    // visible message yet — before the first streaming row
+                    // appears, or between tool rounds. The streaming row
+                    // itself keeps its own spinner (unchanged).
+                    val newest = visible.firstOrNull()
+                    val showTyping = generating && (newest == null || newest.role != "assistant" || newest.status != "streaming")
+                    if (showTyping) {
+                        item { TypingIndicatorRow("Main") }
+                    }
                     items(visible, key = { it.id }, contentType = { it.role }) { m ->
                         val cur = matches.getOrNull(currentIdx)
                         val hl = if (searchOpen && query.isNotBlank()) Highlight(query, if (cur?.messageId == m.id) cur.occurrence else -1) else null
@@ -525,7 +563,17 @@ fun ChatScreen(
                         } else {
                             val fix = if (m.status == "error") errorFix(m.error, provider, modelName) else null
                             val help = if (m.status == "error") apiErrorHelp(m.error, provider, metadata.keepThoughtSignature) else null
-                            AssistantMessage(
+                            // Group chat sender header (Phase 1): the AI's
+                            // messages carry Main's avatar and name.
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                val mm = mainMember
+                                if (mm != null) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        MemberAvatar(mm, size = 24.dp)
+                                        Text("Main", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                AssistantMessage(
                                 m, generating, hl, edit, actions, toolResults,
                                 showActions = m.id == lastAnswerId,
                                 errorFix = fix,
@@ -549,7 +597,8 @@ fun ChatScreen(
                                 onEditChange = { t -> editing = editing?.copy(text = t) },
                                 onEditSave = { st -> editing = null; vm.saveEdit(st.messageId, st.text) },
                                 onEditCancel = { editing = null },
-                            )
+                                )
+                            }
                         }
                     }
                 }

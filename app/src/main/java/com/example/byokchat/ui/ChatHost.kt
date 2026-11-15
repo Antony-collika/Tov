@@ -47,6 +47,8 @@ fun ChatHost(
     onPanel: () -> Unit,
     /** Opens the Messages screen (chat history) for this chat. */
     onOpenMessages: () -> Unit,
+    /** Opens the Members screen for this chat (wired by AppNav; no-op until then). */
+    onOpenMembers: () -> Unit = {},
     onOpenStorage: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -125,6 +127,7 @@ fun ChatHost(
                 onNewChat = onNewChat,
                 onOpenInspector = onInspector,
                 onOpenMessages = onOpenMessages,
+                onOpenMembers = onOpenMembers,
                 onOpenRequestLog = onRequestLog,
                 onOpenRequestPanel = onPanel,
                 onOpenStorage = onOpenStorage,
