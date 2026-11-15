@@ -136,7 +136,7 @@ fun MembersScreen(conversationId: String, onBack: () -> Unit) {
  */
 @Composable
 private fun AgentSettingsStubDialog(member: GroupMember, onDismiss: () -> Unit) {
-    val agent = com.example.byokchat.chat.SubAgents.byId(member.id)
+    val agent = com.example.byokchat.chat.SubAgentStore.snapshot.byId(member.id)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(member.name) },

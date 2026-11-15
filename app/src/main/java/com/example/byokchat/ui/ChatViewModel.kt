@@ -123,7 +123,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         val running = subs[conversationId]?.let { sub ->
             GroupMember(
                 id = sub.agentId, name = sub.name,
-                role = com.example.byokchat.chat.SubAgents.byId(sub.agentId)?.role ?: "Sub-agent",
+                role = com.example.byokchat.chat.SubAgentStore.snapshot.byId(sub.agentId)?.role ?: "Sub-agent",
                 status = MemberStatus.WORKING,
                 currentTask = sub.brief.take(60),
             )

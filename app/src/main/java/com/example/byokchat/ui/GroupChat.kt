@@ -77,8 +77,8 @@ fun firstAssistantMessageIds(messages: List<MessageEntity>): Set<String> {
 
 /** Display member for a sub-agent message (sender is the agent id stored in Room). Unknown senders fall back to the raw string, so old messages still render. */
 fun subAgentMember(sender: String): GroupMember {
-    val agent = com.example.byokchat.chat.SubAgents.byId(sender)
-        ?: com.example.byokchat.chat.SubAgents.byName(sender)
+    val agent = com.example.byokchat.chat.SubAgentStore.snapshot.byId(sender)
+        ?: com.example.byokchat.chat.SubAgentStore.snapshot.byName(sender)
     return if (agent != null) {
         GroupMember(id = agent.id, name = agent.name, role = agent.role, status = MemberStatus.IDLE)
     } else {

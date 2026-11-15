@@ -265,7 +265,7 @@ class HistorySync(
                 // Tên người gửi trong heading ("## Tn assistant (Research)")
                 // đổi về id agent để lưu vào Room; tên lạ (sửa tay) thì giữ
                 // nguyên chuỗi đó làm sender (UI vẫn hiện được tên).
-                val senderId = pm.sender?.let { SubAgents.byName(it)?.id ?: it }
+                val senderId = pm.sender?.let { SubAgentStore.snapshot.byName(it)?.id ?: it }
                 val existing = byId[pm.id]
                 if (existing != null) {
                     val newStatus = if (pm.error != null) "error" else "done"

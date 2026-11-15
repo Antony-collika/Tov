@@ -203,7 +203,7 @@ object HistoryExporter {
                     if (m.text.isBlank() && m.error == null && m.toolCallsJson.isNullOrBlank()) continue
                     // Tin của sub-agent (Phase 2): tên người gửi nằm trong
                     // heading, để đọc file là biết ai nói.
-                    val senderSuffix = m.sender?.let { " (${SubAgents.displayName(it)})" }.orEmpty()
+                    val senderSuffix = m.sender?.let { " (${SubAgentStore.snapshot.displayName(it)})" }.orEmpty()
                     appendLine("## T$n assistant$senderSuffix")
                     appendLine("{\"id\":\"${m.id}\"}")
                     if (m.text.isNotBlank()) appendLine(m.text)

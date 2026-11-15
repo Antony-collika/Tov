@@ -11,6 +11,7 @@ import com.example.byokchat.chat.ChatEngine
 import com.example.byokchat.chat.ChatNotifier
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.SubAgentRunner
+import com.example.byokchat.chat.SubAgentStore
 import com.example.byokchat.chat.GenerationService
 import com.example.byokchat.chat.ChatOps
 import com.example.byokchat.media.MediaPlayback
@@ -89,6 +90,8 @@ class AppContainer(val context: Context) {
     val toolProgress = ToolProgressBroker()
     val toolPrefs = ToolPrefs(context)
     private val env = ToolEnv(context, fs, db, settings, permissions, toolProgress)
+    /** Sub-agent team (Phase 3): loaded from agents.json in the app's private files dir, seeded with Research on first launch; the Agent settings screen edits that file. Declared before the registry because the delegate tool is built from the loaded team. */
+    val agentStore = SubAgentStore(java.io.File(context.filesDir, SubAgentStore.FILE_NAME))
     val registry = ToolRegistry(env, toolPrefs, confirmations)
     /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
     val media = MediaPlayback(context)

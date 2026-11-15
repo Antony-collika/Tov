@@ -1,7 +1,7 @@
 package com.example.byokchat.tools
 
 import com.example.byokchat.chat.SubAgentRunner
-import com.example.byokchat.chat.SubAgents
+import com.example.byokchat.chat.SubAgentStore
 import com.example.byokchat.chat.SubRunStatus
 
 /**
@@ -30,7 +30,7 @@ object SubAgentTools {
             },
         ) { _, args ->
             val runner = subRunner() ?: throw ToolException("Sub-agents are not available right now.")
-            val agent = SubAgents.byId(args.reqStr("agent"))
+            val agent = SubAgentStore.snapshot.byId(args.reqStr("agent"))
                 ?: throw ToolException("Unknown sub-agent '${args.reqStr("agent")}'. Available: research.")
             val brief = args.reqStr("brief")
             val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")

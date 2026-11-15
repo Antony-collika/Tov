@@ -137,7 +137,7 @@ object ContextBuilder {
                 // Tin của sub-agent (Phase 2): Main thấy tên người gửi
                 // trong lịch sử ("[Research] ..."), để biết câu này không
                 // phải của mình.
-                val senderName = m.sender?.let { SubAgents.displayName(it) }
+                val senderName = m.sender?.let { SubAgentStore.snapshot.displayName(it) }
                 val text = if (senderName != null && m.text.isNotBlank()) "[$senderName] ${m.text}" else m.text
                 AiMessage(Role.ASSISTANT, text = text, toolCalls = calls, thoughtSignature = m.thoughtSignature,
                     reasoningText = if (reasoningProvider == null) null else m.reasoningText,
