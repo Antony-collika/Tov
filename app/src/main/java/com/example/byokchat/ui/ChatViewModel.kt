@@ -434,6 +434,9 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 return@launch
             }
             app.ops.prepareRegenerateHere(conversationId, turnId, newUserText)
+            // Fork history: bản cũ giữ trong file cũ, bản tạo lại sang file
+            // mới (history_(NN).md). Best-effort — lỗi thì vẫn tạo lại như cũ.
+            app.historySync?.forkHistory(conversationId, turnId)
             app.engine.start(conversationId, turnId)
         }
     }
@@ -488,6 +491,8 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 return@launch
             }
             app.ops.prepareRegenerateHere(conversationId, turnId, null)
+            // Retry cũng là tạo lại tại chỗ: fork như regenerate để giữ bản lỗi cũ.
+            app.historySync?.forkHistory(conversationId, turnId)
             app.engine.start(conversationId, turnId, repair)
         }
     }

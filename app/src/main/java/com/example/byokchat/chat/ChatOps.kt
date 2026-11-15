@@ -58,7 +58,9 @@ class ChatOps(private val db: AppDatabase) {
         val now = System.currentTimeMillis()
         val baseTitle = conv.title.removeSuffix(" (branch)").removeSuffix(" (nhánh)")
         db.conversations().insert(
-            conv.copy(id = newId, title = "$baseTitle (branch)", createdAt = now, updatedAt = now, parentId = conv.id, pinned = false)
+            // Thư mục session mới bắt đầu từ nhánh history 0 (file history.md
+            // gốc) — nhánh của cuộc gốc chỉ có nghĩa trong thư mục của nó.
+            conv.copy(id = newId, title = "$baseTitle (branch)", createdAt = now, updatedAt = now, parentId = conv.id, pinned = false, historyBranch = 0)
         )
         val turnMap = rows.map { it.turnId }.distinct().associateWith { UUID.randomUUID().toString() }
         val copied = rows.map { r ->

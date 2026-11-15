@@ -128,7 +128,14 @@ class ChatEngine(
         turnIds[conversationId] = turnId
         _active.update { it + conversationId }
         job.start()
-        if (oldTurnId != null) scope.launch { settleTurn(conversationId, oldTurnId) }
+        if (oldTurnId != null) scope.launch {
+            settleTurn(conversationId, oldTurnId)
+            // Lượt bị ngắt cũng phải xuất file: trước đây chỉ lượt chạy xong
+            // mới xuất (run() gọi export ở cuối, job bị hủy thì ném lỗi trước
+            // đó) nên file thiếu lượt bị ngắt — vd regenerate rồi gửi lượt
+            // mới ngay thì file giữ bản cũ. Ghi đủ để chắc chắn đúng.
+            exportHistory(conversationId)
+        }
     }
 
     /** Whether this conversation has a live turn right now. Read directly from the flag — no flow lag, so the guards that decide "is a turn running" (send, regenerate, retry) never act on a stale value. */
@@ -151,7 +158,11 @@ class ChatEngine(
         val turnId = turnIds.remove(conversationId)
         jobs.remove(conversationId)?.cancel()
         _active.update { it - conversationId }
-        if (turnId != null) scope.launch { settleTurn(conversationId, turnId) }
+        if (turnId != null) scope.launch {
+            settleTurn(conversationId, turnId)
+            // Như trên: lượt bị dừng cũng xuất file để file khớp Room.
+            exportHistory(conversationId)
+        }
     }
 
     /** Wait for any settle launched by a Stop press (or a supersede) to finish. A send right after a stop uses this so the next request is assembled only after the old turn's Interrupted markers are in the database. */

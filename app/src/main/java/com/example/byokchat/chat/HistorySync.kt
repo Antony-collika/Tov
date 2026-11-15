@@ -500,6 +500,63 @@ class HistorySync(
         }.getOrDefault(false)
     }
 
+    /**
+     * Tách nhánh history khi regenerate (quyết định 15/11/2026): tạo file
+     * history_(NN).md + history.meta_(NN).json mới chứa toàn bộ từ đầu đến
+     * vị trí regenerate (Room lúc này chỉ còn phần prefix — prepareRegenerateHere
+     * đã xóa đáp án cũ + các lượt sau), để bản cũ còn nguyên trong file cũ
+     * thay vì bị ghi đè. Trả true khi đã tách; false khi không cần tách
+     * (file hiện tại chưa chứa lượt đó, chưa có file session) hoặc tách lỗi
+     * (best-effort — người gọi vẫn regenerate như cũ, file sẽ lệch như trước
+     * chứ chat không hỏng). Chạy trong writeMutex để không đụng lần ghi khác.
+     *
+     * Chỉ tách khi file hiện tại thật sự chứa lượt đang tạo lại — tức là có
+     * bản cũ để giữ. Nội dung file mới dựng từ Room (nguồn sự thật), không
+     * copy từ file cũ: sửa ngoài đã đồng bộ thì đã nằm trong Room; sửa ngoài
+     * chưa đồng bộ thì regenerate đã bị chặn trước đó (xem hasExternalChange).
+     * Lượt đang tạo lại chưa xong nên không có trong file mới; lượt mới xong
+     * sẽ append vào đó (số lượt lớn nhất trong file mới < số lượt đó).
+     */
+    suspend fun forkHistory(conversationId: String, turnId: String): Boolean =
+        writeMutex.withLock { forkHistoryLocked(conversationId, turnId) }
+
+    private suspend fun forkHistoryLocked(conversationId: String, turnId: String): Boolean {
+        return runCatching {
+            val conv = db.conversations().get(conversationId) ?: return false
+            val rows = db.messages().getAll(conversationId)
+            // Số lượt đang tạo lại (tin user của lượt vẫn còn trong Room sau
+            // prepareRegenerateHere; không thấy thì không có gì để tách).
+            val turnNo = rows.firstOrNull { it.turnId == turnId && it.role == "user" }?.turnNo ?: return false
+            // File hiện tại có chứa lượt đó không — không thì không có bản cũ
+            // để giữ, lượt mới sẽ append bình thường vào file hiện tại.
+            val currentMd = runCatching {
+                withContext(Dispatchers.IO) { fs.readSessionText(HistoryExporter.historyPath(conv)) }
+            }.getOrNull() ?: return false
+            if (maxTurnIn(currentMd) < turnNo) return false
+            val newBranch = conv.historyBranch + 1
+            val forked = conv.copy(historyBranch = newBranch)
+            // Dựng từ Room: chỉ các lượt đã xong — lượt đang tạo lại chưa xong
+            // nên không có trong file mới; lượt mới xong sẽ append vào đó.
+            val (md, meta) = withContext(Dispatchers.IO) {
+                HistoryExporter.renderHistory(conv, rows) to HistoryExporter.renderMeta(conv, rows)
+            }
+            withContext(Dispatchers.IO) {
+                fs.writeSessionText(HistoryExporter.historyPath(forked), md)
+                fs.writeSessionText(HistoryExporter.metaPath(forked), meta)
+                val back = fs.readSessionText(HistoryExporter.historyPath(forked))
+                if (hashOf(back) != hashOf(md)) {
+                    throw IllegalStateException("history fork verification failed after writing.")
+                }
+            }
+            // Chỉ chuyển con trỏ sang nhánh mới khi file mới đã ghi xong và
+            // verify đúng — file cũ vẫn là bản hiện tại nếu bước nào lỗi.
+            db.conversations().setHistoryBranch(conversationId, newBranch)
+            storeHash(conversationId, hashOf(md))
+            storeSyncedIds(conversationId, HistoryExporter.exportedMessageIds(rows))
+            true
+        }.getOrDefault(false)
+    }
+
     /** Số lượt lớn nhất có trong history.md (quét heading "## Tn ..."). */
     private fun maxTurnIn(md: String): Int {
         var max = 0

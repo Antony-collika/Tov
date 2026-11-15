@@ -108,9 +108,28 @@ object HistoryExporter {
         return "sessions/${date}_${conversation.id.take(8)}"
     }
 
-    fun historyPath(conversation: ConversationEntity): String = "${sessionDir(conversation)}/history.md"
+    /**
+     * Tên file history của một nhánh (fork khi regenerate, quyết định
+     * 15/11/2026): 0 = history.md gốc, N ≥ 1 = history_(NN).md.
+     * Số nhánh đệm 0 thành 2 chữ số, cùng quy ước đặt tên với template
+     * (tools_template_(01).md).
+     */
+    fun historyFileName(branch: Int): String =
+        if (branch <= 0) "history.md" else "history_(%02d).md".format(branch)
 
-    fun metaPath(conversation: ConversationEntity): String = "${sessionDir(conversation)}/history.meta.json"
+    /** Tên file meta của một nhánh: 0 = history.meta.json gốc, N ≥ 1 = history.meta_(NN).json. */
+    fun metaFileName(branch: Int): String =
+        if (branch <= 0) "history.meta.json" else "history.meta_(%02d).json".format(branch)
+
+    /**
+     * Đường dẫn file history hiện tại của một cuộc trò chuyện — nhánh lấy từ
+     * ConversationEntity.historyBranch. Mọi đường đọc/ghi (đồng bộ, xuất,
+     * append, kiểm tra sửa ngoài) đều đi qua đây nên không bao giờ parse
+     * nhầm tên file: chỉ có đúng một chỗ tính tên file.
+     */
+    fun historyPath(conversation: ConversationEntity): String = "${sessionDir(conversation)}/${historyFileName(conversation.historyBranch)}"
+
+    fun metaPath(conversation: ConversationEntity): String = "${sessionDir(conversation)}/${metaFileName(conversation.historyBranch)}"
 
     /** Sub-run journal: sub_runs.meta.json in the session folder (Phase 2) — one JSONL line per sub run, next to history.md/history.meta.json. */
     fun subRunsPath(conversation: ConversationEntity): String = "${sessionDir(conversation)}/sub_runs.meta.json"
