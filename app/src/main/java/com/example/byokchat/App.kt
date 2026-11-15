@@ -92,7 +92,7 @@ class AppContainer(val context: Context) {
     private val env = ToolEnv(context, fs, db, settings, permissions, toolProgress)
     /** Sub-agent team (Phase 3): loaded from agents.json in the app's private files dir, seeded with Research on first launch; the Agent settings screen edits that file. Declared before the registry because the delegate tool is built from the loaded team. */
     val agentStore = SubAgentStore(java.io.File(context.filesDir, SubAgentStore.FILE_NAME))
-    val registry = ToolRegistry(env, toolPrefs, confirmations)
+    val registry = ToolRegistry(env, toolPrefs, confirmations) { agentStore.team.value.agents }
     /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
     val media = MediaPlayback(context)
     /** Những bài AI đã phát trong từng cuộc trò chuyện ("Recently played", menu ⋮): lưu vào DB (bảng recently_played) nên không mất khi app bị kill; store giữ một bản sao trong bộ nhớ để UI đọc ngay. */

@@ -34,11 +34,13 @@ class ToolRegistry(
     private val env: ToolEnv,
     private val prefs: ToolPrefs,
     private val confirmations: ConfirmationBroker,
+    /** The loaded sub-agent team (Phase 3): the delegate tool's agent enum is built from it. */
+    private val teamProvider: () -> List<com.example.byokchat.chat.SubAgentConfig> = { emptyList() },
 ) : ToolRuntime {
     /** Set by AppContainer after the sub-agent runner is built (it needs this registry for the sub's own tools). */
     var subRunner: com.example.byokchat.chat.SubAgentRunner? = null
 
-    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build { subRunner }
+    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build({ subRunner }, teamProvider)
     private val byUid = all.associateBy { it.uid }
 
     fun tool(uid: String): Tool? = byUid[uid]
@@ -77,8 +79,9 @@ class ToolRegistry(
     fun paramDescription(t: Tool, param: String): String =
         defaultParamDescription(t, param).orEmpty()
 
-    /** Schema thật sự gửi cho AI: luôn là schema gốc trong code. */
-    fun effectiveSchema(t: Tool): JsonObject = t.schema
+    /** Schema thật sự gửi cho AI: luôn là schema gốc trong code — hoặc schema
+     *  dựng lại từ đội đã load (tool delegate, Phase 3). */
+    fun effectiveSchema(t: Tool): JsonObject = t.schemaProvider?.invoke() ?: t.schema
 
     fun isAvailable(t: Tool): Boolean =
         (!t.needsWorkspace || env.fs.accessible.value) && t.isAvailable(env)
@@ -105,11 +108,11 @@ class ToolRegistry(
         withContext(Dispatchers.IO) { env.fs.refreshIfStale() }
         return if (exposed == null) {
             all.filter { isAvailable(it) }
-                .map { ToolDef(it.defaultName, it.defaultDescription, it.schema) }
+                .map { ToolDef(it.defaultName, it.defaultDescription, effectiveSchema(it)) }
         } else {
             exposed.mapNotNull { parsed ->
                 val tool = byUid[parsed.uid] ?: return@mapNotNull null // uid đã kiểm tra lúc parse; phòng thủ.
-                if (!isAvailable(tool)) null else ToolDef(parsed.name, parsed.description, tool.schema)
+                if (!isAvailable(tool)) null else ToolDef(parsed.name, parsed.description, effectiveSchema(tool))
             }
         }
     }
@@ -139,7 +142,7 @@ class ToolRegistry(
 
     override fun estimateToolTokens(): Int =
         all.filter { isAvailable(it) }
-            .sumOf { TokenEstimator.text(it.defaultName + it.defaultDescription + it.schema.toString()) }
+            .sumOf { TokenEstimator.text(it.defaultName + it.defaultDescription + effectiveSchema(it).toString()) }
 
     /**
      * Kiểm tra giới hạn ghi của AI (Đợt E, quyết định 6 + quyết định 14). Trả về câu báo lỗi

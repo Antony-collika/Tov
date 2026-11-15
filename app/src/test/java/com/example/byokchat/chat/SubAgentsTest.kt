@@ -10,31 +10,6 @@ import java.io.File
 /** Tests for the Phase 3 team model (config, validation) and the file store. */
 class SubAgentsTest {
 
-    @Test fun briefDetailSplitUsesTheMarker() {
-        val (detail, brief) = splitBriefDetail("Full report.\nWith sources.\n---BRIEF---\nDone — found 5 sources.")
-        assertEquals("Full report.\nWith sources.", detail)
-        assertEquals("Done — found 5 sources.", brief)
-    }
-
-    @Test fun briefDetailSplitWithoutMarkerUsesFirstParagraph() {
-        val answer = "First paragraph here.\n\nSecond paragraph."
-        val (detail, brief) = splitBriefDetail(answer)
-        assertEquals(answer, detail)
-        assertEquals("First paragraph here.", brief)
-    }
-
-    @Test fun briefDetailSplitWithEmptyBriefFallsBackToDetailStart() {
-        val (detail, brief) = splitBriefDetail("Some report.\n---BRIEF---\n")
-        assertEquals("Some report.", detail)
-        assertEquals("Some report.", brief)
-    }
-
-    @Test fun briefDetailSplitWithBlankAnswerIsBlank() {
-        val (detail, brief) = splitBriefDetail("")
-        assertEquals("", detail)
-        assertEquals("", brief)
-    }
-
     @Test fun fallbackBriefPrefersTheLastMessageSentToTheUser() {
         assertEquals("Sent brief.", fallbackBrief("Long final answer.", listOf("First note.", "Sent brief.")))
         assertEquals("First paragraph here.", fallbackBrief("First paragraph here.\n\nSecond paragraph.", emptyList()))

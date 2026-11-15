@@ -61,6 +61,14 @@ class Tool(
     val unavailableHint: String? = null,
     val isAvailable: (ToolEnv) -> Boolean = { true },
     val previewFn: (suspend (ToolEnv, JsonObject) -> String)? = null,
+    /**
+     * Rebuilds the schema on each send instead of using [schema] (Phase 3):
+     * the delegate tool's agent enum comes from the loaded team, so it must
+     * follow team edits without an app restart. Only the schema is dynamic
+     * — [defaultDescription] stays fixed, because tools.md checks it
+     * (origin_description) and a team edit must never break that file.
+     */
+    val schemaProvider: (() -> JsonObject)? = null,
     val run: suspend (ToolEnv, JsonObject) -> String,
 ) {
     val defaultMode: ToolMode get() = if (risk == Risk.READ) ToolMode.AUTO else ToolMode.ASK

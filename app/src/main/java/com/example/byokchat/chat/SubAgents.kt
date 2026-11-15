@@ -203,35 +203,15 @@ data class SubRunsHeader(
 )
 
 /**
- * Split a sub-agent's final answer into (detail, brief): the brief is the
- * text after a line that is exactly ---BRIEF---; without the marker, the
- * brief is the first paragraph (up to 300 chars) and the detail is the whole
- * answer. Pure, so it can be unit-tested without Android.
- *
- * Kept only as a fallback for a sub that never calls the send_message tool:
- * its first paragraph becomes the brief the user sees. The marker itself is
- * no longer instructed anywhere (Phase 3); old answers that contain it
- * still split the same way.
- */
-fun splitBriefDetail(answer: String): Pair<String, String> {
-    val lines = answer.lines()
-    val idx = lines.indexOfFirst { it.trim() == "---BRIEF---" }
-    if (idx >= 0) {
-        val detail = lines.subList(0, idx).joinToString("\n").trim()
-        val brief = lines.subList(idx + 1, lines.size).joinToString("\n").trim()
-        val d = detail.ifBlank { brief }
-        val b = brief.ifBlank { d.take(300) }
-        return d to b
-    }
-    val trimmed = answer.trim()
-    val firstPara = trimmed.split(Regex("\n\\s*\n")).firstOrNull().orEmpty().trim()
-    return trimmed to firstPara.take(300).ifBlank { trimmed.take(300) }
-}
-
-/**
  * The brief the user sees for a run: the last message the sub sent to the
  * user with the send_message tool, or — when it never sent one — the first
  * paragraph of its final answer (up to 300 chars). Pure.
+ *
+ * (Phase 2 had splitBriefDetail, which split on a ---BRIEF--- marker in the
+ * sub's answer. Phase 3 removed the marker: the sub sends its brief with
+ * the send_message tool instead. The marker never reached stored data —
+ * it only ever existed in the transient final-answer text — so no old
+ * history needs the split, and the function is gone.)
  */
 fun fallbackBrief(finalText: String, sentToUser: List<String>): String {
     val sent = sentToUser.lastOrNull { it.isNotBlank() }
