@@ -193,6 +193,14 @@ fun AppNav() {
                 MembersScreen(
                     conversationId = entry.arguments?.getString("id") ?: "",
                     onBack = { nav.popBackStack() },
+                    onAgentSettings = { agentId -> nav.navigate("agent-settings/" + Uri.encode(agentId)) },
+                    onAddAgent = { nav.navigate("agent-settings/new") },
+                )
+            }
+            composable("agent-settings/{agentId}", arguments = listOf(navArgument("agentId") { type = NavType.StringType })) { entry ->
+                AgentSettingsScreen(
+                    agentId = entry.arguments?.getString("agentId") ?: "",
+                    onBack = { nav.popBackStack() },
                 )
             }
             composable("tools") {

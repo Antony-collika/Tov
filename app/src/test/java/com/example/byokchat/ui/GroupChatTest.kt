@@ -44,6 +44,36 @@ class GroupChatTest {
         assertEquals(MemberStatus.IDLE, members[1].status)
     }
 
+    @Test fun sessionTokenPercentIsZeroWithoutBudget() {
+        assertEquals(0, sessionTokenPercent(0, 0))
+        assertEquals(0, sessionTokenPercent(100, 0))
+        assertEquals(38, sessionTokenPercent(380, 1000))
+        assertEquals(100, sessionTokenPercent(9999, 100))
+        assertEquals(0, sessionTokenPercent(0, 32000))
+    }
+
+    @Test fun formatElapsedCountsMinutesAndHours() {
+        assertEquals("00:00", formatElapsed(0))
+        assertEquals("00:05", formatElapsed(5_000))
+        assertEquals("09:12", formatElapsed(552_000))
+        assertEquals("1:02:03", formatElapsed(3_723_000))
+        assertEquals("00:00", formatElapsed(-1000))
+    }
+
+    @Test fun buildSessionInfoAddsFinishedAndLiveTokens() {
+        val info = buildSessionInfo(
+            conversationId = "abcdef12-3456", startedAt = 1000, peakMembers = 3,
+            messageCount = 19, subMessageCount = 4,
+            finishedSubTokens = 300, liveSubTokens = 80,
+            teamTokenBudget = 32000, journalPath = "sessions/x/sub_runs.meta.json",
+        )
+        assertEquals("abcdef12", info.sessionShortId)
+        assertEquals(3, info.peakMembers)
+        assertEquals(380, info.sessionTokensUsed)
+        assertEquals(32000, info.sessionTokenBudget)
+        assertEquals(2, info.membersAtStart)
+    }
+
     @Test fun groupsAreOrderedByUrgencyAndEmptyGroupsAreSkipped() {
         val members = listOf(
             member("a", MemberStatus.IDLE),

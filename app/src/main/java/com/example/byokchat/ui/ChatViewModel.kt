@@ -13,6 +13,7 @@ import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
+import com.example.byokchat.chat.HistoryExporter
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.chat.RequestAssembler
@@ -37,6 +38,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -101,17 +103,26 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         app.engine.activeConversations.map { conversationId in it }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
+    /** The sub-agent team (Phase 3): loaded from agents.json, edited in the agent settings. */
+    val team: StateFlow<com.example.byokchat.chat.SubAgentTeam> = app.agentStore.team
+
+    /** Most members at once this session (the ViewModel lives while the chat is open). */
+    private val _peakMembers = MutableStateFlow(2)
+    val peakMembers: StateFlow<Int> = _peakMembers.asStateFlow()
+
     /**
-     * Group chat members (Phase 2): every chat starts with 2 members — you
+     * Group chat members (Phase 3): every chat starts with 2 members — you
      * and Main. Main shows as Working while the engine is answering this
-     * conversation, Available otherwise; a sub-agent joins this same list
-     * while it runs (Working, with its brief as the current task) and
-     * leaves when its task is done.
+     * conversation, Available otherwise. The whole team is listed: a
+     * running sub shows Working with its live rounds/tokens, the rest show
+     * Available (a turned-off agent stays listed, marked, so its settings
+     * stay reachable).
      */
     val members: StateFlow<List<GroupMember>> = combine(
         generating,
         app.subRunner.activeSubs,
-    ) { gen, subs ->
+        app.agentStore.team,
+    ) { gen, subs, team ->
         val base = listOf(
             GroupMember(id = "you", name = "You", role = "You", status = MemberStatus.IDLE, isUser = true),
             GroupMember(
@@ -120,16 +131,55 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 currentTask = if (gen) "Answering…" else null,
             ),
         )
-        val running = subs[conversationId]?.let { sub ->
-            GroupMember(
-                id = sub.agentId, name = sub.name,
-                role = com.example.byokchat.chat.SubAgentStore.snapshot.byId(sub.agentId)?.role ?: "Sub-agent",
-                status = MemberStatus.WORKING,
-                currentTask = sub.brief.take(60),
-            )
+        val running = subs[conversationId]
+        val agents = team.agents.map { agent ->
+            if (running?.agentId == agent.id) {
+                GroupMember(
+                    id = agent.id, name = agent.name, role = agent.role,
+                    status = MemberStatus.WORKING,
+                    currentTask = running.brief.take(120),
+                    startedAt = running.startedAt,
+                    roundsUsed = running.rounds, roundCap = running.roundCap,
+                    tokensUsed = running.tokensUsed, tokenBudget = running.tokenBudget,
+                    enabled = agent.enabled, isAgent = true,
+                )
+            } else {
+                GroupMember(
+                    id = agent.id, name = agent.name, role = agent.role,
+                    status = MemberStatus.IDLE, enabled = agent.enabled, isAgent = true,
+                )
+            }
         }
-        if (running != null) base + running else base
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), defaultMembers())
+        base + agents
+    }.onEach { _peakMembers.value = maxOf(_peakMembers.value, it.size) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), defaultMembers())
+
+    /** Session header for the Members screen (Phase 3): id, start, peak, message counts, session token bar, journal path. */
+    val sessionInfo: StateFlow<SessionInfo?> = combine(
+        conversation,
+        messages,
+        peakMembers,
+        app.subRunner.activeSubs,
+        app.subRunner.sessionSubTokens,
+        app.agentStore.team,
+    ) { conv, msgs, peak, subs, subTokens, team ->
+        if (conv == null) null else buildSessionInfo(
+            conversationId = conv.id,
+            startedAt = conv.createdAt,
+            peakMembers = peak,
+            messageCount = msgs.size,
+            subMessageCount = msgs.count { it.sender != null },
+            finishedSubTokens = subTokens[conversationId] ?: 0,
+            liveSubTokens = subs[conversationId]?.tokensUsed ?: 0,
+            teamTokenBudget = team.enabledAgents().sumOf { it.tokenBudget },
+            journalPath = HistoryExporter.subRunsPath(conv),
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** Stop only this conversation's sub run (Members screen): Main keeps going. */
+    fun stopSub() {
+        app.subRunner.stopSub(conversationId)
+    }
 
     val providers: StateFlow<List<ProviderConfig>> = app.settings.providers
 

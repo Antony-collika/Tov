@@ -29,13 +29,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.data.MessageEntity
 
-// ============ Group chat members (Phase 1: UI shell, no real sub-agents yet) ============
+// ============ Group chat members (Phase 3: full session info) ============
 //
 // Every chat is a group chat: it starts with 2 members (you + Main) and
 // sub-agents join later when Main calls them. This file holds the member
-// model, the pure grouping for the Members screen, and the shared avatar /
-// typing-indicator pieces. It knows nothing about the engine; the ViewModel
-// feeds it the live member list (Main's status follows `generating`).
+// model, the pure grouping for the Members screen, the session header, and
+// the shared avatar / typing-indicator pieces. It knows nothing about the
+// engine; the ViewModel feeds it the live member list (Main's status
+// follows `generating`).
 
 /** What a member is doing right now. */
 enum class MemberStatus {
@@ -51,6 +52,78 @@ data class GroupMember(
     /** What the member is doing right now ("Answering…"); null when idle. */
     val currentTask: String? = null,
     val isUser: Boolean = false,
+    /** Live run progress of a working sub (null when not running): the run's start, rounds and tokens. */
+    val startedAt: Long? = null,
+    val roundsUsed: Int? = null,
+    val roundCap: Int? = null,
+    val tokensUsed: Int? = null,
+    val tokenBudget: Int? = null,
+    /** False = the agent is turned off in the team (shown, but Main cannot call it). */
+    val enabled: Boolean = true,
+    /** True for team agents (tapping the avatar opens their settings). */
+    val isAgent: Boolean = false,
+)
+
+/** Session header for the Members screen (Phase 3). */
+data class SessionInfo(
+    /** Short session id (first 8 chars of the conversation id). */
+    val sessionShortId: String,
+    val startedAt: Long,
+    /** Every session starts with 2 members: you + Main. */
+    val membersAtStart: Int = 2,
+    /** Most members at once this session (tracked while the screen's ViewModel lives). */
+    val peakMembers: Int,
+    val messageCount: Int,
+    /** Messages sent by a sub-agent. */
+    val subMessageCount: Int,
+    /** Tokens used by sub runs this session (finished runs + the live one). */
+    val sessionTokensUsed: Int,
+    /** Sum of the enabled agents' token budgets — the bar's 100%. */
+    val sessionTokenBudget: Int,
+    /** Path of sub_runs.meta.json in the session storage (null before the conversation loads). */
+    val journalPath: String?,
+)
+
+/** Session token bar: percent of the team budget used (0 when there is no budget to measure against). */
+fun sessionTokenPercent(used: Int, budget: Int): Int =
+    if (budget <= 0) 0 else (used * 100 / budget).coerceIn(0, 100)
+
+/** Elapsed time as mm:ss, or h:mm:ss past an hour. Pure. */
+fun formatElapsed(elapsedMs: Long): String {
+    val totalSeconds = (elapsedMs.coerceAtLeast(0) / 1000).toInt()
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, seconds)
+    else "%02d:%02d".format(minutes, seconds)
+}
+
+/** Wall-clock time as HH:mm in the device timezone. Pure. */
+fun formatClock(epochMs: Long): String =
+    java.time.Instant.ofEpochMilli(epochMs)
+        .atZone(java.time.ZoneId.systemDefault())
+        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))
+
+/** Build the session header from its parts. Pure, so it can be unit-tested without Android. */
+fun buildSessionInfo(
+    conversationId: String,
+    startedAt: Long,
+    peakMembers: Int,
+    messageCount: Int,
+    subMessageCount: Int,
+    finishedSubTokens: Int,
+    liveSubTokens: Int,
+    teamTokenBudget: Int,
+    journalPath: String?,
+): SessionInfo = SessionInfo(
+    sessionShortId = conversationId.take(8),
+    startedAt = startedAt,
+    peakMembers = peakMembers,
+    messageCount = messageCount,
+    subMessageCount = subMessageCount,
+    sessionTokensUsed = finishedSubTokens + liveSubTokens,
+    sessionTokenBudget = teamTokenBudget,
+    journalPath = journalPath,
 )
 
 /** The two members every chat starts with. */
