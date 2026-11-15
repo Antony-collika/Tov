@@ -11,14 +11,12 @@ import com.example.byokchat.AppContainer
 import com.example.byokchat.ai.ImageStore
 import com.example.byokchat.ai.MetadataParams
 import com.example.byokchat.ai.ProviderFactory
-import com.example.byokchat.chat.ActiveSubRun
 import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.HistoryExporter
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.chat.RequestAssembler
-import com.example.byokchat.chat.SubAgentTeam
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.data.ContextLimits
 import com.example.byokchat.data.ConversationEntity
@@ -157,14 +155,18 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), defaultMembers())
 
     /** Session header for the Members screen (Phase 3): id, start, peak, message counts, session token bar, journal path. */
+    // Note: two nested 3-flow combines, not one 6-flow combine — kotlinc
+    // could not infer the transform lambda of combine(6 flows) here
+    // (it fell back to the vararg overload), while 2- and 3-flow
+    // combines infer fine elsewhere in this file.
     val sessionInfo: StateFlow<SessionInfo?> = combine(
-        conversation,
-        messages,
-        peakMembers,
-        app.subRunner.activeSubs,
-        app.subRunner.sessionSubTokens,
-        app.agentStore.team,
-    ) { conv: ConversationEntity?, msgs: List<MessageEntity>, peak: Int, subs: Map<String, ActiveSubRun>, subTokens: Map<String, Int>, team: SubAgentTeam ->
+        combine(conversation, messages, peakMembers) { conv, msgs, peak -> Triple(conv, msgs, peak) },
+        combine(app.subRunner.activeSubs, app.subRunner.sessionSubTokens, app.agentStore.team) { subs, subTokens, team ->
+            Triple(subs, subTokens, team)
+        },
+    ) { first, second ->
+        val (conv, msgs, peak) = first
+        val (subs, subTokens, team) = second
         if (conv == null) null else buildSessionInfo(
             conversationId = conv.id,
             startedAt = conv.createdAt,
