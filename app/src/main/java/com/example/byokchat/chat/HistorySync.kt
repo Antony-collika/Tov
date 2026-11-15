@@ -53,7 +53,7 @@ class HistorySync(
     private val prefs = context.applicationContext.getSharedPreferences("history_sync", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
-    private val headingRx = Regex("^## T(\\d+) (user|assistant)\\s*$")
+    private val headingRx = Regex("^## T(\\d+) (user|assistant)(?: \\(([^)]+)\\))?\\s*$")
 
     /**
      * Khóa ghi file: các lần ghi history.md + history.meta.json (appendTurn /
@@ -262,6 +262,10 @@ class HistorySync(
                 } else {
                     null
                 }
+                // Tên người gửi trong heading ("## Tn assistant (Research)")
+                // đổi về id agent để lưu vào Room; tên lạ (sửa tay) thì giữ
+                // nguyên chuỗi đó làm sender (UI vẫn hiện được tên).
+                val senderId = pm.sender?.let { SubAgents.byName(it)?.id ?: it }
                 val existing = byId[pm.id]
                 if (existing != null) {
                     val newStatus = if (pm.error != null) "error" else "done"
@@ -273,7 +277,8 @@ class HistorySync(
                         existing.toolCallsJson != callsJson || existing.imagePaths != newImages ||
                         existing.thoughtSignature != newSig ||
                         existing.reasoningText != newRText || existing.reasoningReplay != newRReplay ||
-                        existing.reasoningProvider != newRProvider
+                        existing.reasoningProvider != newRProvider ||
+                        existing.sender != senderId
                     ) {
                         db.messages().upsert(
                             existing.copy(
@@ -287,6 +292,7 @@ class HistorySync(
                                 reasoningText = newRText,
                                 reasoningReplay = newRReplay,
                                 reasoningProvider = newRProvider,
+                                sender = senderId,
                                 edited = if (existing.text != pm.text) true else existing.edited,
                             ),
                         )
@@ -305,6 +311,7 @@ class HistorySync(
                             seq = maxSeq,
                             role = pm.role,
                             text = pm.text,
+                            sender = senderId,
                             imagePaths = if (pm.role == "user") encodeImages(entry.attachments) else "[]",
                             toolCallsJson = callsJson,
                             status = if (pm.error != null) "error" else "done",

@@ -134,7 +134,12 @@ object ContextBuilder {
                 // khối "Suy luận" ở màn chat vẫn đọc trực tiếp từ DB nên
                 // user vẫn xem được chữ suy luận đã lưu.
                 val reasoningProvider = m.reasoningProvider?.takeIf { it != "anthropic" }
-                AiMessage(Role.ASSISTANT, text = m.text, toolCalls = calls, thoughtSignature = m.thoughtSignature,
+                // Tin của sub-agent (Phase 2): Main thấy tên người gửi
+                // trong lịch sử ("[Research] ..."), để biết câu này không
+                // phải của mình.
+                val senderName = m.sender?.let { SubAgents.displayName(it) }
+                val text = if (senderName != null && m.text.isNotBlank()) "[$senderName] ${m.text}" else m.text
+                AiMessage(Role.ASSISTANT, text = text, toolCalls = calls, thoughtSignature = m.thoughtSignature,
                     reasoningText = if (reasoningProvider == null) null else m.reasoningText,
                     reasoningReplay = if (reasoningProvider == null) null else m.reasoningReplay, reasoningProvider = reasoningProvider)
             }

@@ -19,6 +19,8 @@ data class ParsedHistoryMessage(
     val text: String,
     /** Nội dung lỗi của lượt lỗi (dòng "(error: ...)" cuối tin assistant). */
     val error: String? = null,
+    /** Tên người gửi trong heading ("## Tn assistant (Research)") — null = Main. */
+    val sender: String? = null,
 )
 
 /** Toàn bộ history.md đã parse (chỉ định dạng sidecar; không dùng format legacy). */
@@ -40,7 +42,7 @@ data class ParsedHistory(
  */
 object HistoryMdParser {
     private val json = Json { ignoreUnknownKeys = true }
-    private val headingRx = Regex("^## T(\\d+) (user|assistant)\\s*$")
+    private val headingRx = Regex("^## T(\\d+) (user|assistant)(?: \\(([^)]+)\\))?\\s*$")
     private val imagesLineRx = Regex("^\\(\\+ \\d+ image\\(s\\)\\)$")
     private val errorLineRx = Regex("^\\(error: (.*)\\)$")
 
@@ -81,6 +83,7 @@ object HistoryMdParser {
         val seenIds = mutableSetOf<String>()
         var currentTurn = 0
         var currentRole: String? = null
+        var currentSender: String? = null
         var currentId: String? = null
         var currentLine = 0
         val currentText = mutableListOf<String>()
@@ -104,8 +107,9 @@ object HistoryMdParser {
                     body = body.lines().dropLast(1).joinToString("\n").trimEnd('\n')
                 }
             }
-            messages += ParsedHistoryMessage(id, currentTurn, role, body, error)
+            messages += ParsedHistoryMessage(id, currentTurn, role, body, error, sender = currentSender)
             currentRole = null
+            currentSender = null
             currentId = null
             currentText.clear()
         }
@@ -123,6 +127,9 @@ object HistoryMdParser {
                     flush()
                     currentTurn = m.groupValues[1].toInt()
                     currentRole = m.groupValues[2]
+                    // Tên người gửi trong heading ("## Tn assistant
+                    // (Research)") — chỉ tin assistant mới có.
+                    currentSender = if (currentRole == "assistant") m.groupValues[3].takeIf { it.isNotBlank() } else null
                     currentLine = lineNo
                 }
                 currentRole != null && currentId == null -> {

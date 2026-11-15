@@ -61,6 +61,12 @@ data class MessageEntity(
     @ColumnInfo(defaultValue = "0") val turnNo: Int = 0,
     val seq: Long,
     val role: String,
+    /**
+     * Who sent an assistant message: null = Main, otherwise the sub-agent
+     * id (Phase 2) — the chat shows that agent's avatar + name, and
+     * history.md writes it in the heading ("## Tn assistant (Research)").
+     */
+    val sender: String? = null,
     val text: String,
     val edited: Boolean = false,
     val imagePaths: String = "[]",

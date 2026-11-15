@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class, RecentlyPlayedEntity::class],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -107,9 +107,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v8 -> v9 (Phase 2 sub-agents, 2026-11-15): `sender` trên messages —
+         * ai gửi một tin assistant (null = Main, còn lại là id sub-agent).
+         * Hàng cũ để null — tin cũ vẫn là của Main.
+         */
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN sender TEXT")
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "byokchat.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 // Không còn fallbackToDestructiveMigration(): từ v5 trở đi mọi
                 // thay đổi cấu trúc đều phải có migration thật (quy tắc kế hoạch
                 // Glassbox, mục 6 Đợt E). v2 -> v3 (bỏ systemPrompt) và v3 -> v4

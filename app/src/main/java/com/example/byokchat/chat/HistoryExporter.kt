@@ -182,7 +182,10 @@ object HistoryExporter {
                 "assistant" -> {
                     if (m.status == "streaming") continue
                     if (m.text.isBlank() && m.error == null && m.toolCallsJson.isNullOrBlank()) continue
-                    appendLine("## T$n assistant")
+                    // Tin của sub-agent (Phase 2): tên người gửi nằm trong
+                    // heading, để đọc file là biết ai nói.
+                    val senderSuffix = m.sender?.let { " (${SubAgents.displayName(it)})" }.orEmpty()
+                    appendLine("## T$n assistant$senderSuffix")
                     appendLine("{\"id\":\"${m.id}\"}")
                     if (m.text.isNotBlank()) appendLine(m.text)
                     if (m.error != null) appendLine("(error: ${m.error})")
