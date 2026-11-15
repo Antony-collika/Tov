@@ -200,4 +200,59 @@ class HistoryExporterTest {
         assertEquals("Research", parsed.messages[2].sender)
         assertEquals(null, parsed.messages[3].sender)
     }
+
+    @Test
+    fun historyFileNames() {
+        // Fork khi regenerate (15/11/2026): nhánh 0 = tên gốc, N ≥ 1 = _(NN).
+        assertEquals("history.md", HistoryExporter.historyFileName(0))
+        assertEquals("history.meta.json", HistoryExporter.metaFileName(0))
+        assertEquals("history_(01).md", HistoryExporter.historyFileName(1))
+        assertEquals("history.meta_(01).json", HistoryExporter.metaFileName(1))
+        assertEquals("history_(12).md", HistoryExporter.historyFileName(12))
+        assertEquals("history.meta_(12).json", HistoryExporter.metaFileName(12))
+        // Nhánh âm (dữ liệu lạ) thì về tên gốc, không tạo tên file kỳ quặc.
+        assertEquals("history.md", HistoryExporter.historyFileName(-1))
+        assertEquals("history.meta.json", HistoryExporter.metaFileName(-1))
+    }
+
+    @Test
+    fun historyPathsFollowBranch() {
+        val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
+        // Chỉ kiểm tra tên file ở cuối đường dẫn (thư mục session chứa ngày
+        // theo múi giờ máy chạy test nên không hardcode cả đường dẫn).
+        assertTrue(HistoryExporter.historyPath(conv).endsWith("/history.md"))
+        assertTrue(HistoryExporter.metaPath(conv).endsWith("/history.meta.json"))
+        val forked = conv.copy(historyBranch = 1)
+        assertTrue(HistoryExporter.historyPath(forked).endsWith("/history_(01).md"))
+        assertTrue(HistoryExporter.metaPath(forked).endsWith("/history.meta_(01).json"))
+        // Cùng thư mục session, chỉ khác tên file — không parse nhầm sang
+        // thư mục khác.
+        assertEquals(
+            HistoryExporter.sessionDir(conv),
+            HistoryExporter.sessionDir(forked),
+        )
+    }
+
+    @Test
+    fun forkRendersPrefixOnly() {
+        // Mô phỏng Room sau prepareRegenerateHere cho lượt 2: lượt 1 đã xong,
+        // lượt 2 chỉ còn tin user (đáp án cũ đã xóa). File fork dựng từ Room
+        // phải chỉ chứa lượt 1 — lượt 2 chưa xong nên không có trong file;
+        // lượt mới xong sẽ append vào đó.
+        val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
+        val rows = listOf(
+            msg("m1", "t1", 1, "user", "First question", { copy(turnNo = 1) }),
+            msg("m2", "t1", 2, "assistant", "Answer one.", { copy(turnNo = 1) }),
+            msg("m3", "t2", 3, "user", "Second question", { copy(turnNo = 2) }),
+        )
+        val out = HistoryExporter.renderHistory(conv, rows)
+        assertTrue(out.contains("## T1 user\n{\"id\":\"m1\"}\nFirst question"))
+        assertTrue(out.contains("## T1 assistant\n{\"id\":\"m2\"}\nAnswer one."))
+        assertTrue(!out.contains("## T2"))
+        assertEquals(2, HistoryMdParser.parseMd(out).nextTurn)
+        val meta = HistoryMdParser.parseMeta(HistoryExporter.renderMeta(conv, rows))
+        assertTrue(meta.messages.containsKey("m1"))
+        assertTrue(meta.messages.containsKey("m2"))
+        assertTrue(!meta.messages.containsKey("m3"))
+    }
 }
