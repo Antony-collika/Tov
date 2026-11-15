@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import com.example.byokchat.data.MessageEntity
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -7,6 +8,34 @@ class GroupChatTest {
 
     private fun member(id: String, status: MemberStatus) =
         GroupMember(id = id, name = id, role = "agent", status = status)
+
+    private fun msg(id: String, turnId: String, seq: Long, role: String) =
+        MessageEntity(
+            id = id, conversationId = "c1", turnId = turnId,
+            seq = seq, role = role, text = "x", createdAt = seq,
+        )
+
+    @Test fun headerOnlyOnFirstAssistantMessageOfEachTurn() {
+        val rows = listOf(
+            msg("u1", "t1", 1, "user"),
+            msg("a1", "t1", 2, "assistant"),
+            msg("a2", "t1", 3, "assistant"),
+            msg("a3", "t1", 4, "assistant"),
+            msg("u2", "t2", 5, "user"),
+            msg("a4", "t2", 6, "assistant"),
+            msg("a5", "t2", 7, "assistant"),
+        )
+        assertEquals(setOf("a1", "a4"), firstAssistantMessageIds(rows))
+    }
+
+    @Test fun headerLogicIgnoresUserMessagesAndEmptyList() {
+        val rows = listOf(
+            msg("u1", "t1", 1, "user"),
+            msg("u2", "t2", 2, "user"),
+        )
+        assertEquals(emptySet<String>(), firstAssistantMessageIds(rows))
+        assertEquals(emptySet<String>(), firstAssistantMessageIds(emptyList()))
+    }
 
     @Test fun defaultMembersAreYouAndMain() {
         val members = defaultMembers()

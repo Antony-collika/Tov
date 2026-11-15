@@ -286,6 +286,10 @@ fun ChatScreen(
     }
     // Turns that have an AI message on screen. A turn without one gets "Regenerate" in your message's menu.
     val turnsWithAnswer = remember(chrono) { chrono.filter { it.role == "assistant" }.map { it.turnId }.toSet() }
+    // Group chat (Phase 1 fix): one "Main" header per assistant turn — only
+    // the first assistant message of a turn carries it; later tool rounds in
+    // the same turn do not repeat it.
+    val firstAssistantOfTurn = remember(chrono) { firstAssistantMessageIds(chrono) }
     val toolResults = remember(messages) {
         ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
     }
@@ -563,11 +567,13 @@ fun ChatScreen(
                         } else {
                             val fix = if (m.status == "error") errorFix(m.error, provider, modelName) else null
                             val help = if (m.status == "error") apiErrorHelp(m.error, provider, metadata.keepThoughtSignature) else null
-                            // Group chat sender header (Phase 1): the AI's
-                            // messages carry Main's avatar and name.
+                            // Group chat sender header (Phase 1): the first
+                            // assistant message of a turn carries Main's avatar
+                            // and name; later tool rounds in the same turn do
+                            // not repeat it.
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 val mm = mainMember
-                                if (mm != null) {
+                                if (mm != null && m.id in firstAssistantOfTurn) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         MemberAvatar(mm, size = 24.dp)
                                         Text("Main", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

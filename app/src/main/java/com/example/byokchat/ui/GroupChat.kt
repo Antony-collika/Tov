@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.example.byokchat.data.MessageEntity
 
 // ============ Group chat members (Phase 1: UI shell, no real sub-agents yet) ============
 //
@@ -57,6 +58,21 @@ fun defaultMembers(): List<GroupMember> = listOf(
     GroupMember(id = "you", name = "You", role = "You", status = MemberStatus.IDLE, isUser = true),
     GroupMember(id = "main", name = "Main", role = "Main agent", status = MemberStatus.IDLE),
 )
+
+/**
+ * Ids of the assistant messages that start a turn: the first assistant
+ * message of each turn (in chronological order) carries the "Main" sender
+ * header; later tool rounds in the same turn do not repeat it. [messages]
+ * is the chat list in chronological order (the same list the screen renders,
+ * before it is reversed for display).
+ */
+fun firstAssistantMessageIds(messages: List<MessageEntity>): Set<String> {
+    val seenTurns = mutableSetOf<String>()
+    return messages
+        .filter { it.role == "assistant" && seenTurns.add(it.turnId) }
+        .map { it.id }
+        .toSet()
+}
 
 /** One section of the Members screen: a title and the members in it. */
 data class MemberGroup(val title: String, val members: List<GroupMember>)
