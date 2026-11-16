@@ -46,6 +46,7 @@ fun SettingsScreen(
     onWebSearch: () -> Unit,
     onStorage: () -> Unit,
     onAppearance: () -> Unit,
+    onDiagnostics: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -93,6 +94,11 @@ fun SettingsScreen(
                 title = "Manage tools",
                 summary = "Turn tools on or off and choose how much control you keep. The name and description the AI sees are managed in the Tools card file.",
                 onClick = onTools,
+            )
+            SettingsCard(
+                title = "Diagnostics",
+                summary = "Sub-agent handoff log: copy or export it and send it to Muse when a turn gets stuck.",
+                onClick = onDiagnostics,
             )
             SettingsCard(
                 title = "Web search",

@@ -147,6 +147,13 @@ fun AppNav() {
                     onWebSearch = { nav.navigate("settings-web-search") },
                     onStorage = { nav.navigate("settings-storage") },
                     onAppearance = { nav.navigate("settings-appearance") },
+                    onDiagnostics = { nav.navigate("diagnostics") },
+                )
+            }
+            composable("diagnostics") {
+                DiagnosticsScreen(
+                    onBack = { nav.popBackStack() },
+                    onOpenRequestLog = { nav.navigate("request-log") },
                 )
             }
             composable("settings-web-search") { SettingsWebSearchScreen(onBack = { nav.popBackStack() }) }
