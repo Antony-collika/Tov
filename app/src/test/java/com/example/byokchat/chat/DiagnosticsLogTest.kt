@@ -18,8 +18,15 @@ class DiagnosticsLogTest {
         val log = DiagnosticsLog(tempDir())
         log.log("handoff/test", "hello")
         val text = log.readText()
-        assertTrue(text.contains("[handoff/test] hello"))
-        assertTrue(text.matches(Regex("(?s)\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3} \\[handoff/test\\] hello\\n")))
+        assertTrue(text.contains("[handoff/test] hello thread="))
+        assertTrue(text.matches(Regex("(?s)\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3} \\[handoff/test\\] hello thread=.+\\n")))
+    }
+
+    @Test fun logLineCarriesTheWritingThreadName() {
+        val log = DiagnosticsLog(tempDir())
+        log.log("handoff/test", "hello")
+        // The test itself runs on this thread, so its name must be in the line.
+        assertTrue(log.readText().contains("thread=${Thread.currentThread().name}\n"))
     }
 
     @Test fun handoffLineCarriesConversationTurnAndDetail() {
@@ -56,6 +63,48 @@ class DiagnosticsLogTest {
         val log = DiagnosticsLog(blocker)
         log.log("handoff/test", "must not throw")
         assertEquals("", log.readText())
+    }
+
+    @Test fun threadDumpWritesOneDelimitedBlock() {
+        val log = DiagnosticsLog(tempDir())
+        log.log("handoff/test", "before")
+        log.threadDump()
+        log.log("handoff/test", "after")
+        val text = log.readText()
+        assertTrue(text.contains("--- thread dump:"))
+        assertTrue(text.contains("--- end thread dump ---"))
+        // The calling thread is always in its own dump.
+        assertTrue(text.contains("\"${Thread.currentThread().name}\" state="))
+        // The block sits between the surrounding lines, in order.
+        assertTrue(text.indexOf("before") < text.indexOf("--- thread dump:"))
+        assertTrue(text.indexOf("--- end thread dump ---") < text.indexOf("after"))
+    }
+
+    @Test fun threadDumpNeverThrowsOnAnUnwritableDir() {
+        val blocker = File(System.getProperty("java.io.tmpdir"), "tov-diag-block-${System.nanoTime()}")
+        blocker.writeText("not a dir")
+        val log = DiagnosticsLog(blocker)
+        log.threadDump()
+        assertEquals("", log.readText())
+    }
+
+    @Test fun formatThreadDumpSortsByNameAndShowsFrames() {
+        val frames = arrayOf(StackTraceElement("com.example.Foo", "bar", "Foo.kt", 42))
+        val dump = formatThreadDump(
+            mapOf(
+                Thread("zeta") to frames,
+                Thread("alpha") to emptyArray(),
+            ),
+            "2026-11-16 12:00:00.000",
+        )
+        assertTrue(dump.contains("2026-11-16 12:00:00.000 [thread-dump] --- thread dump: 2 threads ---"))
+        assertTrue(dump.contains("--- end thread dump ---"))
+        // Sorted by name: alpha first, zeta second.
+        assertTrue(dump.indexOf("\"alpha\"") < dump.indexOf("\"zeta\""))
+        assertTrue(dump.contains("\"zeta\" state=NEW"))
+        assertTrue(dump.contains("    at com.example.Foo.bar(Foo.kt:42)"))
+        assertTrue(dump.contains("\"alpha\" state=NEW"))
+        assertTrue(dump.contains("    (no stack trace)"))
     }
 }
 

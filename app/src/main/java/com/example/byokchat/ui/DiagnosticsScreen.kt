@@ -171,6 +171,17 @@ fun DiagnosticsScreen(onBack: () -> Unit, onOpenRequestLog: () -> Unit) {
                 actions = {
                     TextButton(
                         onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                container.diagnosticsLog.threadDump()
+                                launch(Dispatchers.Main) {
+                                    Toast.makeText(context, "Thread dump saved", Toast.LENGTH_SHORT).show()
+                                    refresh()
+                                }
+                            }
+                        },
+                    ) { Text("Thread dump") }
+                    TextButton(
+                        onClick = {
                             clipboard.setText(AnnotatedString(bundle()))
                             Toast.makeText(context, "Diagnostics copied", Toast.LENGTH_SHORT).show()
                             refresh()
@@ -192,7 +203,8 @@ fun DiagnosticsScreen(onBack: () -> Unit, onOpenRequestLog: () -> Unit) {
         ) {
             Text(
                 "Sub-agent handoff log: each step from a sub finishing to the next request. " +
-                    "Copy or export it and send it to Muse when a turn gets stuck.",
+                    "Copy or export it and send it to Muse when a turn gets stuck. " +
+                    "If a turn is stuck right now, tap Thread dump first to capture the stuck threads, then copy or export.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))

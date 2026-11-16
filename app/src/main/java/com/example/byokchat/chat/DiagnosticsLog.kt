@@ -35,13 +35,13 @@ class DiagnosticsLog(
     /** The whole log text (empty when there is no file yet). Never throws. */
     fun readText(): String = runCatching { file().readText() }.getOrDefault("")
 
-    /** One timestamped line: "2026-11-16 09:12:33.123 [tag] message". Never throws. */
+    /** One timestamped line: "2026-11-16 09:12:33.123 [tag] message thread=main". Never throws. */
     fun log(tag: String, message: String) {
         runCatching {
             synchronized(lock) {
                 dir.mkdirs()
                 val f = file()
-                f.appendText("${timeFormat.format(Date())} [$tag] $message\n")
+                f.appendText("${timeFormat.format(Date())} [$tag] $message thread=${Thread.currentThread().name}\n")
                 if (f.length() > maxBytes) trimLocked(f)
             }
         }
@@ -50,6 +50,26 @@ class DiagnosticsLog(
     /** One line for a delegate handoff step. */
     fun handoff(step: String, conversationId: String, turnId: String, detail: String = "") {
         log("handoff/$step", "conv=${conversationId.take(8)} turn=$turnId $detail".trim())
+    }
+
+    /**
+     * Thread dump on demand (16/11/2026): capture every thread's name,
+     * state and stack trace and append it to the log as one delimited
+     * block, so a stuck turn can be diagnosed from the exact threads
+     * instead of guessed at. Called only when the user taps "Thread dump"
+     * on the Diagnostics screen — no background work, no watcher, no
+     * polling. Best-effort like [log]: a failure never breaks the chat.
+     */
+    fun threadDump() {
+        runCatching {
+            val traces = Thread.getAllStackTraces()
+            synchronized(lock) {
+                dir.mkdirs()
+                val f = file()
+                f.appendText(formatThreadDump(traces, timeFormat.format(Date())))
+                if (f.length() > maxBytes) trimLocked(f)
+            }
+        }
     }
 
     private fun trimLocked(f: File) {
@@ -63,3 +83,23 @@ class DiagnosticsLog(
         )
     }
 }
+
+/**
+ * One delimited thread-dump block, ready to append to the log. Pure, so
+ * it can be unit-tested. Threads are sorted by name so two dumps of the
+ * same state read the same; a thread with no frames gets "(no stack trace)"
+ * instead of an empty block.
+ */
+internal fun formatThreadDump(traces: Map<Thread, Array<StackTraceElement>>, timestamp: String): String =
+    buildString {
+        appendLine("$timestamp [thread-dump] --- thread dump: ${traces.size} threads ---")
+        traces.entries.sortedBy { it.key.name }.forEach { (thread, frames) ->
+            appendLine("\"${thread.name}\" state=${thread.state} daemon=${thread.isDaemon}")
+            if (frames.isEmpty()) {
+                appendLine("    (no stack trace)")
+            } else {
+                frames.forEach { appendLine("    at $it") }
+            }
+        }
+        appendLine("--- end thread dump ---")
+    }

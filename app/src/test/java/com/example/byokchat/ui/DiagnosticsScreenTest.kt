@@ -22,6 +22,22 @@ class DiagnosticsScreenTest {
         assertEquals(emptyList<String>(), sessionsInDiagnosticsLog("no handoff lines here\n"))
     }
 
+    @Test fun sessionsStillParsedWhenLinesCarryThreadNames() {
+        // Handoff lines now end with thread=<name>; a thread dump block is
+        // in the same file. Neither must change session parsing.
+        val text = """
+            2026-11-16 12:21:40.870 [handoff/sub.run.return] conv=dd287ba1 turn=t1 agent=monica-the-singer status=DONE thread=DefaultDispatcher-worker-1
+            2026-11-16 12:21:40.872 [handoff/delegate.handler.return] conv=dd287ba1 turn=t1 agent=monica-the-singer status=DONE thread=DefaultDispatcher-worker-1
+            2026-11-16 12:22:00.000 [thread-dump] --- thread dump: 2 threads ---
+            "DefaultDispatcher-worker-1" state=RUNNABLE daemon=false
+                at com.example.byokchat.tools.ToolRegistry.execute(ToolRegistry.kt:270)
+            "main" state=RUNNABLE daemon=false
+                at android.os.Looper.loop(Looper.java:123)
+            --- end thread dump ---
+        """.trimIndent()
+        assertEquals(listOf("dd287ba1"), sessionsInDiagnosticsLog(text))
+    }
+
     @Test fun bundleContainsLogSessionsAndOtherLogPaths() {
         val chat = LatestChatFiles(
             sessionId = "ba949149",
