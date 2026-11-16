@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -14,7 +15,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
@@ -66,6 +69,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     val prefs by container.toolPrefs.prefs.collectAsState()
     val workspaceOk by container.fs.accessible.collectAsState()
     val searchKey by container.settings.searchApiKey.collectAsState()
+    val maxToolRounds by container.settings.maxToolRounds.collectAsState()
     var query by remember { mutableStateOf("") }
 
     Scaffold(
@@ -112,6 +116,42 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                         }
                     },
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                )
+                // Max tool rounds (16/11/2026): trước đây fix cứng 12 ở
+                // ChatEngine, giờ chỉnh được ở đây (1–50). Chỉ nhận số;
+                // số ngoài khoảng được kẹp lại lúc lưu, ô trống thì trả
+                // lại giá trị đang lưu khi rời ô — không bao giờ lưu số
+                // không hợp lệ, không bao giờ crash.
+                var roundsText by remember(maxToolRounds) { mutableStateOf(maxToolRounds.toString()) }
+                var roundsFocused by remember { mutableStateOf(false) }
+                Text(
+                    "Max tool rounds (1–50)",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                )
+                OutlinedTextField(
+                    value = roundsText,
+                    onValueChange = { input ->
+                        val digits = input.filter { it.isDigit() }
+                        roundsText = digits
+                        digits.toIntOrNull()?.let { container.settings.setMaxToolRounds(it) }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        .onFocusChanged { focus ->
+                            if (roundsFocused && !focus.isFocused && roundsText.toIntOrNull() == null) {
+                                roundsText = maxToolRounds.toString()
+                            }
+                            roundsFocused = focus.isFocused
+                        },
+                )
+                Text(
+                    "How many rounds of tool calls Main may run in one turn. " +
+                        "When the AI keeps calling tools past this many rounds, the turn stops with an error.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
                 )
             }
             if (groups.isEmpty()) {
