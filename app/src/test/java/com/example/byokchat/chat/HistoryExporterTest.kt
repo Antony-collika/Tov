@@ -3,6 +3,7 @@ package com.example.byokchat.chat
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.MessageEntity
+import java.io.File
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -23,6 +24,14 @@ class HistoryExporterTest {
             id = id, conversationId = "conv-abcdefgh", turnId = turnId, seq = seq,
             role = role, text = text, createdAt = 1_700_000_000_000,
         ).extra()
+
+    /** Name-resolution tests need a known agent in the store snapshot; there is no seed anymore. */
+    private fun installReviewAgent() {
+        val dir = File(System.getProperty("java.io.tmpdir"), "tov-agents-${System.nanoTime()}")
+        dir.mkdirs()
+        val store = SubAgentStore(File(dir, "agents.json"))
+        assertTrue(store.save(SubAgentTeam(agents = listOf(testAgent()))).isSuccess)
+    }
 
     @Test
     fun rendersUserAssistantAndToolRound() {
@@ -181,23 +190,24 @@ class HistoryExporterTest {
 
     @Test
     fun subAgentMessageHeadingCarriesSenderName() {
+        installReviewAgent()
         val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
         val rows = listOf(
             msg("m1", "t1", 1, "user", "Find something about X."),
-            msg("m2", "t1", 2, "assistant", "Hi, I'm Research.", { copy(sender = "research") }),
-            msg("m3", "t1", 3, "assistant", "Done — found 5 sources.", { copy(sender = "research") }),
+            msg("m2", "t1", 2, "assistant", "Hi, I'm Review.", { copy(sender = "review") }),
+            msg("m3", "t1", 3, "assistant", "Done — found 5 sources.", { copy(sender = "review") }),
             msg("m4", "t1", 4, "assistant", "Here is the summary."),
         )
         val out = HistoryExporter.renderHistory(conv, rows)
 
-        assertTrue(out.contains("## T1 assistant (Research)\n{\"id\":\"m2\"}\nHi, I'm Research."))
-        assertTrue(out.contains("## T1 assistant (Research)\n{\"id\":\"m3\"}\nDone — found 5 sources."))
+        assertTrue(out.contains("## T1 assistant (Review)\n{\"id\":\"m2\"}\nHi, I'm Review."))
+        assertTrue(out.contains("## T1 assistant (Review)\n{\"id\":\"m3\"}\nDone — found 5 sources."))
         assertTrue(out.contains("## T1 assistant\n{\"id\":\"m4\"}\nHere is the summary."))
         // Round-trip: the parser reads the sender name back.
         val parsed = HistoryMdParser.parseMd(out)
         assertEquals(null, parsed.messages[0].sender)
-        assertEquals("Research", parsed.messages[1].sender)
-        assertEquals("Research", parsed.messages[2].sender)
+        assertEquals("Review", parsed.messages[1].sender)
+        assertEquals("Review", parsed.messages[2].sender)
         assertEquals(null, parsed.messages[3].sender)
     }
 

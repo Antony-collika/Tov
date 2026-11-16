@@ -1,10 +1,30 @@
 package com.example.byokchat.ui
 
+import com.example.byokchat.chat.SubAgentConfig
+import com.example.byokchat.chat.SubAgentStore
+import com.example.byokchat.chat.SubAgentTeam
 import com.example.byokchat.data.MessageEntity
+import java.io.File
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GroupChatTest {
+
+    /** Name-resolution tests need a known agent in the store snapshot; there is no seed anymore. */
+    private fun installReviewAgent() {
+        val dir = File(System.getProperty("java.io.tmpdir"), "tov-agents-${System.nanoTime()}")
+        dir.mkdirs()
+        val agent = SubAgentConfig(
+            id = "review", name = "Review", role = "Review agent",
+            description = "Reviews a draft.",
+            systemPrompt = "You are Review. Check the draft Main gives you and report back.",
+            toolUids = listOf("web.search", "web.fetch"),
+            workspaceFolder = "Review",
+        )
+        val store = SubAgentStore(File(dir, "agents.json"))
+        assertTrue(store.save(SubAgentTeam(agents = listOf(agent))).isSuccess)
+    }
 
     private fun member(id: String, status: MemberStatus) =
         GroupMember(id = id, name = id, role = "agent", status = status)
@@ -121,9 +141,10 @@ class GroupChatTest {
     }
 
     @Test fun subAgentMemberUsesConfigForKnownAgent() {
-        val m = subAgentMember("research")
-        assertEquals("research", m.id)
-        assertEquals("Research", m.name)
+        installReviewAgent()
+        val m = subAgentMember("review")
+        assertEquals("review", m.id)
+        assertEquals("Review", m.name)
     }
 
     @Test fun subAgentMemberFallsBackToRawSenderForUnknownAgent() {

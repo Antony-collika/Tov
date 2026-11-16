@@ -14,6 +14,7 @@ import com.example.byokchat.tools.DailyTools
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -59,6 +60,14 @@ class RequestAssemblerTest {
     )
 
     private fun noRename(uid: String): String? = null
+
+    /** Name-resolution tests need a known agent in the store snapshot; there is no seed anymore. */
+    private fun installReviewAgent() {
+        val dir = File(System.getProperty("java.io.tmpdir"), "tov-agents-${System.nanoTime()}")
+        dir.mkdirs()
+        val store = SubAgentStore(File(dir, "agents.json"))
+        assertTrue(store.save(SubAgentTeam(agents = listOf(testAgent()))).isSuccess)
+    }
 
     @Test
     fun systemIsTheSavedPromptPlusTimeLine() {
@@ -453,11 +462,12 @@ class RequestAssemblerTest {
 
     @Test
     fun subAgentMessageReachesMainWithSenderNamePrefix() {
+        installReviewAgent()
         val out = RequestAssembler.assemble(
             systemPrompt = "Be helpful",
             rows = listOf(
                 row("u1", "t1", 1, "user", "Find something."),
-                row("a1", "t1", 2, "assistant", "Done — found 5 sources.").copy(sender = "research"),
+                row("a1", "t1", 2, "assistant", "Done — found 5 sources.").copy(sender = "review"),
             ),
             toolDefs = emptyList(),
             budget = 100_000,
@@ -465,6 +475,6 @@ class RequestAssemblerTest {
         )
         val sent = out.sentMessages
         assertEquals(Role.ASSISTANT, sent.last().role)
-        assertEquals("[Research] Done — found 5 sources.", sent.last().text)
+        assertEquals("[Review] Done — found 5 sources.", sent.last().text)
     }
 }
