@@ -166,6 +166,39 @@ object ContextBuilder {
             }
         }
         val callIds = withCalls.flatMap { it.toolCalls }.map { it.id }.toSet()
-        return withCalls.filter { it.role != Role.TOOL || it.toolCallId in callIds }
+        val paired = withCalls.filter { it.role != Role.TOOL || it.toolCallId in callIds }
+        return orderToolResults(paired)
+    }
+
+    /**
+     * Tool-call adjacency (16/11/2026): OpenAI-compatible servers (and
+     * Gemini) require a tool-call message to be followed immediately by
+     * its tool-result messages. A sub-agent writes its own messages into
+     * the chat DURING the delegate tool call, so they land between Main's
+     * tool-call message and the tool result — and the next request would
+     * fail with a 400 once the run returns. Pull each call's results
+     * forward to right after the call; the intervening messages keep
+     * their relative order and move after the results. Content is
+     * preserved, only the order changes.
+     */
+    private fun orderToolResults(msgs: List<AiMessage>): List<AiMessage> {
+        val remaining = msgs.toMutableList()
+        val out = ArrayList<AiMessage>(msgs.size)
+        while (remaining.isNotEmpty()) {
+            val m = remaining.removeAt(0)
+            out += m
+            if (m.role == Role.ASSISTANT && m.toolCalls.isNotEmpty()) {
+                val wanted = m.toolCalls.map { it.id }.toSet()
+                val it = remaining.iterator()
+                while (it.hasNext()) {
+                    val r = it.next()
+                    if (r.role == Role.TOOL && r.toolCallId in wanted) {
+                        out += r
+                        it.remove()
+                    }
+                }
+            }
+        }
+        return out
     }
 }
