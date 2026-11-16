@@ -108,6 +108,22 @@ class DiagnosticsLog(
         }
     }
 
+    /**
+     * Clear the log (16/11/2026): delete diagnostics.log so a new test run
+     * starts from an empty log instead of mixing sessions. Only this file
+     * is touched; the next [log]/[threadDump]/[coroutineDump] recreates it
+     * (each write does mkdirs + appendText). Called only when the user taps
+     * "Clear" on the Diagnostics screen. Best-effort like [log].
+     */
+    fun clear() {
+        runCatching {
+            synchronized(lock) {
+                val f = file()
+                if (f.exists()) f.delete()
+            }
+        }
+    }
+
     private fun trimLocked(f: File) {
         val lines = f.readLines()
         if (lines.isEmpty()) return

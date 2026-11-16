@@ -3,7 +3,9 @@ package com.example.byokchat.ui
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -182,6 +185,17 @@ fun DiagnosticsScreen(onBack: () -> Unit, onOpenRequestLog: () -> Unit) {
                     ) { Text("Thread dump") }
                     TextButton(
                         onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                container.diagnosticsLog.coroutineDump()
+                                launch(Dispatchers.Main) {
+                                    Toast.makeText(context, "Coroutine dump saved", Toast.LENGTH_SHORT).show()
+                                    refresh()
+                                }
+                            }
+                        },
+                    ) { Text("Coroutine dump") }
+                    TextButton(
+                        onClick = {
                             clipboard.setText(AnnotatedString(bundle()))
                             Toast.makeText(context, "Diagnostics copied", Toast.LENGTH_SHORT).show()
                             refresh()
@@ -204,7 +218,8 @@ fun DiagnosticsScreen(onBack: () -> Unit, onOpenRequestLog: () -> Unit) {
             Text(
                 "Sub-agent handoff log: each step from a sub finishing to the next request. " +
                     "Copy or export it and send it to Muse when a turn gets stuck. " +
-                    "If a turn is stuck right now, tap Thread dump first to capture the stuck threads, then copy or export.",
+                    "If a turn is stuck right now, tap Coroutine dump first to capture where the turn is parked, then copy or export. " +
+                    "Tap Clear before a fresh test run so the log starts empty and sessions don't mix.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))
@@ -214,7 +229,24 @@ fun DiagnosticsScreen(onBack: () -> Unit, onOpenRequestLog: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))
-            Text("Diagnostics log", style = MaterialTheme.typography.labelLarge)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Diagnostics log", style = MaterialTheme.typography.labelLarge)
+                TextButton(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            container.diagnosticsLog.clear()
+                            launch(Dispatchers.Main) {
+                                Toast.makeText(context, "Log cleared", Toast.LENGTH_SHORT).show()
+                                refresh()
+                            }
+                        }
+                    },
+                ) { Text("Clear") }
+            }
             if (logText.isBlank()) {
                 Text("No handoff has been logged yet.", style = MaterialTheme.typography.bodyMedium)
             } else {

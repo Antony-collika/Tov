@@ -38,6 +38,21 @@ class DiagnosticsScreenTest {
         assertEquals(listOf("dd287ba1"), sessionsInDiagnosticsLog(text))
     }
 
+    @Test fun sessionsStillParsedWhenCoroutineDumpPresent() {
+        // A coroutine dump block lives in the same file; it must not change
+        // session parsing (its lines carry no conv= ids).
+        val text = """
+            2026-11-16 12:21:40.870 [handoff/sub.run.return] conv=dd287ba1 turn=t1 agent=monica-the-singer status=DONE thread=DefaultDispatcher-worker-1
+            2026-11-16 12:22:00.000 [coroutine-dump] --- coroutine dump ---
+            Coroutines dump 2026/11/16 12:22:00
+
+            Coroutine "engine#1":StandaloneCoroutine{Active}@1, state: SUSPENDED
+                at com.example.byokchat.chat.ChatEngine.run(ChatEngine.kt:200)
+            --- end coroutine dump ---
+        """.trimIndent()
+        assertEquals(listOf("dd287ba1"), sessionsInDiagnosticsLog(text))
+    }
+
     @Test fun bundleContainsLogSessionsAndOtherLogPaths() {
         val chat = LatestChatFiles(
             sessionId = "ba949149",

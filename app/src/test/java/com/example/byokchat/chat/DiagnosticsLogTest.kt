@@ -175,6 +175,33 @@ class DiagnosticsLogTest {
             PrintStream(bytes, true, Charsets.UTF_8).use { DebugProbes.dumpCoroutines(it) }
         }
     }
+
+    @Test fun clearDeletesTheFileAndLaterWritesRecreateIt() {
+        val log = DiagnosticsLog(tempDir())
+        log.log("handoff/test", "old line")
+        assertTrue(log.file().exists())
+        log.clear()
+        assertEquals("", log.readText())
+        assertTrue(!log.file().exists())
+        log.log("handoff/test", "new line")
+        val text = log.readText()
+        assertTrue(text.contains("new line"))
+        assertTrue(!text.contains("old line"))
+    }
+
+    @Test fun clearOnAnEmptyLogIsANoop() {
+        val log = DiagnosticsLog(tempDir())
+        log.clear()
+        assertEquals("", log.readText())
+    }
+
+    @Test fun clearNeverThrowsOnAnUnwritableDir() {
+        val blocker = File(System.getProperty("java.io.tmpdir"), "tov-diag-block-${System.nanoTime()}")
+        blocker.writeText("not a dir")
+        val log = DiagnosticsLog(blocker)
+        log.clear()
+        assertEquals("", log.readText())
+    }
 }
 
 /** Pure-logic checks for the anti-hang fallback (the withTimeout path itself needs Room, so it is verified on device). */
