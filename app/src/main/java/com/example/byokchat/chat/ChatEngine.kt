@@ -402,7 +402,11 @@ class ChatEngine(
 
             // AI yêu cầu gọi công cụ: chạy rồi quay lại vòng lặp để AI đọc kết quả
             rounds++
-            if (rounds > MAX_TOOL_ROUNDS) {
+            // Max vòng tool của Main (16/11/2026): chỉnh được ở Manage tools
+            // (SettingsRepository.maxToolRounds, mặc định 12) — trước đây fix
+            // cứng ở MAX_TOOL_ROUNDS, user không đổi được.
+            val maxToolRounds = settings.maxToolRounds.value
+            if (rounds > maxToolRounds) {
                 msgDao.upsert(
                     base.copy(
                         id = UUID.randomUUID().toString(),
@@ -411,7 +415,7 @@ class ChatEngine(
                         status = "error",
                         text = "",
                         toolCallsJson = null,
-                        error = "Stopped because the AI called tools for more than $MAX_TOOL_ROUNDS rounds in a row.",
+                        error = "Stopped because the AI called tools for more than $maxToolRounds rounds in a row.",
                     )
                 )
                 notifyFinished(conversationId, displayTitle(conv.title), success = false, answer = "")
@@ -687,6 +691,7 @@ class ChatEngine(
     }
 
     companion object {
+        /** Mặc định cho SettingsRepository.maxToolRounds (chỉnh được ở Manage tools). */
         const val MAX_TOOL_ROUNDS = 12
         private const val LIVE_INTERVAL_MS = 150L
         private const val DB_FLUSH_MS = 3000L

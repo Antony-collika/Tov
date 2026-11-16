@@ -24,6 +24,19 @@ import kotlinx.serialization.json.jsonPrimitive
 enum class ThemeMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
 
 /**
+ * Max tool rounds của Main trong một lượt (16/11/2026): trước đây fix
+ * cứng ở ChatEngine.MAX_TOOL_ROUNDS = 12, user không chỉnh được. Giờ
+ * chỉnh được ở màn Manage tools; mặc định 12 để giữ đúng hành vi cũ.
+ * Kẹp 1–50 để lượt không chạy mãi (1) và tránh số quá lớn vô nghĩa.
+ */
+const val MAX_TOOL_ROUNDS_DEFAULT = 12
+const val MIN_TOOL_ROUNDS = 1
+const val MAX_TOOL_ROUNDS_LIMIT = 50
+
+/** Kẹp số vòng tool về 1–50; dùng cho cả lúc lưu setting lẫn lúc đọc kho cũ. */
+fun clampMaxToolRounds(rounds: Int): Int = rounds.coerceIn(MIN_TOOL_ROUNDS, MAX_TOOL_ROUNDS_LIMIT)
+
+/**
  * Chuẩn hóa thư mục con cho phép ghi (Đợt E, quyết định 6): trim, '\' -> '/',
  * bỏ '/' ở hai đầu, gộp '/' lặp. Rỗng = ghi anywhere bên trong các folder playground.
  */
@@ -225,6 +238,18 @@ class SettingsRepository(context: Context) {
     fun setRequestLogEnabled(enabled: Boolean) {
         _requestLogEnabled.value = enabled
         plain.edit().putBoolean("request_log_enabled", enabled).apply()
+    }
+
+    /** Max tool rounds của Main trong một lượt — xem [MAX_TOOL_ROUNDS_DEFAULT]. */
+    private val _maxToolRounds = MutableStateFlow(
+        clampMaxToolRounds(plain.getInt("max_tool_rounds", MAX_TOOL_ROUNDS_DEFAULT)),
+    )
+    val maxToolRounds: StateFlow<Int> = _maxToolRounds.asStateFlow()
+
+    fun setMaxToolRounds(rounds: Int) {
+        val clamped = clampMaxToolRounds(rounds)
+        _maxToolRounds.value = clamped
+        plain.edit().putInt("max_tool_rounds", clamped).apply()
     }
 
     /** Nhật ký request (Đợt B): ghi mỗi lần gọi model ra file, mặc định bật. */
