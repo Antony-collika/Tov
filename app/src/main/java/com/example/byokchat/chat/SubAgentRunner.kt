@@ -293,6 +293,17 @@ class SubAgentRunner(
             status = SubRunStatus.FAILED
             error = e.message ?: e.toString()
         } finally {
+            // A bare child Job blocks its parent's completion (16/11/2026):
+            // the delegate tool runs under withContext (ToolRegistry), and
+            // subJob is a child of that Job. Without complete() here, the
+            // withContext Job can never complete after a normal run — the
+            // sub finished, but its Job stays ACTIVE forever, so execute()
+            // never returns, no tool result is recorded and no round-2
+            // request is ever sent (the turn stalls with "Main is typing"
+            // and idle dispatchers). complete() on an already-cancelled
+            // Job is a no-op, so the stopSub / Main-stop paths are
+            // unaffected.
+            subJob.complete()
             _activeSubs.update { it - conversationId }
             subJobs.update { it - conversationId }
         }
