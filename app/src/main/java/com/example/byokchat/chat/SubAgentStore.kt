@@ -22,10 +22,13 @@ import java.io.File
  * not a second source of truth.
  *
  * Behaviour:
- * - First launch (no file): the seed team (Research only) is written out,
- *   so the user can find and edit the file.
- * - Corrupt file: the team falls back to the seed, the error is recorded
+ * - First launch (no file): an empty team is written out — no agent is
+ *   shipped; the user adds agents herself in the Agent settings screen.
+ * - Corrupt file: the team falls back to empty, the error is recorded
  *   in [lastLoadError], and the file is left untouched so nothing is lost.
+ * - A stored agent with id "research" (the removed Phase 3 seed) is
+ *   dropped on load, and the file is rewritten only when something was
+ *   dropped — no other stored agent is ever touched.
  * - Every load/save updates [snapshot], so code without access to the
  *   store (history export/import, chat headers) can still resolve an
  *   agent id to its display name.
@@ -36,7 +39,7 @@ class SubAgentStore(private val file: File) {
 
         /** Last loaded team, for call sites without the store. Updated on every load/save. */
         @Volatile
-        var snapshot: SubAgentTeam = defaultTeam()
+        var snapshot: SubAgentTeam = emptyTeam()
             private set
     }
 
@@ -51,40 +54,37 @@ class SubAgentStore(private val file: File) {
 
     private fun loadFromDisk(): SubAgentTeam {
         if (!file.exists()) {
-            val seed = defaultTeam()
-            runCatching { writeFile(seed) }
-            snapshot = seed
-            return seed
+            val empty = emptyTeam()
+            runCatching { writeFile(empty) }
+            snapshot = empty
+            return empty
         }
         return try {
             val parsed = json.decodeFromString<SubAgentTeam>(file.readText()).sanitized()
-            val migrated = migrateLegacyResearchPrompt(parsed)
+            val migrated = migrateDropResearch(parsed)
             if (migrated != parsed) runCatching { writeFile(migrated) }
             snapshot = migrated
             migrated
         } catch (e: Exception) {
             _lastLoadError.value =
                 "Could not read agents.json (${e.message ?: e.javaClass.simpleName}); " +
-                    "using the default team. The file was left untouched."
-            val seed = defaultTeam()
-            snapshot = seed
-            seed
+                    "using an empty team. The file was left untouched."
+            val empty = emptyTeam()
+            snapshot = empty
+            empty
         }
     }
 
     /**
-     * Refresh an untouched Research seed prompt to the current seed (the
-     * greeting change): only when the stored prompt is byte-identical to
-     * the old seed prompt. A prompt the user edited — even one character
-     * — is left alone, and the file is rewritten only when something
-     * actually changed. The old defaultGreeting field, if present in the
-     * file, is dropped on save (the loader ignores unknown fields).
+     * Drop the removed Research seed (id "research") from a stored team.
+     * The user asked for it to be gone completely and will create a new
+     * agent herself — so the drop is unconditional for that id, even if
+     * she customized it. Every other stored agent is left untouched, and
+     * the file is rewritten only when something was actually dropped.
      */
-    private fun migrateLegacyResearchPrompt(team: SubAgentTeam): SubAgentTeam {
-        val research = team.byId("research") ?: return team
-        if (research.systemPrompt != LEGACY_RESEARCH_SYSTEM_PROMPT) return team
-        val refreshed = research.copy(systemPrompt = defaultResearchAgent().systemPrompt)
-        return team.copy(agents = team.agents.map { if (it.id == "research") refreshed else it })
+    private fun migrateDropResearch(team: SubAgentTeam): SubAgentTeam {
+        if (team.byId("research") == null) return team
+        return team.copy(agents = team.agents.filterNot { it.id == "research" })
     }
 
     private fun writeFile(team: SubAgentTeam) {

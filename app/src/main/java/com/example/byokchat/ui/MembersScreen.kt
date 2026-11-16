@@ -65,6 +65,7 @@ fun MembersScreen(
     })
     val members by vm.members.collectAsState()
     val sessionInfo by vm.sessionInfo.collectAsState()
+    val team by container.agentStore.team.collectAsState()
     val groups = remember(members) { groupMembers(members) }
     // Ticking clock for the session elapsed time and the per-sub timers.
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -238,6 +239,15 @@ fun MembersScreen(
                     Text(
                         "An agent that finished its run stays in the team — Main calls it again when needed, with the same role and tools. Tap an agent's avatar to edit its folder, tools and role.",
                         style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (team.agents.isEmpty()) {
+                item {
+                    Text(
+                        "No sub-agents yet — Main has no one to call. Add one below, then teach Main when to call it.",
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

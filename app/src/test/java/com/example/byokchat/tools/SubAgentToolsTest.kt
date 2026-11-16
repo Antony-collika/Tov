@@ -1,7 +1,7 @@
 package com.example.byokchat.tools
 
+import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.chat.SubAgentRunner
-import com.example.byokchat.chat.defaultResearchAgent
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -20,19 +20,32 @@ class SubAgentToolsTest {
     private fun enumOf(schema: JsonObject): List<String>? =
         (agentParam(schema)["enum"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
 
+    private fun testAgent(
+        id: String = "research",
+        name: String = "Research",
+        description: String = "Researches a topic.",
+        enabled: Boolean = true,
+    ) = SubAgentConfig(
+        id = id, name = name, role = "Research agent", description = description,
+        systemPrompt = "You are Research. Research the web.",
+        toolUids = listOf("web.search", "web.fetch"),
+        workspaceFolder = "Research",
+        enabled = enabled,
+    )
+
     @Test fun delegateSchemaListsEnabledAgentsOnly() {
-        val review = defaultResearchAgent().copy(id = "review", name = "Review", description = "Reviews a draft.")
-        val off = defaultResearchAgent().copy(id = "off", name = "Off", description = "Turned off.")
-        val schema = SubAgentTools.delegateSchema(listOf(defaultResearchAgent(), review, off.copy(enabled = false)))
+        val review = testAgent(id = "review", name = "Review", description = "Reviews a draft.")
+        val off = testAgent(id = "off", name = "Off", description = "Turned off.")
+        val schema = SubAgentTools.delegateSchema(listOf(testAgent(), review, off.copy(enabled = false)))
         assertEquals(listOf("research", "review"), enumOf(schema))
         val desc = agentParam(schema)["description"] as JsonPrimitive
-        assertTrue(desc.content.contains("research — Researches a topic"))
+        assertTrue(desc.content.contains("research — Researches a topic."))
         assertTrue(desc.content.contains("review — Reviews a draft."))
         assertTrue(!desc.content.contains("off"))
     }
 
     @Test fun delegateSchemaWithNoEnabledAgentHasNoEnum() {
-        val schema = SubAgentTools.delegateSchema(listOf(defaultResearchAgent().copy(enabled = false)))
+        val schema = SubAgentTools.delegateSchema(listOf(testAgent().copy(enabled = false)))
         assertNull(enumOf(schema))
         val desc = agentParam(schema)["description"] as JsonPrimitive
         assertTrue(desc.content.contains("No sub-agents are enabled"))

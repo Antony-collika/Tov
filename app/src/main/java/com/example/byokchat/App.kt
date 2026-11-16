@@ -91,7 +91,7 @@ class AppContainer(val context: Context) {
     val toolProgress = ToolProgressBroker()
     val toolPrefs = ToolPrefs(context)
     private val env = ToolEnv(context, fs, db, settings, permissions, toolProgress)
-    /** Sub-agent team (Phase 3): loaded from agents.json in the app's private files dir, seeded with Research on first launch; the Agent settings screen edits that file. Declared before the registry because the delegate tool is built from the loaded team. */
+    /** Sub-agent team (Phase 3): loaded from agents.json in the app's private files dir; the team starts empty and the user adds agents in the Agent settings screen, which edits that file. Declared before the registry because the delegate tool is built from the loaded team. */
     val agentStore = SubAgentStore(java.io.File(context.filesDir, SubAgentStore.FILE_NAME))
     /** Diagnostic log (16/11/2026): the delegate handoff steps, shown on the Diagnostics screen. Declared before the registry because the delegate tool logs through it. */
     val diagnosticsLog = DiagnosticsLog(java.io.File(context.filesDir, "diagnostics-log"))
