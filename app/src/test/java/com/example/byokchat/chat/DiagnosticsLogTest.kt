@@ -162,6 +162,36 @@ class DiagnosticsLogTest {
         assertTrue(dump.contains("--- end coroutine dump ---"))
     }
 
+    @Test fun formatCoroutineDumpFailureShowsExceptionAndFirstTenFrames() {
+        val e = RuntimeException("boom")
+        e.stackTrace = Array(12) { StackTraceElement("com.example.Foo", "bar$it", "Foo.kt", it) }
+        val block = formatCoroutineDumpFailure(e, "2026-11-16 12:00:00.000")
+        assertTrue(block.contains("2026-11-16 12:00:00.000 [coroutine-dump] --- coroutine dump FAILED ---"))
+        assertTrue(block.contains("java.lang.RuntimeException: boom"))
+        assertTrue(block.contains("    at com.example.Foo.bar0(Foo.kt:0)"))
+        assertTrue(block.contains("    at com.example.Foo.bar9(Foo.kt:9)"))
+        assertTrue(!block.contains("bar10"))
+        assertTrue(!block.contains("bar11"))
+        assertTrue(block.contains("--- end coroutine dump ---"))
+    }
+
+    @Test fun coroutineDumpReturnsFalseWhenProbesAreNotInstalled() {
+        // No test installs the probes, so isInstalled is false: no real dump
+        // is written, so the result is false — the screen must not claim
+        // success. The note block is still written, so the log explains why.
+        val log = DiagnosticsLog(tempDir())
+        assertFalse(log.coroutineDump())
+        assertTrue(log.readText().contains("DebugProbes not installed"))
+    }
+
+    @Test fun coroutineDumpReturnsFalseOnAnUnwritableDir() {
+        val blocker = File(System.getProperty("java.io.tmpdir"), "tov-diag-block-${System.nanoTime()}")
+        blocker.writeText("not a dir")
+        val log = DiagnosticsLog(blocker)
+        assertFalse(log.coroutineDump())
+        assertEquals("", log.readText())
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test fun dumpCoroutinesWithoutInstallThrows() {
         // Library behaviour, verified against the kotlinx-coroutines-debug

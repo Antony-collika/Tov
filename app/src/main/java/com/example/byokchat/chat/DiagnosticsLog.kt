@@ -87,10 +87,17 @@ class DiagnosticsLog(
      * instead. Called only when the user taps "Coroutine dump" on the
      * Diagnostics screen — no background work, no watcher, no polling.
      * Best-effort like [log]: a failure never breaks the chat.
+     *
+     * Returns true only when a real dump was written. A failure is VISIBLE
+     * instead of silent: on device the release build's R8 broke
+     * [DebugProbes.dumpCoroutines] (16/11/2026) and the button showed
+     * "saved" while nothing was written. On any exception a failure block
+     * with the exception is appended to the log instead, and the result is
+     * false so the screen can say so.
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun coroutineDump() {
-        runCatching {
+    fun coroutineDump(): Boolean {
+        return try {
             val installed = DebugProbes.isInstalled
             val dump = if (installed) {
                 val bytes = ByteArrayOutputStream()
@@ -105,6 +112,21 @@ class DiagnosticsLog(
                 f.appendText(formatCoroutineDump(dump, installed, timeFormat.format(Date())))
                 if (f.length() > maxBytes) trimLocked(f)
             }
+            installed && dump.isNotBlank()
+        } catch (e: Throwable) {
+            // The dump itself failed: write the failure into the log so the
+            // next export shows what broke, instead of a toast claiming
+            // success. Still best-effort: if even that write fails, swallow
+            // it — the chat must not break.
+            runCatching {
+                synchronized(lock) {
+                    dir.mkdirs()
+                    val f = file()
+                    f.appendText(formatCoroutineDumpFailure(e, timeFormat.format(Date())))
+                    if (f.length() > maxBytes) trimLocked(f)
+                }
+            }
+            false
         }
     }
 
@@ -154,6 +176,21 @@ internal fun formatThreadDump(traces: Map<Thread, Array<StackTraceElement>>, tim
             }
         }
         appendLine("--- end thread dump ---")
+    }
+
+/**
+ * One delimited coroutine-dump failure block, ready to append to the log.
+ * Pure, so it can be unit-tested. The dump call itself can throw (on
+ * device the release build's R8 broke DebugProbes.dumpCoroutines) — the
+ * failure must be visible in the log, with the exception and its first
+ * frames, instead of a toast claiming the dump was saved.
+ */
+internal fun formatCoroutineDumpFailure(e: Throwable, timestamp: String): String =
+    buildString {
+        appendLine("$timestamp [coroutine-dump] --- coroutine dump FAILED ---")
+        appendLine("    ${e.javaClass.name}: ${e.message}")
+        e.stackTrace.take(10).forEach { appendLine("    at $it") }
+        appendLine("--- end coroutine dump ---")
     }
 
 /**

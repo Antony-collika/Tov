@@ -186,9 +186,13 @@ fun DiagnosticsScreen(onBack: () -> Unit, onOpenRequestLog: () -> Unit) {
                     TextButton(
                         onClick = {
                             scope.launch(Dispatchers.IO) {
-                                container.diagnosticsLog.coroutineDump()
+                                val ok = container.diagnosticsLog.coroutineDump()
                                 launch(Dispatchers.Main) {
-                                    Toast.makeText(context, "Coroutine dump saved", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(
+                                        context,
+                                        if (ok) "Coroutine dump saved" else "Coroutine dump failed — see log",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
                                     refresh()
                                 }
                             }
