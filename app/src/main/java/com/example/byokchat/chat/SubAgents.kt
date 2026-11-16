@@ -44,8 +44,6 @@ data class SubAgentConfig(
     val toolUids: List<String>,
     /** The agent's own workspace folder inside the AI playground. */
     val workspaceFolder: String,
-    /** Greeting Main scripts for the agent when it joins the room (used when Main does not pass one). */
-    val defaultGreeting: String,
     /** Ceilings, set per agent in its settings (defaults from the design). */
     val roundCap: Int = DEFAULT_ROUND_CAP,
     val tokenBudget: Int = DEFAULT_TOKEN_BUDGET,
@@ -78,7 +76,6 @@ data class SubAgentConfig(
         systemPrompt = systemPrompt.trim(),
         toolUids = toolUids.map { it.trim() }.filter { it.isNotBlank() }.distinct(),
         workspaceFolder = workspaceFolder.trim(),
-        defaultGreeting = defaultGreeting.trim(),
         roundCap = roundCap.coerceIn(MIN_ROUND_CAP, MAX_ROUND_CAP),
         tokenBudget = tokenBudget.coerceIn(MIN_TOKEN_BUDGET, MAX_TOKEN_BUDGET),
         modelProviderId = modelProviderId?.trim()?.takeIf { it.isNotBlank() },
@@ -130,6 +127,20 @@ data class SubAgentTeam(
     }
 }
 
+/** The Research system prompt before the greeting change (Phase 3): the
+ *  sub was greeted by Main, so the prompt only taught send_message at the
+ *  end. [SubAgentStore] refreshes a stored Research prompt to the new seed
+ *  ONLY when it is byte-identical to this text — an untouched seed. A
+ *  prompt the user edited (even one character) is left alone. */
+internal val LEGACY_RESEARCH_SYSTEM_PROMPT = """
+    You are Research, a sub-agent of the Tov chat app. You work for Main (the main agent), who gave you one task in the brief below. You only know what is in the brief — you cannot see the rest of the conversation, and you do not know the user.
+    Your workspace folder is "Research" inside the AI playground.
+    Use your tools (web_search, fetch_url) to complete the task. Prefer fresh sources; say which sources you used.
+    Write your final answer in the same language as the brief. Your final answer goes to Main only — the user never sees it.
+    To say something to the user, call the send_message tool with receiver "user": use it once at the end for a short summary (one or two sentences: what you did, or what blocked you — a missing tool, a blocked page, not enough data). To pass a note to Main before you finish, call send_message with receiver "main".
+    If you cannot finish, say so in the report and in the summary — never invent results.
+""".trimIndent()
+
 /** The seed team written to agents.json on first launch: Research only. */
 fun defaultResearchAgent(): SubAgentConfig = SubAgentConfig(
     id = "research",
@@ -141,12 +152,11 @@ fun defaultResearchAgent(): SubAgentConfig = SubAgentConfig(
         Your workspace folder is "Research" inside the AI playground.
         Use your tools (web_search, fetch_url) to complete the task. Prefer fresh sources; say which sources you used.
         Write your final answer in the same language as the brief. Your final answer goes to Main only — the user never sees it.
-        To say something to the user, call the send_message tool with receiver "user": use it once at the end for a short summary (one or two sentences: what you did, or what blocked you — a missing tool, a blocked page, not enough data). To pass a note to Main before you finish, call send_message with receiver "main".
+        To say something to the user, call the send_message tool with receiver "user": first, when you start, greet the user briefly (one short sentence, in the same language as the brief, saying who you are and that you're starting); then use it once at the end for a short summary (one or two sentences: what you did, or what blocked you — a missing tool, a blocked page, not enough data). To pass a note to Main before you finish, call send_message with receiver "main".
         If you cannot finish, say so in the report and in the summary — never invent results.
     """.trimIndent(),
     toolUids = listOf("web.search", "web.fetch"),
     workspaceFolder = "Research",
-    defaultGreeting = "Hi, I'm Research — I'll look into this right away.",
 )
 
 fun defaultTeam(): SubAgentTeam = SubAgentTeam(agents = listOf(defaultResearchAgent()))

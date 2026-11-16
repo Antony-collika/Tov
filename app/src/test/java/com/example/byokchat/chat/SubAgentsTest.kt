@@ -1,6 +1,9 @@
 package com.example.byokchat.chat
 
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -26,11 +29,12 @@ class SubAgentsTest {
         assertEquals(32_000, agent.tokenBudget)
         assertEquals(listOf("web.search", "web.fetch"), agent.toolUids)
         assertEquals("Research", agent.workspaceFolder)
-        assertTrue(agent.defaultGreeting.isNotBlank())
         assertTrue(agent.enabled)
         // Phase 3: no marker in the prompt — the sub sends its brief with the send_message tool.
         assertTrue(!agent.systemPrompt.contains("---BRIEF---"))
         assertTrue(agent.systemPrompt.contains("send_message"))
+        // The sub greets the user itself with send_message — no Main-scripted greeting.
+        assertTrue(agent.systemPrompt.contains("greet the user briefly"))
         assertEquals(HistoryVisibility.BRIEF_ONLY, agent.historyVisibility)
         assertNull(agent.model)
         assertNull(agent.modelProviderId)
@@ -121,6 +125,45 @@ class SubAgentStoreTest {
         assertEquals(listOf("research"), store.team.value.agents.map { it.id })
         assertTrue(store.lastLoadError.value?.contains("agents.json") == true)
         assertEquals("{ this is not json", file.readText())
+    }
+
+    @Test fun untouchedSeedPromptIsRefreshedToTheNewSeedOnLoad() {
+        val file = tempFile()
+        file.parentFile?.mkdirs()
+        file.writeText(oldTeamJson(LEGACY_RESEARCH_SYSTEM_PROMPT))
+        val store = SubAgentStore(file)
+        assertEquals(defaultResearchAgent().systemPrompt, store.team.value.byId("research")?.systemPrompt)
+        // The file was rewritten: the new prompt is in, the old greeting field is gone.
+        assertTrue(file.readText().contains("greet the user briefly"))
+        assertTrue(!file.readText().contains("defaultGreeting"))
+    }
+
+    @Test fun editedSeedPromptIsLeftAloneOnLoad() {
+        val file = tempFile()
+        file.parentFile?.mkdirs()
+        val edited = "You are Research. Be extra careful with sources."
+        file.writeText(oldTeamJson(edited))
+        val store = SubAgentStore(file)
+        assertEquals(edited, store.team.value.byId("research")?.systemPrompt)
+        assertTrue(!file.readText().contains("greet the user briefly"))
+    }
+
+    /** An agents.json from before the greeting change: old prompt + the removed defaultGreeting field. */
+    private fun oldTeamJson(prompt: String): String {
+        val json = Json { encodeDefaults = true; ignoreUnknownKeys = true; prettyPrint = true }
+        val agent = JsonObject(
+            mapOf(
+                "id" to JsonPrimitive("research"),
+                "name" to JsonPrimitive("Research"),
+                "role" to JsonPrimitive("Research agent"),
+                "description" to JsonPrimitive("Researches a topic on the web and reports back with sources."),
+                "systemPrompt" to JsonPrimitive(prompt),
+                "toolUids" to JsonArray(listOf(JsonPrimitive("web.search"), JsonPrimitive("web.fetch"))),
+                "workspaceFolder" to JsonPrimitive("Research"),
+                "defaultGreeting" to JsonPrimitive("Hi, I'm Research — I'll look into this right away."),
+            ),
+        )
+        return json.encodeToString(JsonObject(mapOf("version" to JsonPrimitive(1), "agents" to JsonArray(listOf(agent)))))
     }
 
     @Test fun updateAgentRejectsUnknownIdAndInvalidAgent() {

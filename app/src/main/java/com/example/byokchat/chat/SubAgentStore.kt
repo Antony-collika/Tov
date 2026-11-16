@@ -58,8 +58,10 @@ class SubAgentStore(private val file: File) {
         }
         return try {
             val parsed = json.decodeFromString<SubAgentTeam>(file.readText()).sanitized()
-            snapshot = parsed
-            parsed
+            val migrated = migrateLegacyResearchPrompt(parsed)
+            if (migrated != parsed) runCatching { writeFile(migrated) }
+            snapshot = migrated
+            migrated
         } catch (e: Exception) {
             _lastLoadError.value =
                 "Could not read agents.json (${e.message ?: e.javaClass.simpleName}); " +
@@ -68,6 +70,21 @@ class SubAgentStore(private val file: File) {
             snapshot = seed
             seed
         }
+    }
+
+    /**
+     * Refresh an untouched Research seed prompt to the current seed (the
+     * greeting change): only when the stored prompt is byte-identical to
+     * the old seed prompt. A prompt the user edited — even one character
+     * — is left alone, and the file is rewritten only when something
+     * actually changed. The old defaultGreeting field, if present in the
+     * file, is dropped on save (the loader ignores unknown fields).
+     */
+    private fun migrateLegacyResearchPrompt(team: SubAgentTeam): SubAgentTeam {
+        val research = team.byId("research") ?: return team
+        if (research.systemPrompt != LEGACY_RESEARCH_SYSTEM_PROMPT) return team
+        val refreshed = research.copy(systemPrompt = defaultResearchAgent().systemPrompt)
+        return team.copy(agents = team.agents.map { if (it.id == "research") refreshed else it })
     }
 
     private fun writeFile(team: SubAgentTeam) {

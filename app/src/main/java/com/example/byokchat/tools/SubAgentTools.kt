@@ -35,7 +35,7 @@ object SubAgentTools {
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "delegate_to_subagent",
-            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs synchronously — you wait for it to finish. It returns a detailed report as this tool's result, and shows a brief report to the user as its own message. Give a clear brief with exactly what to find and what to include. Also pass a short greeting the sub-agent uses when it joins the chat. Do not delegate tasks the agent's tools cannot do.",
+            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs synchronously — you wait for it to finish. It returns a detailed report as this tool's result, and shows a brief report to the user as its own message. Give a clear brief with exactly what to find and what to include. The sub-agent greets the user itself when it starts. Do not delegate tasks the agent's tools cannot do.",
             schema = delegateSchema(teamProvider()),
             schemaProvider = { delegateSchema(teamProvider()) },
         ) { _, args ->
@@ -54,7 +54,7 @@ object SubAgentTools {
             val brief = args.reqStr("brief")
             val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")
             val turnId = currentTurnId() ?: throw ToolException("No turn is running.")
-            val result = runner.run(agent, brief, args.str("greeting"), conversationId, turnId)
+            val result = runner.run(agent, brief, conversationId, turnId)
             if (result.status == SubRunStatus.FAILED) throw ToolException(result.detailed)
             result.detailed
         },
@@ -77,7 +77,6 @@ object SubAgentTools {
         return schema {
             str("agent", agentDesc, required = true, enum = enabled.map { it.id }.takeIf { it.isNotEmpty() })
             str("brief", "The task: exactly what the sub-agent should do and what to include in its report.", required = true)
-            str("greeting", "Short greeting the sub-agent says to the user when it joins the chat (e.g. \"Hi, I'm Research — I'll look into this right away.\"). If omitted, the agent uses its default greeting.")
         }
     }
 }

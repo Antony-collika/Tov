@@ -51,11 +51,13 @@ data class ActiveSubRun(
  * own folder; by default it never sees the rest of the conversation, only
  * the brief (an agent may opt into seeing Main's recent history).
  *
- * Flow: greet the user (scripted by Main) → loop tool rounds (own round cap
- * + token budget) → on finish, return the detailed report to Main (the
- * delegate tool's result). Every run is recorded in sub_runs.meta.json in
- * the session folder. Dismiss is implicit here: when the run ends, the sub
- * leaves the member list (it stays in the team and can be called again).
+ * Flow: loop tool rounds (own round cap + token budget) → on finish,
+ * return the detailed report to Main (the delegate tool's result). The
+ * sub greets the user itself, with its send_message tool at the start of
+ * its first round (taught in its system prompt) — Main never scripts the
+ * greeting. Every run is recorded in sub_runs.meta.json in the session
+ * folder. Dismiss is implicit here: when the run ends, the sub leaves
+ * the member list (it stays in the team and can be called again).
  *
  * Talking to the user (Phase 3): the sub's plain text goes only to Main.
  * A message reaches the group chat ONLY when the sub calls its
@@ -118,7 +120,6 @@ class SubAgentRunner(
     suspend fun run(
         agent: SubAgentConfig,
         brief: String,
-        greeting: String?,
         conversationId: String,
         turnId: String,
     ): SubRunResult {
@@ -149,9 +150,9 @@ class SubAgentRunner(
         // later Main stop must not be mistaken for a per-sub stop.
         stopRequested.remove(conversationId)
         try {
-            // The sub greets the user when called in (scripted by Main; the
-            // agent's default when Main passes none).
-            writeSubMessage(conversationId, turnId, turnNo, agent, greeting ?: agent.defaultGreeting)
+            // The sub greets the user itself, with its send_message tool
+            // at the start of its first round (taught in its system
+            // prompt) — Main never scripts the greeting.
             // The agent's own model when it has one, else Main's current
             // model (same provider). A removed/renamed provider is a clear
             // failure, not a silent fallback to Main's model.
@@ -497,7 +498,7 @@ class SubAgentRunner(
         )
     }
 
-    /** One of the sub's own messages (greeting or brief report): an assistant message tagged with the agent id. */
+    /** One of the sub's own messages (a send_message to the user, or the brief report): an assistant message tagged with the agent id. */
     private suspend fun writeSubMessage(
         conversationId: String,
         turnId: String,

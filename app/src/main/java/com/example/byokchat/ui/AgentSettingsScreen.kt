@@ -81,7 +81,6 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
     var description by remember(key) { mutableStateOf(agent?.description ?: "") }
     var systemPrompt by remember(key) { mutableStateOf(agent?.systemPrompt ?: "") }
     var workspaceFolder by remember(key) { mutableStateOf(agent?.workspaceFolder ?: "") }
-    var defaultGreeting by remember(key) { mutableStateOf(agent?.defaultGreeting ?: "") }
     var roundCapText by remember(key) { mutableStateOf(agent?.roundCap?.toString() ?: SubAgentConfig.DEFAULT_ROUND_CAP.toString()) }
     var tokenBudgetText by remember(key) { mutableStateOf(agent?.tokenBudget?.toString() ?: SubAgentConfig.DEFAULT_TOKEN_BUDGET.toString()) }
     // A new agent starts with the web tools (the common case); uncheck to take them away.
@@ -166,10 +165,6 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                 label = { Text("Workspace folder") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
             )
             OutlinedTextField(
-                value = defaultGreeting, onValueChange = { defaultGreeting = it },
-                label = { Text("Default greeting") }, modifier = Modifier.fillMaxWidth(), minLines = 2,
-            )
-            OutlinedTextField(
                 value = roundCapText, onValueChange = { roundCapText = it.filter { c -> c.isDigit() } },
                 label = { Text("Max rounds per run (${SubAgentConfig.MIN_ROUND_CAP}–${SubAgentConfig.MAX_ROUND_CAP})") },
                 modifier = Modifier.fillMaxWidth(), singleLine = true,
@@ -234,7 +229,7 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                         id = if (isNew) agentIdSlug(name) else agent!!.id,
                         name = name, role = role, description = description,
                         systemPrompt = systemPrompt, toolUids = toolUids.toList(),
-                        workspaceFolder = workspaceFolder, defaultGreeting = defaultGreeting,
+                        workspaceFolder = workspaceFolder,
                         roundCap = roundCapText.toIntOrNull() ?: SubAgentConfig.DEFAULT_ROUND_CAP,
                         tokenBudget = tokenBudgetText.toIntOrNull() ?: SubAgentConfig.DEFAULT_TOKEN_BUDGET,
                         enabled = enabled,
