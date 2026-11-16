@@ -33,6 +33,12 @@ data class ProviderConfig(
     val includeUsage: Boolean = true,
     /** Các mô hình người dùng ghim lên đầu danh sách chọn. Có giá trị mặc định nên dữ liệu cũ vẫn đọc được. */
     val pinnedModels: List<String> = emptyList(),
+    /**
+     * Header HTTP tùy chỉnh, gửi kèm mọi request tới provider này (mục
+     * Advanced trong màn sửa provider — giống FPilot). Có giá trị mặc
+     * định nên dữ liệu provider cũ vẫn đọc được.
+     */
+    val customHeaders: List<CustomHeader> = emptyList(),
 ) {
     fun effectiveBaseUrl(): String {
         if (baseUrl.isNotBlank()) return baseUrl.trim()
@@ -43,6 +49,11 @@ data class ProviderConfig(
         }
     }
 }
+
+/** Một header HTTP tùy chỉnh của provider: tên + giá trị, gửi kèm mọi
+ * request tới provider đó. Tên rỗng thì bỏ qua khi lưu. */
+@Serializable
+data class CustomHeader(val name: String, val value: String)
 
 object ContextLimits {
     /** Giới hạn ngữ cảnh (token) của một mô hình. Giá trị bạn nhập tay trong nhà cung cấp luôn được ưu tiên. */

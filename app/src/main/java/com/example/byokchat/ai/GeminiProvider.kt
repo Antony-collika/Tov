@@ -27,6 +27,7 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
         var httpStatus: Int? = null
         val req = Request.Builder()
             .url("$base/v1beta/models/$model:streamGenerateContent?alt=sse")
+            .withCustomHeaders(cfg)
             .withAuth()
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
@@ -196,7 +197,7 @@ class GeminiProvider(private val cfg: ProviderConfig, private val log: RequestLo
     }
 
     override suspend fun listModels(): List<String> {
-        val req = Request.Builder().url("$base/v1beta/models?pageSize=200").withAuth().get().build()
+        val req = Request.Builder().url("$base/v1beta/models?pageSize=200").withCustomHeaders(cfg).withAuth().get().build()
         val root = Http.client.getJson(req).jsonObject
         return root["models"]?.jsonArray?.mapNotNull { m ->
             val o = m.jsonObject

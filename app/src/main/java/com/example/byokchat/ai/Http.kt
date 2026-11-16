@@ -1,5 +1,6 @@
 package com.example.byokchat.ai
 
+import com.example.byokchat.data.ProviderConfig
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -116,6 +117,22 @@ suspend fun <T> OkHttpClient.executeCancellable(request: Request, block: suspend
             handle?.dispose()
         }
     }
+
+/** Gắn các header HTTP tùy chỉnh của provider lên request. Gọi TRƯỚC
+ * withAuth() để header xác thực không bao giờ bị custom header đè.
+ * Hàng trùng tên: hàng sau thắng (OkHttp header() thay thế header cũ
+ * cùng tên). Hàng có tên không phải token HTTP hợp lệ (vd có khoảng
+ * trắng) thì bỏ qua để một hàng lỗi không làm hỏng cả request. */
+fun Request.Builder.withCustomHeaders(cfg: ProviderConfig): Request.Builder {
+    cfg.customHeaders.forEach { h ->
+        val name = h.name.trim()
+        if (name.isNotBlank() && TOKEN_REGEX.matches(name)) header(name, h.value.trim())
+    }
+    return this
+}
+
+/** Token HTTP (RFC 7230): tên header chỉ gồm các ký tự này. */
+private val TOKEN_REGEX = Regex("[!#\$%&'*+\\-.^_`|~0-9A-Za-z]+")
 
 /** Gửi một yêu cầu thường (không streaming) và trả về JSON. */
 suspend fun OkHttpClient.getJson(request: Request): JsonElement {

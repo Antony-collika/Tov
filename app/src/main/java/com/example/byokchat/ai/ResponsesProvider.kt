@@ -62,6 +62,7 @@ class ResponsesProvider(
         var httpStatus: Int? = null
         val req = Request.Builder()
             .url("$base/responses")
+            .withCustomHeaders(cfg)
             .withAuth()
             .post(body.toString().toRequestBody(Http.JSON))
             .build()
@@ -276,7 +277,7 @@ class ResponsesProvider(
     }
 
     override suspend fun listModels(): List<String> {
-        val req = Request.Builder().url("$base/models").withAuth().get().build()
+        val req = Request.Builder().url("$base/models").withCustomHeaders(cfg).withAuth().get().build()
         val root = Http.client.getJson(req).jsonObject
         return root["data"]?.jsonArray
             ?.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }
