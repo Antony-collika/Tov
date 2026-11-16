@@ -1,9 +1,15 @@
 package com.example.byokchat.chat
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.debug.DebugProbes
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.PrintStream
 
 /** Tests for the diagnostic log (16/11/2026): lines, handoff format, rolling cap. */
 class DiagnosticsLogTest {
@@ -105,6 +111,69 @@ class DiagnosticsLogTest {
         assertTrue(dump.contains("    at com.example.Foo.bar(Foo.kt:42)"))
         assertTrue(dump.contains("\"alpha\" state=NEW"))
         assertTrue(dump.contains("    (no stack trace)"))
+    }
+
+    @Test fun coroutineDumpWritesNotInstalledNoteWhenProbesAreNotInstalled() {
+        // No test installs the probes, so isInstalled is false here: the
+        // block must carry the note, not an empty dump and not a throw.
+        val log = DiagnosticsLog(tempDir())
+        log.log("handoff/test", "before")
+        log.coroutineDump()
+        log.log("handoff/test", "after")
+        val text = log.readText()
+        assertTrue(text.contains("--- coroutine dump ---"))
+        assertTrue(text.contains("DebugProbes not installed"))
+        assertTrue(text.contains("--- end coroutine dump ---"))
+        // The block sits between the surrounding lines, in order.
+        assertTrue(text.indexOf("before") < text.indexOf("--- coroutine dump ---"))
+        assertTrue(text.indexOf("--- end coroutine dump ---") < text.indexOf("after"))
+    }
+
+    @Test fun coroutineDumpNeverThrowsOnAnUnwritableDir() {
+        val blocker = File(System.getProperty("java.io.tmpdir"), "tov-diag-block-${System.nanoTime()}")
+        blocker.writeText("not a dir")
+        val log = DiagnosticsLog(blocker)
+        log.coroutineDump()
+        assertEquals("", log.readText())
+    }
+
+    @Test fun formatCoroutineDumpShowsNoteWhenNotInstalled() {
+        val dump = formatCoroutineDump("", installed = false, "2026-11-16 12:00:00.000")
+        assertTrue(dump.contains("2026-11-16 12:00:00.000 [coroutine-dump] --- coroutine dump ---"))
+        assertTrue(dump.contains("DebugProbes not installed"))
+        assertTrue(dump.contains("--- end coroutine dump ---"))
+    }
+
+    @Test fun formatCoroutineDumpKeepsDumpTextWhenInstalled() {
+        val dump = formatCoroutineDump(
+            "Coroutines dump 2026/11/16 12:00:00\n\nCoroutine \"main#1\":StandaloneCoroutine{Active}@1, state: SUSPENDED\n",
+            installed = true,
+            "2026-11-16 12:00:00.000",
+        )
+        assertTrue(dump.contains("--- coroutine dump ---"))
+        assertTrue(dump.contains("Coroutine \"main#1\""))
+        assertTrue(dump.contains("--- end coroutine dump ---"))
+        assertTrue(!dump.contains("not installed"))
+    }
+
+    @Test fun formatCoroutineDumpSaysSoWhenInstalledButEmpty() {
+        val dump = formatCoroutineDump("", installed = true, "2026-11-16 12:00:00.000")
+        assertTrue(dump.contains("(no coroutines)"))
+        assertTrue(dump.contains("--- end coroutine dump ---"))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun dumpCoroutinesWithoutInstallThrows() {
+        // Library behaviour, verified against the kotlinx-coroutines-debug
+        // 1.9.0 source (DebugProbes.kt: "All introspecting methods throw
+        // IllegalStateException if debug probes were not installed") — it
+        // does NOT return an empty dump. That is why coroutineDump() checks
+        // isInstalled first instead of calling it blindly.
+        assertFalse(DebugProbes.isInstalled)
+        assertThrows(IllegalStateException::class.java) {
+            val bytes = ByteArrayOutputStream()
+            PrintStream(bytes, true, Charsets.UTF_8).use { DebugProbes.dumpCoroutines(it) }
+        }
     }
 }
 

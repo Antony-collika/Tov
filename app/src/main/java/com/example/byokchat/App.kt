@@ -31,7 +31,9 @@ import com.example.byokchat.tools.ToolRegistry
 import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.debug.DebugProbes
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,12 +47,33 @@ class App : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        installCoroutineDebugProbes()
         container = AppContainer(this)
         CoroutineScope(Dispatchers.IO).launch {
             container.db.messages().markInterrupted()
             container.fs.refresh()
         }
         keepServiceWhileAnswering()
+    }
+
+    /**
+     * Coroutine debug probes (16/11/2026, diagnostic-only): installed once
+     * at startup, before any coroutine is created, so a later coroutine
+     * dump can show where a parked coroutine is suspended — a thread dump
+     * cannot show that (a suspended coroutine has no thread and no stack).
+     * Creation stacktraces are recorded too, so the dump also shows where
+     * each coroutine was created. It slows coroutine creation down; that
+     * overhead is accepted while the sub-agent handoff stall is being
+     * diagnosed. Best-effort: if install ever fails (e.g. the hooks were
+     * stripped), the app still starts and DiagnosticsLog.coroutineDump()
+     * degrades to a note line instead of a dump.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun installCoroutineDebugProbes() {
+        runCatching {
+            DebugProbes.enableCreationStackTraces = true
+            DebugProbes.install()
+        }
     }
 
     /** Có cuộc trò chuyện đang được AI trả lời -> bật dịch vụ nền; hết -> tắt. */

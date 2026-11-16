@@ -100,6 +100,8 @@ dependencies {
     ksp(libs.room.compiler)
 
     implementation(libs.coroutines.android)
+    // Coroutine dump in Diagnostics (16/11/2026): shows where a parked coroutine is suspended.
+    implementation(libs.coroutines.debug)
     implementation(libs.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.coil.compose)

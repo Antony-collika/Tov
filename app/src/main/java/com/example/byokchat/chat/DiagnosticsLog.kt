@@ -1,6 +1,10 @@
 package com.example.byokchat.chat
 
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.debug.DebugProbes
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.PrintStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -72,6 +76,38 @@ class DiagnosticsLog(
         }
     }
 
+    /**
+     * Coroutine dump on demand (16/11/2026): dump every live coroutine's
+     * state and last suspension point and append it to the log as one
+     * delimited block, in the same style as [threadDump]. A thread dump
+     * cannot show a suspended coroutine (it has no thread and no stack),
+     * so this is what shows where a stuck turn is parked. Needs the debug
+     * probes installed at startup (see App); when they are not installed,
+     * [DebugProbes.dumpCoroutines] throws, so the block carries a note
+     * instead. Called only when the user taps "Coroutine dump" on the
+     * Diagnostics screen — no background work, no watcher, no polling.
+     * Best-effort like [log]: a failure never breaks the chat.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun coroutineDump() {
+        runCatching {
+            val installed = DebugProbes.isInstalled
+            val dump = if (installed) {
+                val bytes = ByteArrayOutputStream()
+                PrintStream(bytes, true, Charsets.UTF_8).use { DebugProbes.dumpCoroutines(it) }
+                bytes.toString(Charsets.UTF_8.name())
+            } else {
+                ""
+            }
+            synchronized(lock) {
+                dir.mkdirs()
+                val f = file()
+                f.appendText(formatCoroutineDump(dump, installed, timeFormat.format(Date())))
+                if (f.length() > maxBytes) trimLocked(f)
+            }
+        }
+    }
+
     private fun trimLocked(f: File) {
         val lines = f.readLines()
         if (lines.isEmpty()) return
@@ -102,4 +138,24 @@ internal fun formatThreadDump(traces: Map<Thread, Array<StackTraceElement>>, tim
             }
         }
         appendLine("--- end thread dump ---")
+    }
+
+/**
+ * One delimited coroutine-dump block, ready to append to the log. Pure, so
+ * it can be unit-tested. When the probes are not installed there is no
+ * dump text, so the block carries a note instead of staying empty; when
+ * they are installed but no coroutine exists, it says so.
+ */
+internal fun formatCoroutineDump(dump: String, installed: Boolean, timestamp: String): String =
+    buildString {
+        appendLine("$timestamp [coroutine-dump] --- coroutine dump ---")
+        if (!installed) {
+            appendLine("    (DebugProbes not installed — coroutine dump unavailable)")
+        } else if (dump.isBlank()) {
+            appendLine("    (no coroutines)")
+        } else {
+            append(dump)
+            if (!dump.endsWith("\n")) appendLine()
+        }
+        appendLine("--- end coroutine dump ---")
     }
