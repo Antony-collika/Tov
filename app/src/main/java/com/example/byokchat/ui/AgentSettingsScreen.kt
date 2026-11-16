@@ -28,19 +28,26 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.byokchat.chat.AgentConfigMd
 import com.example.byokchat.chat.HistoryVisibility
+import com.example.byokchat.chat.ParsedAgentConfig
 import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.container
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Id for a new agent, from its name ("My Reviewer" -> "my-reviewer"). Pure. */
 fun agentIdSlug(name: String): String {
@@ -95,6 +102,135 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var showDelete by remember { mutableStateOf(false) }
     var modelMenu by remember { mutableStateOf(false) }
+    // Config file (Stage 2): an optional external file this agent's fields
+    // sync with. Blank = the fields live in agents.json only.
+    var configFile by remember(key) { mutableStateOf(agent?.configFile ?: "") }
+    var configFileError by remember { mutableStateOf<String?>(null) }
+    var syncNote by remember { mutableStateOf<String?>(null) }
+    var configFileName by remember(configFile) { mutableStateOf(configFile.substringAfterLast('/').ifEmpty { configFile }) }
+    val scope = rememberCoroutineScope()
+
+    /** The agent as the form stands now (id slugged from the name for a new agent). */
+    fun formConfig() = SubAgentConfig(
+        id = if (isNew) agentIdSlug(name) else agent!!.id,
+        name = name, role = role, description = description,
+        systemPrompt = systemPrompt, toolUids = toolUids.toList(),
+        workspaceFolder = workspaceFolder,
+        roundCap = roundCapText.toIntOrNull() ?: SubAgentConfig.DEFAULT_ROUND_CAP,
+        tokenBudget = tokenBudgetText.toIntOrNull() ?: SubAgentConfig.DEFAULT_TOKEN_BUDGET,
+        enabled = enabled,
+        modelProviderId = modelChoice?.first, model = modelChoice?.second,
+        historyVisibility = history,
+        configFile = configFile.trim().ifEmpty { null },
+    )
+
+    /** Fill the form from a parsed config file (only the fields the file has). */
+    fun applyParsed(p: ParsedAgentConfig) {
+        p.name?.let { name = it }
+        p.role?.let { role = it }
+        p.description?.let { description = it }
+        p.systemPrompt?.let { systemPrompt = it }
+        p.workspaceFolder?.let { workspaceFolder = it }
+        p.toolUids?.let { toolUids = it.toSet() }
+        if (p.modelProviderId != null && p.model != null) modelChoice = p.modelProviderId to p.model
+        p.roundCap?.let { roundCapText = it.toString() }
+        p.tokenBudget?.let { tokenBudgetText = it.toString() }
+        p.historyVisibility?.let { history = it }
+        p.enabled?.let { enabled = it }
+    }
+
+    // Pick a config file: parse it at once and fill the fields with it.
+    // Write access is kept so saving can write the fields back to it.
+    val pickConfigFile = rememberCardFilePicker(
+        onPicked = { path ->
+            configFile = path
+            configFileError = null
+            syncNote = null
+            scope.launch(Dispatchers.IO) {
+                val result = runCatching { AgentConfigMd.parse(container.fs.readCardFile(path)) }
+                withContext(Dispatchers.Main) {
+                    result.onSuccess { parsed ->
+                        applyParsed(parsed)
+                        syncNote = "Filled from the linked file."
+                    }.onFailure { e ->
+                        configFileError = "Could not read the file: ${e.message ?: e.javaClass.simpleName}"
+                    }
+                }
+            }
+        },
+        onPickError = { configFileError = it },
+        writeAccess = true,
+    )
+
+    // Display name of the linked file (a URI needs a provider lookup).
+    LaunchedEffect(configFile) {
+        if (configFile.isNotBlank()) {
+            configFileName = withContext(Dispatchers.IO) { container.fs.cardFileDisplayName(configFile) }
+        }
+    }
+
+    // Two-way sync, change-triggered ONLY — no file watcher, no polling,
+    // no background sync (performance: the app must not slow down watching
+    // a file). Only two sync points exist: (a) here, when this screen
+    // opens for a linked agent — the file is re-read once, and when its
+    // content differs from the stored fields the file wins and the fields
+    // are filled from it; (b) on save, the fields are written back to the
+    // file. Nothing else reads or writes the file.
+    LaunchedEffect(key) {
+        val stored = agent ?: return@LaunchedEffect
+        val path = stored.configFile?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val parsed = withContext(Dispatchers.IO) {
+            runCatching { AgentConfigMd.parse(container.fs.readCardFile(path)) }
+        }
+        parsed.onSuccess { p ->
+            if (p.differsFrom(stored)) {
+                applyParsed(p)
+                syncNote = "Updated from the linked file."
+            }
+        }.onFailure { e ->
+            configFileError =
+                "Could not read the linked file (${e.message ?: e.javaClass.simpleName}); showing the saved fields."
+        }
+    }
+
+    /**
+     * Create a new template file in Storage/template/ and link this agent
+     * to it. The file starts from the form when the agent already has a
+     * name; otherwise from the blank template (and the form is filled
+     * with it, so a new agent has a starting point).
+     */
+    fun createTemplate() {
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                if (container.fs.sessionRootOrNull() == null) {
+                    error("Choose a Session storage folder first (Settings → Select Storage and Playground folder).")
+                }
+                val fromForm = name.isNotBlank()
+                val content = if (fromForm) AgentConfigMd.serialize(formConfig()) else AgentConfigMd.agentTemplate()
+                val relPath = "template/" + uniqueTemplateName("agent_template.md") { n ->
+                    container.fs.findSession("template/$n") != null
+                }
+                container.fs.writeSessionText(relPath, content)
+                val doc = container.fs.findSession(relPath)
+                    ?: error("Could not find the created file.")
+                val uriString = doc.uri.toString()
+                runCatching { container.fs.takeCardFilePermission(doc.uri) }
+                container.fs.readCardFile(uriString)
+                uriString to fromForm
+            }.onSuccess { (uriString, fromForm) ->
+                withContext(Dispatchers.Main) {
+                    configFile = uriString
+                    configFileError = null
+                    if (!fromForm) {
+                        applyParsed(AgentConfigMd.parse(AgentConfigMd.agentTemplate()))
+                        syncNote = "Filled from the new template file."
+                    }
+                }
+            }.onFailure { e ->
+                withContext(Dispatchers.Main) { configFileError = e.message ?: "Could not create the file." }
+            }
+        }
+    }
 
     // Tools a sub may use: everything except the delegate tool (no sub-subs).
     // The send_message tool is added to every run by the runner, so it is
@@ -143,6 +279,38 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
             }
             if (!isNew) {
                 Text("Id: ${agent!!.id} (never changes)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text("Config file", style = MaterialTheme.typography.labelLarge)
+            if (configFile.isBlank()) {
+                Text("(no file linked)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text(configFileName, style = MaterialTheme.typography.bodyMedium)
+            }
+            Text(
+                "Link a file and the fields stay in sync with it: opening this screen reads the file, saving writes the fields back. The file is a plain markdown file — edit it in any editor.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Column {
+                TextButton(onClick = { pickConfigFile.launch(arrayOf("*/*")) }) {
+                    Text(if (configFile.isBlank()) "Choose file" else "Change file")
+                }
+                if (configFile.isNotBlank()) {
+                    TextButton(onClick = {
+                        configFileError = null
+                        openFileAt(context, container.fs, configFile.trim(), onError = { configFileError = it })
+                    }) { Text("Open file") }
+                }
+                TextButton(onClick = ::createTemplate) { Text("Create template") }
+                if (configFile.isNotBlank()) {
+                    TextButton(onClick = { configFile = ""; syncNote = null }) { Text("Unlink file") }
+                }
+            }
+            if (configFileError != null) {
+                Text(configFileError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            if (syncNote != null) {
+                Text(syncNote!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             OutlinedTextField(
                 value = name, onValueChange = { name = it },
@@ -241,19 +409,33 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
             }
             Button(
                 onClick = {
-                    val updated = SubAgentConfig(
-                        id = if (isNew) agentIdSlug(name) else agent!!.id,
-                        name = name, role = role, description = description,
-                        systemPrompt = systemPrompt, toolUids = toolUids.toList(),
-                        workspaceFolder = workspaceFolder,
-                        roundCap = roundCapText.toIntOrNull() ?: SubAgentConfig.DEFAULT_ROUND_CAP,
-                        tokenBudget = tokenBudgetText.toIntOrNull() ?: SubAgentConfig.DEFAULT_TOKEN_BUDGET,
-                        enabled = enabled,
-                        modelProviderId = modelChoice?.first, model = modelChoice?.second,
-                        historyVisibility = history,
-                    )
+                    val updated = formConfig()
                     val result = if (isNew) store.addAgent(updated) else store.updateAgent(updated)
-                    result.onSuccess { onBack() }.onFailure { error = it.message }
+                    if (result.isFailure) {
+                        error = result.exceptionOrNull()?.message
+                    } else {
+                        // Saved in agents.json. When a file is linked, write
+                        // the fields back to it (sync point (b)); a write
+                        // failure keeps the agent saved but stays on this
+                        // screen with the error shown.
+                        val path = updated.configFile
+                        if (path == null) {
+                            onBack()
+                        } else {
+                            scope.launch(Dispatchers.IO) {
+                                val write = runCatching {
+                                    container.fs.writeCardFile(path, AgentConfigMd.serialize(updated))
+                                }
+                                withContext(Dispatchers.Main) {
+                                    write.onSuccess { onBack() }
+                                        .onFailure {
+                                            error = "Saved, but could not write back to the linked file: " +
+                                                (it.message ?: it.javaClass.simpleName)
+                                        }
+                                }
+                            }
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (isNew) "Add agent" else "Save") }

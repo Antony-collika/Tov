@@ -53,6 +53,13 @@ data class SubAgentConfig(
     val model: String? = null,
     /** What the agent may see beyond its brief. */
     val historyVisibility: HistoryVisibility = HistoryVisibility.BRIEF_ONLY,
+    /**
+     * Optional linked config file (relative playground path or content://
+     * URI): the fields above are kept in sync with it — the Agent settings
+     * screen re-reads it on open and writes it back on save. Null = the
+     * fields live in agents.json only.
+     */
+    val configFile: String? = null,
 ) {
     companion object {
         const val DEFAULT_ROUND_CAP = 10
@@ -79,6 +86,7 @@ data class SubAgentConfig(
         tokenBudget = tokenBudget.coerceIn(MIN_TOKEN_BUDGET, MAX_TOKEN_BUDGET),
         modelProviderId = modelProviderId?.trim()?.takeIf { it.isNotBlank() },
         model = model?.trim()?.takeIf { it.isNotBlank() },
+        configFile = configFile?.trim()?.takeIf { it.isNotBlank() },
     )
 
     /** Problems the settings screen shows instead of saving silently. Empty = OK. */

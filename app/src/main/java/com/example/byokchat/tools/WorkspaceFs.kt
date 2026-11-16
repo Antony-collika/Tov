@@ -645,6 +645,39 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
         true
     }.getOrDefault(false)
 
+    /**
+     * Giữ quyền đọc + ghi lâu dài cho file user vừa chọn bằng hộp chọn hệ
+     * thống (đồng bộ cấu hình agent cần ghi lại file, thẻ chỉ cần đọc).
+     * Trả về false khi nhà cung cấp không cho giữ quyền — lúc đó không
+     * nên lưu URI (quyền sẽ mất khi khởi động lại app).
+     */
+    fun takeCardFileReadWritePermission(uri: Uri): Boolean = runCatching {
+        resolver.takePersistableUriPermission(
+            uri,
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+        )
+        true
+    }.getOrDefault(false)
+
+    /**
+     * Ghi nội dung file thẻ trỏ tới (đối xứng [readCardFile]): URI ngoài
+     * ghi qua ContentResolver (cần quyền ghi lâu dài đã giữ lúc chọn
+     * file); đường dẫn tương đối ghi trong playground như cũ. Chạy chặn,
+     * gọi từ luồng nền. Dùng cho đồng bộ cấu hình agent (ghi lại file khi
+     * lưu trong app) — thẻ không ghi lại file nên không dùng chung.
+     */
+    fun writeCardFile(source: String, text: String) {
+        if (isExternalCardFile(source)) {
+            val uri = Uri.parse(source)
+            val doc = DocumentFile.fromSingleUri(ctx, uri)
+                ?: throw ToolException("Could not write to the file.")
+            resolver.openOutputStream(uri, "wt")?.use { it.write(text.toByteArray(Charsets.UTF_8)) }
+                ?: throw ToolException("Could not write to '${doc.name ?: source}'.")
+            return
+        }
+        writeText(source, text)
+    }
+
     /** Tên hiển thị đã tra được của file ngoài, để không hỏi lại nhà cung cấp. */
     private val cardFileNames = ConcurrentHashMap<String, String>()
 
