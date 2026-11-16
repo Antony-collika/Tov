@@ -79,12 +79,22 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // kotlinx-coroutines-debug and byte-buddy-agent both ship these
-            // Windows-only attach DLLs; they collide at
-            // mergeReleaseJavaResource and are useless on Android.
+            // kotlinx-coroutines-debug shades byte-buddy into its jar, so
+            // the debug jar and the byte-buddy jars ship identical
+            // resources that collide at mergeReleaseJavaResource. The
+            // Windows attach DLLs and the Maven/license metadata are
+            // useless on Android, so exclude them all at once.
             excludes += setOf(
                 "win32-x86/attach_hotspot_windows.dll",
                 "win32-x86-64/attach_hotspot_windows.dll",
+                "META-INF/licenses/ASM",
+                "META-INF/maven/net.bytebuddy/byte-buddy/pom.properties",
+                "META-INF/maven/net.bytebuddy/byte-buddy/pom.xml",
+                "META-INF/maven/net.bytebuddy/byte-buddy-dep/pom.properties",
+                "META-INF/maven/net.bytebuddy/byte-buddy-dep/pom.xml",
+                "META-INF/maven/net.bytebuddy/byte-buddy-agent/pom.properties",
+                "META-INF/maven/net.bytebuddy/byte-buddy-agent/pom.xml",
+                "META-INF/versions/9/module-info.class",
             )
         }
     }
