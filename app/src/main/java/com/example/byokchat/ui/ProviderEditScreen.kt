@@ -1,6 +1,7 @@
 package com.example.byokchat.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +50,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.container
+import com.example.byokchat.data.CustomHeader
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.ProviderType
 import kotlinx.coroutines.launch
@@ -72,6 +77,10 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
     // Custom (OpenAI Responses và Gemini tự gửi usage).
     // Provider mới mặc định bật.
     var includeUsage by remember { mutableStateOf(existing?.includeUsage ?: true) }
+    // Header HTTP tùy chỉnh (mục Advanced): mở sẵn khi provider đã có
+    // header, thu gọn khi chưa có.
+    val headers = remember { mutableStateListOf<CustomHeader>().apply { addAll(existing?.customHeaders ?: emptyList()) } }
+    var advancedExpanded by remember { mutableStateOf(existing?.customHeaders?.isNotEmpty() == true) }
     var makeDefault by remember { mutableStateOf(existing == null || existing.id == activeId) }
     var fetching by remember { mutableStateOf(false) }
     /** Kết quả lần fetch gần nhất: null = chưa fetch. */
@@ -93,6 +102,8 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
             contextTokens = contextText.trim().toIntOrNull() ?: 0,
             maxOutputTokens = maxOutText.trim().toIntOrNull()?.coerceAtLeast(256) ?: 8192,
             includeUsage = includeUsage,
+            // Hàng có tên rỗng thì bỏ; tên và giá trị đều trim.
+            customHeaders = headers.map { CustomHeader(it.name.trim(), it.value.trim()) }.filter { it.name.isNotBlank() },
         )
     }
 
@@ -228,6 +239,48 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     }
                     Switch(checked = includeUsage, onCheckedChange = { includeUsage = it })
                 }
+            }
+            // Advanced: header HTTP tùy chỉnh, gửi kèm mọi request tới
+            // provider này (giống FPilot). Mở sẵn khi đã có header.
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { advancedExpanded = !advancedExpanded },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Advanced", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                Icon(
+                    if (advancedExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (advancedExpanded) "Collapse" else "Expand",
+                )
+            }
+            if (advancedExpanded) {
+                Text("Custom HTTP headers", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "Sent on every request to this provider",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                headers.forEachIndexed { index, header ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = header.name,
+                            onValueChange = { headers[index] = header.copy(name = it) },
+                            label = { Text("Header name") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                        )
+                        OutlinedTextField(
+                            value = header.value,
+                            onValueChange = { headers[index] = header.copy(value = it) },
+                            label = { Text("Value") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1.2f).padding(start = 8.dp),
+                        )
+                        IconButton(onClick = { headers.removeAt(index) }) {
+                            Icon(Icons.Filled.Close, contentDescription = "Remove header")
+                        }
+                    }
+                }
+                TextButton(onClick = { headers.add(CustomHeader("", "")) }) { Text("+ Add row") }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Use as the default for new conversations", modifier = Modifier.weight(1f))
