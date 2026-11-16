@@ -97,7 +97,9 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
     var modelMenu by remember { mutableStateOf(false) }
 
     // Tools a sub may use: everything except the delegate tool (no sub-subs).
-    // The send_message tool is added to every run by the runner, so it is never listed here.
+    // The send_message tool is added to every run by the runner, so it is
+    // not a checkbox below — it is shown as a built-in row instead (always
+    // on, Main cannot use it).
     val pickableTools = container.registry.all.filter { !it.uid.startsWith("sub.") }
     val modelOptions: List<Pair<String, Pair<String, String>?>> =
         listOf("Follow Main's model" to null) +
@@ -189,6 +191,20 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                         Text(tool.defaultName, style = MaterialTheme.typography.bodyMedium)
                         Text(tool.uid, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+            }
+            // Built-in, not a checkbox: the runner adds send_message to
+            // every sub run, and Main cannot use it (it is not in the tool
+            // registry). Shown so the user can see what the sub can do.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = true, onCheckedChange = null, enabled = false)
+                Column {
+                    Text("send_message", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "sub.send — built-in, always on. Only the sub can use it, to send a message to the user or to Main. Main cannot call it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
             Text("Model", style = MaterialTheme.typography.labelLarge)

@@ -1,5 +1,6 @@
 package com.example.byokchat.tools
 
+import com.example.byokchat.chat.SubAgentRunner
 import com.example.byokchat.chat.defaultResearchAgent
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -39,5 +40,18 @@ class SubAgentToolsTest {
 
     @Test fun delegateSchemaWithEmptyTeamHasNoEnum() {
         assertNull(enumOf(SubAgentTools.delegateSchema(emptyList())))
+    }
+
+    @Test fun sendMessageIsNotInTheRegistry_MainCannotCallIt() {
+        // The registry is what Main sees: the delegate is the only sub tool
+        // in it. send_message is offered by the runner to subs only, so
+        // Main can never call it — but it is still shown in the agent
+        // settings as a built-in row, so the user knows the sub has it.
+        val tools = SubAgentTools.build({ null })
+        assertEquals(listOf("sub.delegate"), tools.map { it.uid })
+        assertTrue(tools.none { it.uid == SubAgentRunner.SEND_TOOL_UID })
+        assertTrue(tools.none { it.defaultName == SubAgentRunner.SEND_TOOL_NAME })
+        assertEquals("sub.send", SubAgentRunner.SEND_TOOL_UID)
+        assertEquals("send_message", SubAgentRunner.SEND_TOOL_NAME)
     }
 }
