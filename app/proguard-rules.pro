@@ -5,3 +5,8 @@
 # Rhino itself must NOT be excluded: NewPipeExtractor needs it at runtime.
 -dontwarn java.beans.**
 -dontwarn javax.script.**
+
+# kotlinx-coroutines-debug references BlockHound (optional, test-only) via
+# CoroutinesBlockHoundIntegration, which is never present on Android.
+# DebugProbes itself does not touch that code path.
+-dontwarn reactor.blockhound.integration.**
