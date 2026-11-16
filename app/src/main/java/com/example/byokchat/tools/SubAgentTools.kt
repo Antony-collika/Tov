@@ -1,5 +1,6 @@
 package com.example.byokchat.tools
 
+import com.example.byokchat.chat.DiagnosticsLog
 import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.chat.SubAgentRunner
 import com.example.byokchat.chat.SubRunStatus
@@ -29,6 +30,8 @@ object SubAgentTools {
     fun build(
         subRunner: () -> SubAgentRunner?,
         teamProvider: () -> List<SubAgentConfig> = { emptyList() },
+        /** Diagnostic log (16/11/2026): the handoff steps, for the Diagnostics screen. Null = no logging. */
+        diagnosticsLog: DiagnosticsLog? = null,
     ): List<Tool> = listOf(
         Tool(
             uid = "sub.delegate",
@@ -54,7 +57,15 @@ object SubAgentTools {
             val brief = args.reqStr("brief")
             val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")
             val turnId = currentTurnId() ?: throw ToolException("No turn is running.")
+            val handoffStartedAt = System.currentTimeMillis()
             val result = runner.run(agent, brief, conversationId, turnId)
+            // Handoff step (16/11/2026): the run returned — the next step
+            // is the engine recording this result in the chat history.
+            // Logged before the FAILED check, so a failed run is traced too.
+            diagnosticsLog?.handoff(
+                "delegate.handler.return", conversationId, turnId,
+                "agent=${agent.id} status=${result.status} took=${System.currentTimeMillis() - handoffStartedAt}ms",
+            )
             if (result.status == SubRunStatus.FAILED) throw ToolException(result.detailed)
             result.detailed
         },

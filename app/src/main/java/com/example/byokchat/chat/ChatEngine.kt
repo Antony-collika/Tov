@@ -27,10 +27,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.UUID
@@ -69,6 +71,8 @@ class ChatEngine(
     private val fs: WorkspaceFs? = null,
     /** Đồng bộ hai chiều history.md (Đợt E); null = chỉ xuất một chiều như Đợt D. */
     private val historySync: HistorySync? = null,
+    /** Diagnostic log (16/11/2026): the handoff steps, for the Diagnostics screen. Null = no logging. */
+    private val diagnosticsLog: DiagnosticsLog? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -431,25 +435,94 @@ class ChatEngine(
                 // turn owns the conversation now, so this result is dropped
                 // instead of landing in the new turn's history.
                 if (jobs[conversationId] !== myJob) return
-                msgDao.upsert(
-                    MessageEntity(
-                        id = UUID.randomUUID().toString(),
-                        conversationId = conversationId,
-                        turnId = turnId,
-                        turnNo = turnNo,
-                        seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
-                        role = "tool",
-                        text = outcome.resultText,
-                        toolCallId = call.id,
-                        toolUid = outcome.uid,
-                        toolName = call.name,
-                        toolIsError = outcome.isError,
-                        createdAt = System.currentTimeMillis(),
-                    )
-                )
+                recordToolResult(msgDao, conversationId, turnId, turnNo, call, outcome)
             }
         }
     }
+
+    /**
+     * Record one tool result (16/11/2026): the only step between a sub
+     * finishing and the next request, and a stuck write here used to hang
+     * the whole turn with no error. The write is capped at
+     * [TOOL_RESULT_UPSERT_TIMEOUT_MS]: on timeout, the failure is logged
+     * and an error result is recorded instead, so the turn continues and
+     * Main answers from history. If even that write fails, the turn still
+     * continues — sanitize drops the orphan call and Main answers from
+     * history. A genuine user Stop is NOT caught here (only the timeout
+     * is): its cancellation still propagates and settleTurn writes the
+     * Interrupted marker, as before.
+     */
+    private suspend fun recordToolResult(
+        msgDao: MessageDao,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        call: AiToolCall,
+        outcome: ToolOutcome,
+    ) {
+        val startedAt = System.currentTimeMillis()
+        diagnosticsLog?.handoff("engine.tool-result.upsert.start", conversationId, turnId, "tool=${call.name}")
+        val recorded = try {
+            withTimeout(TOOL_RESULT_UPSERT_TIMEOUT_MS) {
+                msgDao.upsert(toolResultEntity(msgDao, conversationId, turnId, turnNo, call, outcome))
+            }
+            true
+        } catch (e: TimeoutCancellationException) {
+            diagnosticsLog?.handoff(
+                "engine.tool-result.upsert.timeout", conversationId, turnId,
+                "tool=${call.name} after=${System.currentTimeMillis() - startedAt}ms",
+            )
+            runCatching {
+                withTimeout(TOOL_RESULT_UPSERT_TIMEOUT_MS) {
+                    msgDao.upsert(
+                        toolResultEntity(
+                            msgDao, conversationId, turnId, turnNo, call,
+                            outcome.copy(resultText = ModelFacingText.subResultNotRecorded(call.name), isError = true),
+                        ),
+                    )
+                }
+            }.onFailure {
+                diagnosticsLog?.handoff(
+                    "engine.tool-result.error-upsert.failed", conversationId, turnId,
+                    "tool=${call.name} ${it.message ?: it.javaClass.simpleName}",
+                )
+            }.isSuccess
+        }
+        if (recorded) {
+            diagnosticsLog?.handoff(
+                "engine.tool-result.upsert.end", conversationId, turnId,
+                "tool=${call.name} took=${System.currentTimeMillis() - startedAt}ms",
+            )
+        } else {
+            diagnosticsLog?.handoff(
+                "engine.tool-result.upsert.gave-up", conversationId, turnId,
+                "tool=${call.name} — continuing without the result; the orphan call will be dropped from the next request",
+            )
+        }
+    }
+
+    /** One tool-result message row. Built inside the timeout so the seq read is capped too. */
+    private suspend fun toolResultEntity(
+        msgDao: MessageDao,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        call: AiToolCall,
+        outcome: ToolOutcome,
+    ): MessageEntity = MessageEntity(
+        id = UUID.randomUUID().toString(),
+        conversationId = conversationId,
+        turnId = turnId,
+        turnNo = turnNo,
+        seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+        role = "tool",
+        text = outcome.resultText,
+        toolCallId = call.id,
+        toolUid = outcome.uid,
+        toolName = call.name,
+        toolIsError = outcome.isError,
+        createdAt = System.currentTimeMillis(),
+    )
 
     /**
      * Write "Interrupted by the user." tool results for the calls of a round
@@ -617,5 +690,15 @@ class ChatEngine(
         const val MAX_TOOL_ROUNDS = 12
         private const val LIVE_INTERVAL_MS = 150L
         private const val DB_FLUSH_MS = 3000L
+        /**
+         * Cap on recording one tool result (16/11/2026): a stuck write
+         * here used to hang the whole turn with no error — the sub had
+         * finished, its result was never recorded, and the next request
+         * was never built. 30s is far above a normal local write and far
+         * below "forever": on timeout the turn records an error result
+         * instead and continues. Only this write is capped — never the
+         * tool run itself (a legit sub run can take minutes).
+         */
+        const val TOOL_RESULT_UPSERT_TIMEOUT_MS = 30_000L
     }
 }

@@ -78,6 +78,8 @@ class SubAgentRunner(
     private val tools: ToolRuntime,
     private val fs: WorkspaceFs,
     private val requestLog: RequestLog? = null,
+    /** Diagnostic log (16/11/2026): the handoff steps, for the Diagnostics screen. Null = no logging. */
+    private val diagnosticsLog: DiagnosticsLog? = null,
 ) {
     companion object {
         /** Uid + model-facing name of the sub's send tool (Phase 3). It is
@@ -306,6 +308,12 @@ class SubAgentRunner(
             finishOrFallback(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser)
         }
         _sessionSubTokens.update { it + (conversationId to (it[conversationId] ?: 0) + result.tokensUsed) }
+        // Handoff step (16/11/2026): the run returned — the next step is
+        // the delegate tool returning, then the engine recording the result.
+        diagnosticsLog?.handoff(
+            "sub.run.return", conversationId, turnId,
+            "agent=${agent.id} status=${result.status} rounds=${result.rounds} took=${System.currentTimeMillis() - startedAt}ms",
+        )
         if (cancelled) throw CancellationException("Interrupted by the user.")
         return result
     }

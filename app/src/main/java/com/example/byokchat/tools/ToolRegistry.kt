@@ -36,11 +36,13 @@ class ToolRegistry(
     private val confirmations: ConfirmationBroker,
     /** The loaded sub-agent team (Phase 3): the delegate tool's agent enum is built from it. */
     private val teamProvider: () -> List<com.example.byokchat.chat.SubAgentConfig> = { emptyList() },
+    /** Diagnostic log (16/11/2026): the handoff steps, for the Diagnostics screen. Null = no logging. */
+    private val diagnosticsLog: com.example.byokchat.chat.DiagnosticsLog? = null,
 ) : ToolRuntime {
     /** Set by AppContainer after the sub-agent runner is built (it needs this registry for the sub's own tools). */
     var subRunner: com.example.byokchat.chat.SubAgentRunner? = null
 
-    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build({ subRunner }, teamProvider)
+    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build({ subRunner }, teamProvider, diagnosticsLog)
     private val byUid = all.associateBy { it.uid }
 
     fun tool(uid: String): Tool? = byUid[uid]
@@ -265,11 +267,22 @@ class ToolRegistry(
                 Dispatchers.IO + WorkspaceFs.cancelJob.asContextElement(currentCoroutineContext()[Job]) +
                     ToolProgressScope(call.id) +
                     if (conversationId != null) ConversationScope(conversationId, turnId) else EmptyCoroutineContext
-            ToolOutcome(
+            val outcome = ToolOutcome(
                 tool.uid,
                 withContext(runContext) { tool.run(env, args) }.cap(),
                 false,
             )
+            // Handoff step (16/11/2026): the delegate tool returned — the
+            // next step is the engine recording the result in the chat
+            // history. Only the delegate is traced: it is the one whose
+            // result the next request depends on.
+            if (tool.uid == "sub.delegate") {
+                diagnosticsLog?.handoff(
+                    "delegate.execute.return", conversationId ?: "", turnId,
+                    "tool=${call.name} error=${outcome.isError}",
+                )
+            }
+            outcome
         } catch (e: CancellationException) {
             throw e
         } catch (e: ToolException) {

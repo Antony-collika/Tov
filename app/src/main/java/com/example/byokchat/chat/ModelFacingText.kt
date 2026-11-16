@@ -64,6 +64,12 @@ object ModelFacingText {
     /** Tool chạy lỗi. */
     fun toolError(detail: String): String = "Error while running the tool: $detail"
 
+    /** Kết quả tool khi sub đã xong việc nhưng báo cáo của nó ghi vào DB
+     *  không được (16/11/2026): model không có báo cáo, trả lời từ lịch
+     *  sử thay vì gọi lại sub ngay. */
+    fun subResultNotRecorded(toolName: String): String =
+        "The sub-agent finished, but its report could not be recorded (the '$toolName' result was not saved), so you do not have it. Answer from the conversation history instead, or call the sub-agent again if you need the report."
+
     /** Kết quả tool cũ trong lịch sử đã rút gọn thành một dòng (thẻ History, Đợt C). */
     fun compactedToolResult(toolName: String, chars: Int, turn: Int): String =
         "[Shortened result: $toolName, $chars characters, turn T$turn. Call the tool again for the full result.]"
