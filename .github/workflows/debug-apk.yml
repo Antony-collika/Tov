@@ -4,11 +4,23 @@
 # (the Coroutine dump button silently wrote nothing on the release build),
 # while a debug build has no minification, so the dump should work there.
 # DELETE this file once the hang is fixed — the release workflow in
-# android.yml stays. Manual trigger only: it is never run by a push or PR.
+# android.yml stays.
+#
+# The push trigger exists only to REGISTER this workflow on this branch:
+# GitHub only lets workflow_dispatch run for workflows it has seen on the
+# default branch, so a dispatch-only file living only on a feature branch
+# answers 404. A push that touches this file registers it (and runs the
+# debug build once); from then on it is dispatchable on this branch too.
+# It is scoped to this branch and to this file, so no other push runs it.
 name: Android Debug APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/group-chat-ui
+    paths:
+      - .github/workflows/debug-apk.yml
 
 permissions:
   contents: read
