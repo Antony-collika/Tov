@@ -53,6 +53,13 @@ fun ModelPickerSheet(
     onTogglePin: (providerId: String, model: String) -> Unit,
     onConnect: () -> Unit,
     onDismiss: () -> Unit,
+    /**
+     * Agent settings only: when set, the sheet offers a "Follow Main's
+     * model" row on top (an agent with no own model follows Main). Null
+     * = the chat picker, no such row.
+     */
+    onFollowMain: (() -> Unit)? = null,
+    followMainSelected: Boolean = false,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
@@ -66,7 +73,7 @@ fun ModelPickerSheet(
                 Button(onClick = onConnect) { Text("Connect AI") }
             }
         } else {
-            PickerBody(providers, providerId, model, refreshing, onSelect, onTogglePin)
+            PickerBody(providers, providerId, model, refreshing, onSelect, onTogglePin, onFollowMain, followMainSelected)
         }
     }
 }
@@ -79,6 +86,8 @@ private fun PickerBody(
     refreshing: Boolean,
     onSelect: (String, String) -> Unit,
     onTogglePin: (String, String) -> Unit,
+    onFollowMain: (() -> Unit)? = null,
+    followMainSelected: Boolean = false,
 ) {
     var query by remember { mutableStateOf("") }
     var manual by remember { mutableStateOf(false) }
@@ -108,6 +117,29 @@ private fun PickerBody(
             modifier = Modifier.fillMaxWidth(),
         )
         LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            if (onFollowMain != null) {
+                item(key = "follow-main") {
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .background(if (followMainSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, RoundedCornerShape(12.dp))
+                            .clickable(onClick = onFollowMain)
+                            .padding(start = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f).padding(vertical = 12.dp)) {
+                            Text(
+                                "Follow Main's model",
+                                fontWeight = if (followMainSelected) FontWeight.Bold else null,
+                            )
+                            Text(
+                                "Use whatever model Main is using right now.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
             if (pinned.isNotEmpty()) {
                 item(key = "h-pin") { SectionLabel("Pinned") }
                 items(pinned, key = { (p, m) -> "pin:${p.id}:$m" }) { (p, m) ->

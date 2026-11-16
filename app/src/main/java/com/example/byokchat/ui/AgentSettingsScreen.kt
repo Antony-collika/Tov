@@ -14,8 +14,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -101,7 +99,8 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
     var enabled by remember(key) { mutableStateOf(agent?.enabled ?: true) }
     var error by remember { mutableStateOf<String?>(null) }
     var showDelete by remember { mutableStateOf(false) }
-    var modelMenu by remember { mutableStateOf(false) }
+    var showModelPicker by remember { mutableStateOf(false) }
+    var showToolPicker by remember { mutableStateOf(false) }
     // Config file (Stage 2): an optional external file this agent's fields
     // sync with. Blank = the fields live in agents.json only.
     var configFile by remember(key) { mutableStateOf(agent?.configFile ?: "") }
@@ -237,9 +236,6 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
     // not a checkbox below — it is shown as a built-in row instead (always
     // on, Main cannot use it).
     val pickableTools = container.registry.all.filter { !it.uid.startsWith("sub.") }
-    val modelOptions: List<Pair<String, Pair<String, String>?>> =
-        listOf("Follow Main's model" to null) +
-            providers.flatMap { p -> p.models.map { m -> "${p.name} — $m" to (p.id to m) } }
     val modelLabel = modelChoice?.let { (pid, m) ->
         providers.firstOrNull { it.id == pid }?.let { "${it.name} — $m" } ?: "$pid — $m"
     } ?: "Follow Main's model"
@@ -347,19 +343,18 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
             Text("Tools", style = MaterialTheme.typography.labelLarge)
-            pickableTools.forEach { tool ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(
-                        checked = tool.uid in toolUids,
-                        onCheckedChange = { checked ->
-                            toolUids = if (checked) toolUids + tool.uid else toolUids - tool.uid
-                        },
-                    )
-                    Column {
-                        Text(tool.defaultName, style = MaterialTheme.typography.bodyMedium)
-                        Text(tool.uid, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+            Text(
+                toolSelectionSummary(toolUids, pickableTools.associate { it.uid to it.defaultName }),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            TextButton(onClick = { showToolPicker = true }) { Text("Choose tools") }
+            if (showToolPicker) {
+                ToolPickerSheet(
+                    tools = pickableTools,
+                    selected = toolUids,
+                    onToggle = { uid -> toolUids = if (uid in toolUids) toolUids - uid else toolUids + uid },
+                    onDismiss = { showToolPicker = false },
+                )
             }
             // Built-in, not a checkbox: the runner adds send_message to
             // every sub run, and Main cannot use it (it is not in the tool
@@ -377,15 +372,29 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
             }
             Text("Model", style = MaterialTheme.typography.labelLarge)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = { modelMenu = true }) { Text(modelLabel) }
-                DropdownMenu(expanded = modelMenu, onDismissRequest = { modelMenu = false }) {
-                    modelOptions.forEach { (label, choice) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = { modelChoice = choice; modelMenu = false },
-                        )
-                    }
-                }
+                TextButton(onClick = { showModelPicker = true }) { Text(modelLabel) }
+            }
+            if (showModelPicker) {
+                ModelPickerSheet(
+                    providers = providers,
+                    providerId = modelChoice?.first ?: "",
+                    model = modelChoice?.second ?: "",
+                    refreshing = false,
+                    onSelect = { pid, m -> modelChoice = pid to m; showModelPicker = false },
+                    onTogglePin = { pid, m ->
+                        val cfg = container.settings.provider(pid)
+                        if (cfg != null) {
+                            val pinned = if (m in cfg.pinnedModels) cfg.pinnedModels - m else cfg.pinnedModels + m
+                            container.settings.saveProvider(cfg.copy(pinnedModels = pinned))
+                        }
+                    },
+                    // No provider setup flow from here — connect an AI in
+                    // Settings, then come back to pick its models.
+                    onConnect = { showModelPicker = false },
+                    onDismiss = { showModelPicker = false },
+                    onFollowMain = { modelChoice = null; showModelPicker = false },
+                    followMainSelected = modelChoice == null,
+                )
             }
             Text("History", style = MaterialTheme.typography.labelLarge)
             Row(verticalAlignment = Alignment.CenterVertically) {
