@@ -76,7 +76,18 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // kotlinx-coroutines-debug and byte-buddy-agent both ship these
+            // Windows-only attach DLLs; they collide at
+            // mergeReleaseJavaResource and are useless on Android.
+            excludes += setOf(
+                "win32-x86/attach_hotspot_windows.dll",
+                "win32-x86-64/attach_hotspot_windows.dll",
+            )
+        }
+    }
 }
 
 dependencies {
