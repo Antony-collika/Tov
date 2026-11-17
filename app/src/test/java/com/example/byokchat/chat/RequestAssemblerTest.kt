@@ -14,7 +14,6 @@ import com.example.byokchat.tools.DailyTools
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -60,14 +59,6 @@ class RequestAssemblerTest {
     )
 
     private fun noRename(uid: String): String? = null
-
-    /** Name-resolution tests need a known agent in the store snapshot; there is no seed anymore. */
-    private fun installReviewAgent() {
-        val dir = File(System.getProperty("java.io.tmpdir"), "tov-agents-${System.nanoTime()}")
-        dir.mkdirs()
-        val store = SubAgentStore(File(dir, "agents.json"))
-        assertTrue(store.save(SubAgentTeam(agents = listOf(testAgent()))).isSuccess)
-    }
 
     @Test
     fun systemIsTheSavedPromptPlusTimeLine() {
@@ -461,8 +452,12 @@ class RequestAssemblerTest {
     }
 
     @Test
-    fun subAgentMessageReachesMainWithSenderNamePrefix() {
-        installReviewAgent()
+    fun subAgentMessageIsNotSentToMain() {
+        // 17/11/2026: a sub's short message used to reach Main with a
+        // "[Review] ..." prefix — but a request ending with those model
+        // messages is rejected by Gemini with a 400, and Main already has
+        // the detailed report as the delegate tool's result. The message
+        // stays in the DB and on screen; it is no longer sent to Main.
         val out = RequestAssembler.assemble(
             systemPrompt = "Be helpful",
             rows = listOf(
@@ -474,7 +469,7 @@ class RequestAssemblerTest {
             nameForUid = ::noRename,
         )
         val sent = out.sentMessages
-        assertEquals(Role.ASSISTANT, sent.last().role)
-        assertEquals("[Review] Done — found 5 sources.", sent.last().text)
+        assertEquals(listOf("Find something."), sent.map { it.text })
+        assertTrue(sent.none { it.text.contains("[Review]") })
     }
 }

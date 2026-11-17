@@ -10,14 +10,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Tool-call adjacency (16/11/2026): a sub-agent writes its own messages
- * into the chat DURING the delegate tool call, so in the stored order
- * they land between Main's tool-call message and the tool result.
- * OpenAI-compatible servers (and Gemini) require a tool-call message to
- * be followed immediately by its tool-result messages, so the assembled
- * request must pull each call's results forward to right after the call
- * — the intervening messages keep their relative order and move after
- * the results. Content is preserved, only the order changes.
+ * Tool-call adjacency (16/11/2026) + sub messages excluded from Main's
+ * request (17/11/2026): a sub-agent writes its own messages into the chat
+ * DURING the delegate tool call, so in the stored order they land between
+ * Main's tool-call message and the tool result. They used to be moved
+ * after the result (orderToolResults) — but a request ending with those
+ * model messages is rejected by Gemini with a 400 ("Requests ending with
+ * a model turn are not supported"), so they are now excluded from Main's
+ * request entirely. Main already has the detailed report as the delegate
+ * tool's result; the sub's short messages stay in the DB and on screen.
  */
 class ContextBuilderToolOrderTest {
 
@@ -54,7 +55,7 @@ class ContextBuilderToolOrderTest {
     )
 
     @Test
-    fun subMessageBetweenToolCallAndResultMovesAfterTheResult() {
+    fun subMessageBetweenToolCallAndResultIsExcludedFromMainRequest() {
         val calls = json.encodeToString(
             callsSer,
             listOf(AiToolCall("c1", "delegate_to_subagent", "{}", uid = "sub.delegate")),
@@ -68,12 +69,41 @@ class ContextBuilderToolOrderTest {
         val plan = ContextBuilder.plan(rows, budget = 100_000, nameForUid = { null })
         val msgs = plan.messages
         assertEquals(
-            listOf(Role.USER, Role.ASSISTANT, Role.TOOL, Role.ASSISTANT),
+            listOf(Role.USER, Role.ASSISTANT, Role.TOOL),
             msgs.map { it.role },
         )
         assertEquals(listOf("c1"), msgs[1].toolCalls.map { it.id })
         assertEquals("c1", msgs[2].toolCallId)
-        assertTrue(msgs[3].text.contains("Chào bạn"))
+        assertTrue(msgs.none { it.text.contains("Chào bạn") })
+    }
+
+    @Test
+    fun subMessagesAtTheEndDoNotEndTheRequestWithAModelTurn() {
+        // The 400 case (17/11/2026): after the delegate result, Monica sent
+        // two short messages to the user, so the request ended with model
+        // turns and Gemini refused it. The request must end with the tool
+        // result instead, and carry no "[Monica] ..." text.
+        val calls = json.encodeToString(
+            callsSer,
+            listOf(AiToolCall("c1", "delegate_to_subagent", "{}", uid = "sub.delegate")),
+        )
+        val rows = listOf(
+            row("u1", "t1", 1, "user", "phát nhạc phù hợp thời gian hiện tại đi"),
+            row("a1", "t1", 2, "assistant", "", toolCallsJson = calls),
+            row("r1", "t1", 3, "tool", "detailed report: played Morning Coffee", toolCallId = "c1", toolUid = "sub.delegate", toolName = "delegate_to_subagent"),
+            row("s1", "t1", 4, "assistant", "Chào buổi sáng! Hôm nay trời đẹp.", sender = "monica"),
+            row("s2", "t1", 5, "assistant", "Tôi đã phát bản nhạc Morning Coffee cho bạn.", sender = "monica"),
+        )
+        val plan = ContextBuilder.plan(rows, budget = 100_000, nameForUid = { null })
+        val msgs = plan.messages
+        assertEquals(
+            listOf(Role.USER, Role.ASSISTANT, Role.TOOL),
+            msgs.map { it.role },
+        )
+        assertEquals(Role.TOOL, msgs.last().role)
+        assertEquals("c1", msgs.last().toolCallId)
+        assertTrue(msgs.none { it.text.contains("[Monica]") })
+        assertTrue(msgs.none { it.text.contains("Morning Coffee cho bạn") })
     }
 
     @Test
