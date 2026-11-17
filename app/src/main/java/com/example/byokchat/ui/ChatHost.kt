@@ -49,8 +49,8 @@ fun ChatHost(
     onOpenMessages: () -> Unit,
     /** Opens the Members screen for this chat. */
     onOpenMembers: () -> Unit,
-    /** Opens a sub-agent's run detail for one turn. */
-    onOpenSubRun: (agentId: String, turnId: String) -> Unit,
+    /** Opens the Main↔sub conversation for a whole session (tapping a sub's avatar on the chat screen). */
+    onOpenSubConversation: (agentId: String) -> Unit,
     onOpenStorage: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -130,7 +130,7 @@ fun ChatHost(
                 onOpenInspector = onInspector,
                 onOpenMessages = onOpenMessages,
                 onOpenMembers = onOpenMembers,
-                onOpenSubRun = onOpenSubRun,
+                onOpenSubConversation = onOpenSubConversation,
                 onOpenRequestLog = onRequestLog,
                 onOpenRequestPanel = onPanel,
                 onOpenStorage = onOpenStorage,

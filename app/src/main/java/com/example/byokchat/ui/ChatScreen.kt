@@ -89,8 +89,8 @@ fun ChatScreen(
     onOpenMessages: () -> Unit,
     /** Opens the Members screen (group chat members and status) for this chat. */
     onOpenMembers: () -> Unit,
-    /** Opens a sub-agent's run detail for one turn (tapping its avatar on the chat screen). */
-    onOpenSubRun: (agentId: String, turnId: String) -> Unit,
+    /** Opens the Main↔sub conversation for a whole session (tapping a sub's avatar on the chat screen). */
+    onOpenSubConversation: (agentId: String) -> Unit,
     /** Opens the request log. */
     onOpenRequestLog: () -> Unit,
     /** Opens the Request panel for this chat. */
@@ -576,17 +576,19 @@ fun ChatScreen(
                                 if (headerMember != null) {
                                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         // A sub's avatar on the chat opens
-                                        // its run detail for this turn
-                                        // (17/11/2026); Main's avatar does
-                                        // nothing — everything of Main's is
-                                        // already on the chat. The Members
-                                        // screen's avatar still opens the
-                                        // agent's settings instead.
+                                        // the Main↔sub conversation for the
+                                        // whole session (17/11/2026) — the
+                                        // same screen whichever turn's
+                                        // avatar was tapped. Main's avatar
+                                        // does nothing — everything of
+                                        // Main's is already on the chat. The
+                                        // Members screen's avatar still
+                                        // opens the agent's settings instead.
                                         MemberAvatar(
                                             headerMember,
                                             size = 24.dp,
                                             onClick = senderMember?.let { sm ->
-                                                { onOpenSubRun(sm.id, m.turnId) }
+                                                { onOpenSubConversation(sm.id) }
                                             },
                                         )
                                         Text(headerMember.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)

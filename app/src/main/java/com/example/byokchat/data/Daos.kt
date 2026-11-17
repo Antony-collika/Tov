@@ -183,6 +183,10 @@ interface SubRunDao {
     @Query("SELECT * FROM sub_runs WHERE conversationId = :cid AND agent = :agent AND turnNo = :turnNo ORDER BY finishedAt DESC LIMIT 1")
     suspend fun get(cid: String, agent: String, turnNo: Int): SubRunEntity?
 
+    /** Every stored run of one agent in a conversation, oldest first — the session conversation (17/11/2026). */
+    @Query("SELECT * FROM sub_runs WHERE conversationId = :cid AND agent = :agent ORDER BY turnNo ASC")
+    suspend fun getByAgent(cid: String, agent: String): List<SubRunEntity>
+
     @Insert
     suspend fun insert(row: SubRunEntity)
 

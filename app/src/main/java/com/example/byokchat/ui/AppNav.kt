@@ -125,8 +125,8 @@ fun AppNav() {
                         onRequestLog = { nav.navigate("request-log?id=$id") },
                         onOpenMessages = { nav.navigate("messages/$id") },
                         onOpenMembers = { nav.navigate("members/$id") },
-                        onOpenSubRun = { agentId, turnId ->
-                            nav.navigate("sub-run/$id?agent=${Uri.encode(agentId)}&turn=${Uri.encode(turnId)}")
+                        onOpenSubConversation = { agentId ->
+                            nav.navigate("sub-conversation/$id?agent=${Uri.encode(agentId)}")
                         },
                         onPanel = { nav.navigate("panel?id=$id") },
                         onOpenStorage = { nav.navigate("settings-storage") },
@@ -212,17 +212,15 @@ fun AppNav() {
                 )
             }
             composable(
-                "sub-run/{id}?agent={agent}&turn={turn}",
+                "sub-conversation/{id}?agent={agent}",
                 arguments = listOf(
                     navArgument("id") { type = NavType.StringType },
                     navArgument("agent") { type = NavType.StringType },
-                    navArgument("turn") { type = NavType.StringType },
                 ),
             ) { entry ->
-                SubRunDetailScreen(
+                SubConversationScreen(
                     conversationId = entry.arguments?.getString("id") ?: "",
                     agentId = entry.arguments?.getString("agent") ?: "",
-                    turnId = entry.arguments?.getString("turn") ?: "",
                     onBack = { nav.popBackStack() },
                 )
             }
