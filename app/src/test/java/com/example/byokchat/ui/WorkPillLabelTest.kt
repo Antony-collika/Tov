@@ -12,7 +12,7 @@ import org.junit.Test
  */
 class WorkPillLabelTest {
 
-    private fun tool(uid: String, args: String) = WorkStep.Tool(AiToolCall("c1", "some_name", args), null)
+    private fun tool(uid: String, args: String) = WorkStep.Tool(AiToolCall("c1", "some_name", args, uid = uid), null)
 
     @Test
     fun readFileNamesTheFile() {
