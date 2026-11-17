@@ -64,15 +64,6 @@ import kotlinx.coroutines.withContext
 private const val VARS_HELP = "You can use {date}, {time}, {model} and {provider} — they are replaced when sending. " +
     "Note: {time} changes every minute, so the AI's cache is not reused while it is in the prompt."
 
-/**
- * Đợt 8: nguồn nội dung của thẻ System/Free — gõ trực tiếp hay đọc file
- * ngoài (như SourceRadio của FPilot). Chỉ là trạng thái nháp của màn sửa:
- * lúc Save, TEXT ghi file = null (bỏ liên kết file), FILE ghi đường dẫn
- * vào trường file của thẻ (có file = External file, không file = Text input)
- * — mô hình thẻ lưu trữ không đổi, cơ chế đọc lại file mỗi lần gửi giữ nguyên.
- */
-private enum class CardSource { TEXT, FILE }
-
 /** Sửa một thẻ trong Request panel (Đợt C). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -94,11 +85,9 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Đợt D: file mà thẻ trỏ tới (trống = không trỏ file).
     var file by remember(cardId) { mutableStateOf(card?.file.orEmpty()) }
     var fileError by remember(cardId) { mutableStateOf<String?>(null) }
-    // Đợt 8: nguồn nội dung của thẻ System/Free — khởi đầu theo file đã trỏ
-    // (có file = External file, không file = Text input).
-    var source by remember(cardId) {
-        mutableStateOf(if (card?.file != null) CardSource.FILE else CardSource.TEXT)
-    }
+    // RCP (17/11/2026): thẻ System/Free đồng bộ hai chiều với file ngoài,
+    // như cấu hình sub-agent — ghi chú hiện khi file vừa điền vào ô text.
+    var syncNote by remember(cardId) { mutableStateOf<String?>(null) }
     // Đợt E: thẻ Tools giữ NHIỀU file tools.md (file cũ chuyển thành danh sách 1 file).
     var toolFiles by remember(cardId) { mutableStateOf(card?.toolFiles().orEmpty()) }
     // Sửa luật nguồn 11/11/2026: thẻ Tools có nguồn Text (gõ trực tiếp) hoặc
@@ -133,6 +122,46 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var confirmDiscard by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    /**
+     * RCP (17/11/2026): đồng bộ hai chiều thẻ System/Free với file ngoài,
+     * như cấu hình sub-agent — CHỈ ở 2 điểm, không watcher: (a) đây, lúc
+     * mở màn — đọc file một lần; nội dung khác văn bản đã lưu thì file
+     * thắng và điền vào ô text; lỗi đọc thì báo lỗi, giữ văn bản đã lưu.
+     * (b) lúc Save — ghi văn bản vào thẻ rồi ghi đè lại file (xem save()).
+     * Đọc lại file mỗi lần gửi (resolveFiles) vẫn là lưới an toàn.
+     */
+    LaunchedEffect(cardId) {
+        val c = card ?: return@LaunchedEffect
+        if (c.kind != CardKind.SYSTEM && c.kind != CardKind.FREE) return@LaunchedEffect
+        val path = c.file?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        val content = withContext(Dispatchers.IO) {
+            runCatching { container.fs.readCardFile(path) }
+        }
+        content.onSuccess {
+            if (it != c.text) {
+                text = it
+                syncNote = "Updated from the linked file."
+            }
+        }.onFailure { e ->
+            fileError = "Could not read the linked file (${e.message ?: e.javaClass.simpleName}); showing the saved text."
+        }
+    }
+
+    /** Đọc file vừa chọn và điền nội dung vào ô text (như agent: 'Filled from the linked file.'). */
+    fun fillTextFromFile(path: String) {
+        scope.launch(Dispatchers.IO) {
+            val content = runCatching { container.fs.readCardFile(path) }
+            withContext(Dispatchers.Main) {
+                content.onSuccess {
+                    text = it
+                    syncNote = "Filled from the linked file."
+                }.onFailure { e ->
+                    fileError = "Could not read the file: ${e.message ?: e.javaClass.simpleName}"
+                }
+            }
+        }
+    }
+
     val lastTurnsValid = lastTurns.toIntOrNull()?.let { it in 1..100 } == true
     // Đợt fix 11/11/2026 (I1): file thẻ trỏ tới có thể ở bất cứ đâu, đuôi
     // bất kỳ — không còn kiểm tra đuôi .md nữa.
@@ -142,7 +171,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
             file.trim() != (card.file ?: "") || toolFiles != card.toolFiles() ||
             toolsSource != (card?.toolsSource ?: ToolsSource.FILE) ||
-            source != (if (card.file != null) CardSource.FILE else CardSource.TEXT) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             keepSignature != savedMetadata.keepThoughtSignature ||
             replayReasoning != savedMetadata.replayReasoning ||
@@ -215,14 +243,11 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 turnTags = turnTags,
                 includeErrorTurns = includeErrors,
                 // Thẻ Tools dùng danh sách files (file đơn cũ gộp vào đó);
-                // thẻ khác giữ nguyên file/files của chúng. Đợt 8: nguồn
-                // Text input ghi file = null (bỏ liên kết file cũ), nguồn
-                // External file ghi URI/đường dẫn đã chọn. Quyết định 16:
-                // chọn Text nghĩa là thẻ là Text — bỏ luôn danh sách file
-                // cũ, không giữ cả hai.
+                // thẻ khác giữ nguyên file/files của chúng. RCP (17/11/2026):
+                // thẻ System/Free luôn giữ liên kết file đã chọn (trống =
+                // không trỏ file) — không còn chọn 1 trong 2 nguồn nữa.
                 file = if (c.kind == CardKind.TOOLS) null
-                else if (source == CardSource.FILE) file.trim().ifEmpty { null }
-                else null,
+                else file.trim().ifEmpty { null },
                 files = if (c.kind == CardKind.TOOLS) {
                     if (toolsSource == ToolsSource.TEXT) emptyList() else toolFiles
                 } else it.files,
@@ -236,6 +261,25 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
 
     fun save() {
         val c = card ?: return
+        // RCP (17/11/2026): thẻ System/Free có file thì ghi văn bản vào thẻ
+        // trước, rồi ghi đè lại file (đồng bộ hai chiều, như lưu agent);
+        // lỗi ghi file thì thẻ vẫn lưu, màn hình ở lại và hiện lỗi.
+        if ((c.kind == CardKind.SYSTEM || c.kind == CardKind.FREE) && file.trim().isNotEmpty()) {
+            saveCard(c, goBack = false)
+            val path = file.trim()
+            val content = text
+            scope.launch(Dispatchers.IO) {
+                val write = runCatching { container.fs.writeCardFile(path, content) }
+                withContext(Dispatchers.Main) {
+                    write.onSuccess { onBack() }
+                        .onFailure {
+                            fileError = "Saved, but could not write back to the linked file: " +
+                                (it.message ?: it.javaClass.simpleName)
+                        }
+                }
+            }
+            return
+        }
         // Đợt 6: thẻ Metadata không lưu vào thẻ (thẻ chỉ là vị trí cố định):
         // giá trị lưu toàn cục ở SettingsRepository, max tokens lưu theo
         // provider đang dùng (như màn sửa provider).
@@ -303,8 +347,11 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     if (c.kind == CardKind.TOOLS) {
                         if (uriString !in toolFiles) toolFiles = toolFiles + uriString
                     } else {
+                        // RCP (17/11/2026): file mẫu mới trở thành file liên
+                        // kết và nội dung mẫu điền vào ô text (như agent).
                         file = uriString
-                        source = CardSource.FILE
+                        text = content
+                        syncNote = "Filled from the new template file."
                     }
                     fileError = null
                 }
@@ -453,39 +500,30 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Text("Source", style = MaterialTheme.typography.labelLarge)
-                    PolicyOption(
-                        selected = source == CardSource.TEXT,
-                        title = "Text input",
-                        desc = "Type the system prompt here.",
-                        onClick = { source = CardSource.TEXT },
+                    // RCP (17/11/2026): không còn chọn 1 trong 2 nguồn nữa —
+                    // luôn có ô text VÀ mục File, đồng bộ hai chiều: mở màn
+                    // thì file điền vào ô, lúc Save thì ô ghi đè lại file.
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text("System prompt") },
+                        minLines = 6,
+                        maxLines = 12,
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    PolicyOption(
-                        selected = source == CardSource.FILE,
-                        title = "External file",
-                        desc = "Read from a file anywhere on this device, again on every send.",
-                        onClick = { source = CardSource.FILE },
-                    )
-                    if (source == CardSource.TEXT) {
-                        OutlinedTextField(
-                            value = text,
-                            onValueChange = { text = it },
-                            label = { Text("System prompt") },
-                            minLines = 6,
-                            maxLines = 12,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        FileSection(
-                            file = file,
-                            fileError = fileError,
-                            onCreateTemplate = ::createTemplate,
-                            onOpenFile = ::openFile,
-                            onFilePicked = { file = it; fileError = null; source = CardSource.FILE },
-                            onPickError = { fileError = it },
-                        )
+                    Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (syncNote != null) {
+                        Text(syncNote!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
+                    FileSection(
+                        file = file,
+                        fileError = fileError,
+                        onCreateTemplate = ::createTemplate,
+                        onOpenFile = ::openFile,
+                        onFilePicked = { file = it; fileError = null; fillTextFromFile(it) },
+                        onPickError = { fileError = it },
+                        onUnlink = { file = ""; fileError = null; syncNote = "File unlinked — the text above is used." },
+                    )
                 }
                 CardKind.FREE -> {
                     OutlinedTextField(
@@ -512,40 +550,29 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // Đợt 8: chọn nguồn rạch ròi như thẻ System (dùng chung FileSection).
-                    Text("Source", style = MaterialTheme.typography.labelLarge)
-                    PolicyOption(
-                        selected = source == CardSource.TEXT,
-                        title = "Text input",
-                        desc = "Type the text here.",
-                        onClick = { source = CardSource.TEXT },
+                    // RCP (17/11/2026): như thẻ System — luôn có ô text VÀ
+                    // mục File, đồng bộ hai chiều.
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it },
+                        label = { Text("Text") },
+                        minLines = 4,
+                        maxLines = 10,
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    PolicyOption(
-                        selected = source == CardSource.FILE,
-                        title = "External file",
-                        desc = "Read from a file anywhere on this device, again on every send.",
-                        onClick = { source = CardSource.FILE },
-                    )
-                    if (source == CardSource.TEXT) {
-                        OutlinedTextField(
-                            value = text,
-                            onValueChange = { text = it },
-                            label = { Text("Text") },
-                            minLines = 4,
-                            maxLines = 10,
-                            modifier = Modifier.fillMaxWidth(),
-                        )
-                        Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        FileSection(
-                            file = file,
-                            fileError = fileError,
-                            onCreateTemplate = ::createTemplate,
-                            onOpenFile = ::openFile,
-                            onFilePicked = { file = it; fileError = null; source = CardSource.FILE },
-                            onPickError = { fileError = it },
-                        )
+                    Text(VARS_HELP, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (syncNote != null) {
+                        Text(syncNote!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
+                    FileSection(
+                        file = file,
+                        fileError = fileError,
+                        onCreateTemplate = ::createTemplate,
+                        onOpenFile = ::openFile,
+                        onFilePicked = { file = it; fileError = null; fillTextFromFile(it) },
+                        onPickError = { fileError = it },
+                        onUnlink = { file = ""; fileError = null; syncNote = "File unlinked — the text above is used." },
+                    )
                 }
                 CardKind.TIME -> TimeCardEditor()
                 CardKind.HISTORY -> {
@@ -800,6 +827,8 @@ private fun FileSection(
     onFilePicked: (String) -> Unit,
     /** File đã chọn không dùng được (không giữ được quyền, ...). */
     onPickError: (String) -> Unit,
+    /** Gỡ liên kết file (null = không cho gỡ); văn bản trong thẻ giữ nguyên. */
+    onUnlink: (() -> Unit)? = null,
 ) {
     val fs = LocalContext.current.container.fs
     val pickFile = rememberCardFilePicker(onPicked = onFilePicked, onPickError = onPickError)
@@ -823,8 +852,8 @@ private fun FileSection(
     Text(
         "It can be any file on this device — it does not have to be in the AI playground. " +
             "Its content is read again on every send. Edit the file in any editor and the next send " +
-            "uses the new text. If the file cannot be read, the card's saved text is used instead " +
-            "and an error is shown.",
+            "uses the new text. When you save here, the text above is also written back to the file. " +
+            "If the file cannot be read, the card's saved text is used instead and an error is shown.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -834,6 +863,9 @@ private fun FileSection(
         }
         if (file.isNotBlank()) {
             TextButton(onClick = onOpenFile) { Text("Open file") }
+            if (onUnlink != null) {
+                TextButton(onClick = onUnlink) { Text("Unlink file") }
+            }
         }
         TextButton(onClick = onCreateTemplate) { Text("Create template") }
     }
