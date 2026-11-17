@@ -157,7 +157,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
             turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
             file.trim() != (card.file ?: "") ||
-            selectedUids != (card?.selectedToolUids?.toSet() ?: emptySet()) ||
+            selectedUids != card.selectedToolUids.toSet() ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             keepSignature != savedMetadata.keepThoughtSignature ||
             replayReasoning != savedMetadata.replayReasoning ||
