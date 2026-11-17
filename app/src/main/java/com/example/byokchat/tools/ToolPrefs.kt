@@ -71,4 +71,3 @@ class ToolPrefs(context: Context) {
  */
 internal fun resolveEffectiveDescription(defaultDescription: String, override: String?): String =
     override?.takeIf { it.isNotBlank() } ?: defaultDescription
-}
