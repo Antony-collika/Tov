@@ -156,6 +156,55 @@ data class RecentlyPlayedEntity(
     val position: Int,
 )
 
+/**
+ * One stored sub-agent run (context-manager phase, 17/11/2026): the full
+ * record of a run, keyed by conversation + agent + turn number, so Main
+ * can read it back later with get_subagent_result and the run detail
+ * screen can show it. This table is ADDITIVE: the sub_runs.meta.json
+ * journal file in the session folder stays as it is (the user-readable
+ * journal); both are written when a run ends, and this table is what
+ * reads use. Two runs of the same agent in the same turn are two rows,
+ * and reads take the latest. Deleting the conversation deletes its rows
+ * (CASCADE).
+ */
+@Entity(
+    tableName = "sub_runs",
+    foreignKeys = [ForeignKey(
+        entity = ConversationEntity::class,
+        parentColumns = ["id"],
+        childColumns = ["conversationId"],
+        onDelete = ForeignKey.CASCADE,
+    )],
+    indices = [Index("conversationId"), Index("conversationId", "agent", "turnNo")],
+)
+data class SubRunEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val conversationId: String,
+    val turnNo: Int,
+    /** Id of the sub-agent that ran. */
+    val agent: String,
+    val agentName: String,
+    /** One-line title Main gave the task when delegating. */
+    val title: String,
+    /** The detailed brief Main gave the agent. */
+    val brief: String,
+    /** Lowercase SubRunStatus name: done / failed / round_cap / budget_exceeded / interrupted. */
+    val status: String,
+    val rounds: Int,
+    val tokens: Int,
+    /** Tool calls with arguments, as JSON: [{name, args}]. */
+    val toolCallsJson: String,
+    /** Messages the sub sent to Main, as a JSON string array. */
+    val messagesToMainJson: String,
+    /** The full detailed report (the delegate tool's old result text). */
+    val fullReport: String,
+    /** Readable reasoning across all rounds, "" when the provider returned none. */
+    val reasoning: String,
+    val error: String? = null,
+    val startedAt: Long,
+    val finishedAt: Long,
+)
+
 private val listSer = ListSerializer(String.serializer())
 
 /** Giải mã danh sách đường dẫn ảnh (dạng JSON) thành List; lỗi thì trả về rỗng. */

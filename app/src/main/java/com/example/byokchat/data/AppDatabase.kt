@@ -8,8 +8,8 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
-    entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class, RecentlyPlayedEntity::class],
-    version = 10,
+    entities = [ConversationEntity::class, MessageEntity::class, NoteEntity::class, TodoEntity::class, RecentlyPlayedEntity::class, SubRunEntity::class],
+    version = 11,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -18,6 +18,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun notes(): NoteDao
     abstract fun todos(): TodoDao
     abstract fun recentlyPlayed(): RecentlyPlayedDao
+    abstract fun subRuns(): SubRunDao
 
     companion object {
         /** v1 -> v2: branch parent and pinned flag on conversations (existing data is kept). */
@@ -129,9 +130,57 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v10 -> v11 (context manager, 17/11/2026): table `sub_runs` — one
+         * stored record per sub-agent run, so Main can read a past run back
+         * and the run detail screen can show it. CREATE TABLE only: no old
+         * data is touched or moved, and old runs simply have no row here
+         * (the detail screen falls back to the turn's message rows). There
+         * is no destructive fallback since v5 (Glassbox rule, see
+         * create() below): a version bump without a migration would crash
+         * existing installs on open, and wiping the database would destroy
+         * the user's chats — both worse than this create-only migration,
+         * which is exactly the "no migration" Duy accepted (no old data
+         * migrated, new table only, new chats only).
+         */
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `sub_runs` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`conversationId` TEXT NOT NULL, " +
+                        "`turnNo` INTEGER NOT NULL, " +
+                        "`agent` TEXT NOT NULL, " +
+                        "`agentName` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`brief` TEXT NOT NULL, " +
+                        "`status` TEXT NOT NULL, " +
+                        "`rounds` INTEGER NOT NULL, " +
+                        "`tokens` INTEGER NOT NULL, " +
+                        "`toolCallsJson` TEXT NOT NULL, " +
+                        "`messagesToMainJson` TEXT NOT NULL, " +
+                        "`fullReport` TEXT NOT NULL, " +
+                        "`reasoning` TEXT NOT NULL, " +
+                        "`error` TEXT, " +
+                        "`startedAt` INTEGER NOT NULL, " +
+                        "`finishedAt` INTEGER NOT NULL, " +
+                        "FOREIGN KEY(`conversationId`) REFERENCES `conversations`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_sub_runs_conversationId` " +
+                        "ON `sub_runs` (`conversationId`)",
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_sub_runs_conversationId_agent_turnNo` " +
+                        "ON `sub_runs` (`conversationId`, `agent`, `turnNo`)",
+                )
+            }
+        }
+
         fun create(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "byokchat.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 // Không còn fallbackToDestructiveMigration(): từ v5 trở đi mọi
                 // thay đổi cấu trúc đều phải có migration thật (quy tắc kế hoạch
                 // Glassbox, mục 6 Đợt E). v2 -> v3 (bỏ systemPrompt) và v3 -> v4

@@ -172,6 +172,17 @@ interface TodoDao {
     suspend fun delete(id: String)
 }
 
+/** Stored sub-agent runs (context-manager phase, 17/11/2026). */
+@Dao
+interface SubRunDao {
+    /** The latest run of one agent in one turn of a conversation. */
+    @Query("SELECT * FROM sub_runs WHERE conversationId = :cid AND agent = :agent AND turnNo = :turnNo ORDER BY finishedAt DESC LIMIT 1")
+    suspend fun get(cid: String, agent: String, turnNo: Int): SubRunEntity?
+
+    @Insert
+    suspend fun insert(row: SubRunEntity)
+}
+
 /** "Recently played": lịch sử phát lại theo từng cuộc trò chuyện (2026-11-14). */
 @Dao
 interface RecentlyPlayedDao {
