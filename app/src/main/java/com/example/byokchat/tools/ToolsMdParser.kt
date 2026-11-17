@@ -2,6 +2,8 @@ package com.example.byokchat.tools
 
 /**
  * Parser cho file tools.md của thẻ Tools (Đợt E, quyết định 4/5/7).
+ * RCP (17/11/2026): chỉ còn dùng cho di trú MỘT LẦN của thẻ Tools cũ
+ * (collectUids) — đường gửi không parse file nữa.
  *
  * Định dạng (mượn FPilot, xem file mẫu workspace/user/files/tools.md):
  * - Một khối cho mỗi tool, bắt đầu bằng "## <tên>"; thứ tự khối = thứ tự

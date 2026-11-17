@@ -30,7 +30,7 @@ data class HistoryToolRound(
     val id: String,
     /** uid thật của tool (null nếu không rõ). */
     val uid: String? = null,
-    /** tên model đã gọi (tên trong file tools.md, hoặc tên gốc). */
+    /** tên model đã gọi (tên gốc — tên tool không đổi được nữa, RCP 17/11/2026). */
     val name: String,
     /** tham số gọi, dạng chuỗi JSON. */
     val args: String = "{}",

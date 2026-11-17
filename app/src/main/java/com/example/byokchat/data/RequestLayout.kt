@@ -10,7 +10,7 @@ import java.time.format.DateTimeFormatter
 /** Loại thẻ trong Request panel (Đợt C). Thứ tự thẻ trong danh sách là thứ tự gửi. */
 enum class CardKind { METADATA, SYSTEM, TIME, FREE, HISTORY, LAST_TURN, TOOLS }
 
-/** Nguồn nội dung của thẻ Tools: gõ trực tiếp vào thẻ (TEXT) hay file (FILE) — file ở bất cứ đâu, đuôi bất kỳ, nội dung theo định dạng tools.md. */
+/** Nguồn nội dung CŨ của thẻ Tools (RCP, 17/11/2026 — chỉ còn để di trú một lần): gõ trực tiếp vào thẻ (TEXT) hay file (FILE). Đường gửi không đọc nữa. */
 enum class ToolsSource { TEXT, FILE }
 
 /** Vai của thẻ Free khi gửi. */
@@ -74,7 +74,7 @@ data class RequestCard(
      */
     val toolsSource: ToolsSource = ToolsSource.FILE,
 ) {
-    /** File tools.md của thẻ Tools: [files] nếu có, không thì [file] cũ. */
+    /** File tools.md CŨ của thẻ Tools (chỉ còn để di trú một lần): [files] nếu có, không thì [file] cũ. */
     fun toolFiles(): List<String> = if (files.isNotEmpty()) files else listOfNotNull(file)
     /** Tên hiển thị trên Panel. Đợt 8: thẻ System cũng dùng label khi user đặt tên (màn sửa có ô Name); mặc định vẫn là "System". */
     fun displayName(): String = when (kind) {
