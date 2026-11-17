@@ -168,11 +168,11 @@ fun SubRunDetailScreen(
                 }
             }
             items(agentRows, key = { it.id }) { m ->
-                // The pill renders on its segment's first row, expanded so
-                // the run's work is visible right away; the sub's own
-                // words render as bubbles, in the order they happened.
+                // The pill renders on its segment's first row; tap it to
+                // open the table of steps. The sub's own words render as
+                // bubbles, in the order they happened.
                 segmentsByAnchor[m.id]?.let { segment ->
-                    WorkPill(segment, generating = false, initiallyExpanded = true)
+                    WorkPill(segment, generating = false)
                 }
                 if (m.text.isNotBlank()) {
                     Surface(

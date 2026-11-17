@@ -317,11 +317,17 @@ internal fun AssistantMessage(
                 MessageEditor(edit, "Save", onEditChange, onEditSave, onEditCancel)
                 return@Column
             }
+            // Work pill (17/11/2026, mockup v2): one line at the TOP of
+            // the turn, above the answer bubble — the old per-tool cards
+            // and the separate "Suy luận" block are gone. Reasoning only
+            // appears when the provider really returned readable text
+            // (never invented). A turn with no tools and no reasoning
+            // has no segment, so no pill.
+            if (workSegment != null) WorkPill(workSegment, generating)
             if (shownText.isNotEmpty()) {
                 // Messenger-style bubble (17/11/2026, approved mockup):
                 // the AI's words sit in a grey bubble on the left, like
-                // the user's purple bubble on the right. The work pill
-                // stays a separate card below it, not inside the bubble.
+                // the user's purple bubble on the right.
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
@@ -337,12 +343,6 @@ internal fun AssistantMessage(
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
-            // Work pill (17/11/2026, approved mockup): the agent's tool
-            // calls and readable reasoning live in one expandable pill
-            // now — the old per-tool cards and the separate "Suy luận"
-            // block are gone. Reasoning only appears when the provider
-            // really returned readable text (never invented).
-            if (workSegment != null) WorkPill(workSegment, generating)
             if (m.status == "error") {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
