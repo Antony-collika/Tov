@@ -343,51 +343,80 @@ class ChatEngine(
 
             calls = calls.map { it.copy(uid = tools.uidForName(it.name, exposed)) }
 
-            withContext(NonCancellable) {
-                // A stopped or superseded turn was already settled by
-                // settleTurn when the user pressed Stop (or sent the next
-                // message): its answer must not be written again here, or
-                // the deleted placeholder would come back as an error
-                // bubble. Only the job that still owns the conversation
-                // persists its answer.
-                if (jobs[conversationId] === myJob) {
-                    // Show the complete text right away, then persist it and drop the in-memory copy.
-                    if (text.isNotEmpty()) _live.update { it + (assistantId to text.toString()) }
-                    when {
-                        error != null -> msgDao.upsert(base.copy(text = text.toString(), status = "error", error = error))
-                        text.isEmpty() && calls.isEmpty() ->
-                            if (cancelled != null) msgDao.deleteById(assistantId)
-                            else msgDao.upsert(base.copy(status = "error", error = "The AI returned no content."))
-                        else -> msgDao.upsert(
-                            base.copy(
-                                text = text.toString(),
-                                toolCallsJson = if (calls.isEmpty()) null else json.encodeToString(callsSer, calls),
-                                thoughtSignature = textSignature,
-                                // Đợt provider 12/11/2026: chỉ gắn hãng khi thật
-                                // sự có suy luận/replay (tin không có suy luận thì
-                                // để null như tin cũ).
-                                reasoningText = reasoning.toString().takeIf { it.isNotBlank() },
-                                reasoningReplay = replayJson,
-                                reasoningProvider = if (reasoning.isNotBlank() || replayJson != null) reasoningProvider else null,
-                                status = "done",
+            // A DB failure while persisting the answer used to escape run()
+            // and end the turn silently (no error bubble, no notification).
+            // Show it as the turn's error instead, and try to write it as
+            // an error bubble (17/11/2026). A stopped or superseded turn
+            // is left alone: settleTurn already owns its placeholder.
+            var persistError: String? = null
+            try {
+                withContext(NonCancellable) {
+                    // A stopped or superseded turn was already settled by
+                    // settleTurn when the user pressed Stop (or sent the next
+                    // message): its answer must not be written again here, or
+                    // the deleted placeholder would come back as an error
+                    // bubble. Only the job that still owns the conversation
+                    // persists its answer.
+                    if (jobs[conversationId] === myJob) {
+                        // Show the complete text right away, then persist it and drop the in-memory copy.
+                        if (text.isNotEmpty()) _live.update { it + (assistantId to text.toString()) }
+                        when {
+                            error != null -> msgDao.upsert(base.copy(text = text.toString(), status = "error", error = error))
+                            text.isEmpty() && calls.isEmpty() ->
+                                if (cancelled != null) msgDao.deleteById(assistantId)
+                                else msgDao.upsert(base.copy(status = "error", error = "The AI returned no content."))
+                            else -> msgDao.upsert(
+                                base.copy(
+                                    text = text.toString(),
+                                    toolCallsJson = if (calls.isEmpty()) null else json.encodeToString(callsSer, calls),
+                                    thoughtSignature = textSignature,
+                                    // Đợt provider 12/11/2026: chỉ gắn hãng khi thật
+                                    // sự có suy luận/replay (tin không có suy luận thì
+                                    // để null như tin cũ).
+                                    reasoningText = reasoning.toString().takeIf { it.isNotBlank() },
+                                    reasoningReplay = replayJson,
+                                    reasoningProvider = if (reasoning.isNotBlank() || replayJson != null) reasoningProvider else null,
+                                    status = "done",
+                                )
                             )
-                        )
+                        }
+                    } else if (text.isEmpty() && calls.isEmpty()) {
+                        // The settle was missed or is still running (Stop pressed
+                        // a moment ago): never resurrect anything here, but do
+                        // not leave a bare streaming placeholder spinning
+                        // forever either — drop it if it is still streaming.
+                        // Serialized with settleTurn so a settle that is about
+                        // to keep this message cannot be undone by this delete.
+                        settleMutex.withLock {
+                            val cur = msgDao.getAll(conversationId).firstOrNull { it.id == assistantId }
+                            if (cur?.status == "streaming" && cur.text.isBlank()) msgDao.deleteById(assistantId)
+                        }
                     }
-                } else if (text.isEmpty() && calls.isEmpty()) {
-                    // The settle was missed or is still running (Stop pressed
-                    // a moment ago): never resurrect anything here, but do
-                    // not leave a bare streaming placeholder spinning
-                    // forever either — drop it if it is still streaming.
-                    // Serialized with settleTurn so a settle that is about
-                    // to keep this message cannot be undone by this delete.
-                    settleMutex.withLock {
-                        val cur = msgDao.getAll(conversationId).firstOrNull { it.id == assistantId }
-                        if (cur?.status == "streaming" && cur.text.isBlank()) msgDao.deleteById(assistantId)
-                    }
+                    db.conversations().touch(conversationId, System.currentTimeMillis())
+                    _live.update { it - assistantId }
                 }
-                db.conversations().touch(conversationId, System.currentTimeMillis())
+            } catch (e: Exception) {
+                val detail = e.message ?: e.javaClass.simpleName
+                diagnosticsLog?.handoff("engine.persist.failed", conversationId, turnId, detail)
                 _live.update { it - assistantId }
+                if (cancelled == null && jobs[conversationId] === myJob) {
+                    // The turn's own error (provider error / no content),
+                    // or the save failure itself when the reply was fine.
+                    val bubbleError = error ?: "Could not save the reply: $detail"
+                    runCatching {
+                        withContext(NonCancellable) {
+                            msgDao.upsert(base.copy(text = text.toString(), status = "error", error = bubbleError))
+                        }
+                    }.onFailure {
+                        // The error bubble could not be written either: drop
+                        // the streaming placeholder so no spinner outlives
+                        // the turn.
+                        runCatching { withContext(NonCancellable) { msgDao.deleteById(assistantId) } }
+                    }
+                    if (error == null) persistError = bubbleError
+                }
             }
+            if (persistError != null) error = persistError
             cancelled?.let { throw it }
             if (error != null || calls.isEmpty()) {
                 // No "finished" notification for a turn the user stopped or
@@ -452,9 +481,11 @@ class ChatEngine(
      * and an error result is recorded instead, so the turn continues and
      * Main answers from history. If even that write fails, the turn still
      * continues — sanitize drops the orphan call and Main answers from
-     * history. A genuine user Stop is NOT caught here (only the timeout
-     * is): its cancellation still propagates and settleTurn writes the
-     * Interrupted marker, as before.
+     * history. A genuine DB error is handled the same way (17/11/2026):
+     * it used to escape and end the turn silently, with no error bubble.
+     * A genuine user Stop is NOT caught here (only the timeout and the DB
+     * error are): its cancellation still propagates and settleTurn writes
+     * the Interrupted marker, as before.
      */
     private suspend fun recordToolResult(
         msgDao: MessageDao,
@@ -476,21 +507,20 @@ class ChatEngine(
                 "engine.tool-result.upsert.timeout", conversationId, turnId,
                 "tool=${call.name} after=${System.currentTimeMillis() - startedAt}ms",
             )
-            runCatching {
-                withTimeout(TOOL_RESULT_UPSERT_TIMEOUT_MS) {
-                    msgDao.upsert(
-                        toolResultEntity(
-                            msgDao, conversationId, turnId, turnNo, call,
-                            outcome.copy(resultText = ModelFacingText.subResultNotRecorded(call.name), isError = true),
-                        ),
-                    )
-                }
-            }.onFailure {
-                diagnosticsLog?.handoff(
-                    "engine.tool-result.error-upsert.failed", conversationId, turnId,
-                    "tool=${call.name} ${it.message ?: it.javaClass.simpleName}",
-                )
-            }.isSuccess
+            recordErrorToolResult(msgDao, conversationId, turnId, turnNo, call, outcome)
+        } catch (e: CancellationException) {
+            // A genuine user Stop: never swallowed here — it propagates so
+            // settleTurn can write the Interrupted marker.
+            throw e
+        } catch (e: Exception) {
+            // A genuine DB error (not a timeout): the turn used to end
+            // silently here. Record an error result instead, so the turn
+            // continues and Main answers from history.
+            diagnosticsLog?.handoff(
+                "engine.tool-result.upsert.failed", conversationId, turnId,
+                "tool=${call.name} after=${System.currentTimeMillis() - startedAt}ms ${e.message ?: e.javaClass.simpleName}",
+            )
+            recordErrorToolResult(msgDao, conversationId, turnId, turnNo, call, outcome)
         }
         if (recorded) {
             diagnosticsLog?.handoff(
@@ -504,6 +534,36 @@ class ChatEngine(
             )
         }
     }
+
+    /**
+     * Best-effort fallback for [recordToolResult]: record the tool result
+     * as an error (the model is told the report could not be saved).
+     * Returns false when even that write fails — the caller then continues
+     * without the result and sanitize drops the orphan call, so the turn
+     * still continues instead of ending silently.
+     */
+    private suspend fun recordErrorToolResult(
+        msgDao: MessageDao,
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        call: AiToolCall,
+        outcome: ToolOutcome,
+    ): Boolean = runCatching {
+        withTimeout(TOOL_RESULT_UPSERT_TIMEOUT_MS) {
+            msgDao.upsert(
+                toolResultEntity(
+                    msgDao, conversationId, turnId, turnNo, call,
+                    outcome.copy(resultText = ModelFacingText.subResultNotRecorded(call.name), isError = true),
+                ),
+            )
+        }
+    }.onFailure {
+        diagnosticsLog?.handoff(
+            "engine.tool-result.error-upsert.failed", conversationId, turnId,
+            "tool=${call.name} ${it.message ?: it.javaClass.simpleName}",
+        )
+    }.isSuccess
 
     /** One tool-result message row. Built inside the timeout so the seq read is capped too. */
     private suspend fun toolResultEntity(
