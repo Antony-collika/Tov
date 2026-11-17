@@ -107,6 +107,45 @@ class ContextBuilderToolOrderTest {
     }
 
     @Test
+    fun subToolCardsDoNotLeakIntoMainRequest() {
+        // The sub's tool cards (17/11/2026): a sub assistant row holding a
+        // round's work calls, plus one tool row per call, both written to
+        // the DB so the chat shows them as cards. They must never reach
+        // Main — the assistant row is dropped for its sender, and the tool
+        // results are dropped by sanitize as orphans (no kept assistant
+        // call references them), so the request still ends with the
+        // delegate result, exactly as in the 400 case above.
+        val delegateCalls = json.encodeToString(
+            callsSer,
+            listOf(AiToolCall("c1", "delegate_to_subagent", "{}", uid = "sub.delegate")),
+        )
+        val subCalls = json.encodeToString(
+            callsSer,
+            listOf(AiToolCall("yt1", "youtube_media_play", "{\"videos\":[\"1fueZCTYkpA\"]}", uid = "youtube.media.play")),
+        )
+        val rows = listOf(
+            row("u1", "t1", 1, "user", "mở nhạc gì vui vui đi"),
+            row("a1", "t1", 2, "assistant", "", toolCallsJson = delegateCalls),
+            row("s0", "t1", 3, "assistant", "Chào bạn, mình sẽ tìm và phát nhạc vui vẻ ngay đây!", sender = "monica"),
+            row("st1", "t1", 4, "assistant", "", sender = "monica", toolCallsJson = subCalls),
+            row("rt1", "t1", 5, "tool", "Đang phát: Morning Coffee", toolCallId = "yt1", toolUid = "youtube.media.play", toolName = "youtube_media_play"),
+            row("r1", "t1", 6, "tool", "detailed report: played Morning Coffee", toolCallId = "c1", toolUid = "sub.delegate", toolName = "delegate_to_subagent"),
+            row("s1", "t1", 7, "assistant", "Mình đã phát danh sách nhạc sôi động rồi nhé!", sender = "monica"),
+        )
+        val plan = ContextBuilder.plan(rows, budget = 100_000, nameForUid = { null })
+        val msgs = plan.messages
+        assertEquals(
+            listOf(Role.USER, Role.ASSISTANT, Role.TOOL),
+            msgs.map { it.role },
+        )
+        assertEquals(Role.TOOL, msgs.last().role)
+        assertEquals("c1", msgs.last().toolCallId)
+        assertTrue(msgs.none { it.toolCallId == "yt1" })
+        assertTrue(msgs.none { it.text.contains("Đang phát") })
+        assertTrue(msgs.none { it.text.contains("Mình đã phát") })
+    }
+
+    @Test
     fun orderWithoutInterveningMessagesIsUnchanged() {
         val calls = json.encodeToString(
             callsSer,
