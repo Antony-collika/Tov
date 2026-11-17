@@ -125,6 +125,9 @@ fun AppNav() {
                         onRequestLog = { nav.navigate("request-log?id=$id") },
                         onOpenMessages = { nav.navigate("messages/$id") },
                         onOpenMembers = { nav.navigate("members/$id") },
+                        onOpenSubRun = { agentId, turnId ->
+                            nav.navigate("sub-run/$id?agent=${Uri.encode(agentId)}&turn=${Uri.encode(turnId)}")
+                        },
                         onPanel = { nav.navigate("panel?id=$id") },
                         onOpenStorage = { nav.navigate("settings-storage") },
                     )
@@ -202,6 +205,21 @@ fun AppNav() {
                     onBack = { nav.popBackStack() },
                     onAgentSettings = { agentId -> nav.navigate("agent-settings/" + Uri.encode(agentId)) },
                     onAddAgent = { nav.navigate("agent-settings/new") },
+                )
+            }
+            composable(
+                "sub-run/{id}?agent={agent}&turn={turn}",
+                arguments = listOf(
+                    navArgument("id") { type = NavType.StringType },
+                    navArgument("agent") { type = NavType.StringType },
+                    navArgument("turn") { type = NavType.StringType },
+                ),
+            ) { entry ->
+                SubRunDetailScreen(
+                    conversationId = entry.arguments?.getString("id") ?: "",
+                    agentId = entry.arguments?.getString("agent") ?: "",
+                    turnId = entry.arguments?.getString("turn") ?: "",
+                    onBack = { nav.popBackStack() },
                 )
             }
             composable("agent-settings/{agentId}", arguments = listOf(navArgument("agentId") { type = NavType.StringType })) { entry ->
