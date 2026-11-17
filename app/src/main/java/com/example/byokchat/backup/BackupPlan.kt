@@ -86,6 +86,13 @@ data class RestorePlan(
     val backup: BackupData,
 )
 
+/**
+ * The review screen appears only when there is at least one conflict to
+ * decide. With no conflicts the restore applies straight away — the user
+ * is never asked a question that has no decision in it.
+ */
+fun RestorePlan.needsReview(): Boolean = conflicts.isNotEmpty()
+
 internal fun shorten(text: String, max: Int = 100): String {
     val flat = text.trim().replace(Regex("\\s+"), " ")
     return if (flat.length <= max) flat else flat.take(max - 1).trimEnd() + "…"

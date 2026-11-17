@@ -84,9 +84,12 @@ import java.util.Locale
  * again to open a backup file. Restoring never replaces: new chats,
  * providers and agents are appended, and where the backup differs from
  * this device she chooses keep current or use backup, once, on one
- * screen after decrypting. DB only: files in the playground, the
- * Request panel, theme, max tool rounds and the request log are not
- * backed up at all.
+ * screen after decrypting — and only when there is anything to decide:
+ * with no conflicts the restore applies straight away, with no screen
+ * at all. The review screen also has keep-all / use-all buttons, so she
+ * never has to tap every conflict one by one. DB only: files in the
+ * playground, the Request panel, theme, max tool rounds and the request
+ * log are not backed up at all.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -180,6 +183,34 @@ fun BackupScreen(onBack: () -> Unit) {
         }
     }
 
+    fun applyRestore(toApply: RestorePlan) {
+        busy = true
+        scope.launch(Dispatchers.IO) {
+            val result = runCatching {
+                applyRestorePlan(
+                    db = container.db,
+                    settings = container.settings,
+                    registry = container.registry,
+                    agentStore = container.agentStore,
+                    imagesDir = File(context.filesDir, "images"),
+                    plan = toApply,
+                    decisions = decisions.toMap(),
+                    images = pendingImages,
+                )
+            }
+            withContext(Dispatchers.Main) {
+                busy = false
+                result.onSuccess {
+                    pendingImages = emptyMap()
+                    plan = null
+                    done = it
+                }.onFailure {
+                    error = "Restore failed: ${it.message ?: it.javaClass.simpleName}"
+                }
+            }
+        }
+    }
+
     fun startRestore(password: CharArray) {
         val envelope = pendingEnvelope ?: return
         pendingEnvelope = null
@@ -225,41 +256,19 @@ fun BackupScreen(onBack: () -> Unit) {
                 busy = false
                 if (planned != null) {
                     val (computed, imageMap) = planned
-                    decisions.clear()
-                    computed.conflicts.forEach { decisions[it.id] = ConflictChoice.KEEP_CURRENT }
                     pendingImages = imageMap
-                    plan = computed
+                    if (!computed.needsReview()) {
+                        // No conflicts: apply straight away, no review
+                        // screen — the user is never asked a question that
+                        // has no decision in it.
+                        applyRestore(computed)
+                    } else {
+                        decisions.clear()
+                        computed.conflicts.forEach { decisions[it.id] = ConflictChoice.KEEP_CURRENT }
+                        plan = computed
+                    }
                 } else {
                     error = failure ?: "Could not read the backup contents."
-                }
-            }
-        }
-    }
-
-    fun applyRestore() {
-        val current = plan ?: return
-        busy = true
-        scope.launch(Dispatchers.IO) {
-            val result = runCatching {
-                applyRestorePlan(
-                    db = container.db,
-                    settings = container.settings,
-                    registry = container.registry,
-                    agentStore = container.agentStore,
-                    imagesDir = File(context.filesDir, "images"),
-                    plan = current,
-                    decisions = decisions.toMap(),
-                    images = pendingImages,
-                )
-            }
-            withContext(Dispatchers.Main) {
-                busy = false
-                result.onSuccess {
-                    pendingImages = emptyMap()
-                    plan = null
-                    done = it
-                }.onFailure {
-                    error = "Restore failed: ${it.message ?: it.javaClass.simpleName}"
                 }
             }
         }
@@ -312,7 +321,7 @@ fun BackupScreen(onBack: () -> Unit) {
                         plan = currentPlan,
                         decisions = decisions,
                         onDecision = { id, choice -> decisions[id] = choice },
-                        onApply = { applyRestore() },
+                        onApply = { applyRestore(currentPlan) },
                         onCancel = { plan = null; pendingImages = emptyMap() },
                         busy = busy,
                     )
@@ -425,6 +434,19 @@ private fun RestoreReview(
             "Decide — keep what is on this device, or use the backup's:",
             style = MaterialTheme.typography.titleSmall,
         )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = { plan.conflicts.forEach { onDecision(it.id, ConflictChoice.KEEP_CURRENT) } },
+                modifier = Modifier.weight(1f),
+            ) { Text("Keep all current") }
+            OutlinedButton(
+                onClick = { plan.conflicts.forEach { onDecision(it.id, ConflictChoice.USE_BACKUP) } },
+                modifier = Modifier.weight(1f),
+            ) { Text("Use all backup") }
+        }
         plan.conflicts.forEach { conflict ->
             val choice = decisions[conflict.id] ?: ConflictChoice.KEEP_CURRENT
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -470,12 +492,6 @@ private fun RestoreReview(
             }
             HorizontalDivider()
         }
-    } else {
-        Text(
-            "Nothing on this device differs from the backup, so there is nothing to decide.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
     if (plan.folderReminder.isNotEmpty()) {
         Text(
@@ -487,7 +503,7 @@ private fun RestoreReview(
         )
     }
     Button(onClick = onApply, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
-        Text(if (plan.conflicts.isEmpty()) "Restore" else "Restore with these choices")
+        Text("Restore with these choices")
     }
     OutlinedButton(onClick = onCancel, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
         Text("Cancel")

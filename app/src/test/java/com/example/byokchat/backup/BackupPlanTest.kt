@@ -18,6 +18,8 @@ import org.junit.Test
  * Restore-plan rules (Duy, 2026-11-17): never replace — append where
  * possible; where there is only one value, ask once on a single screen
  * (each conflict: keep current / use backup, default keep current).
+ * The screen appears only when there is a conflict to decide — no
+ * conflicts, no screen, the restore applies straight away (2026-11-17 ~15:32).
  */
 class BackupPlanTest {
     private fun provider(id: String, name: String, key: String) =
@@ -295,5 +297,23 @@ class BackupPlanTest {
             backup(defaultPrompt = "Backup.", searchKeys = mapOf("BRAVE" to "new"), youtubeKey = "new"),
         )
         assertTrue(plan.conflicts.none { it.id in setOf("theme", "maxToolRounds", "requestLogEnabled") })
+    }
+
+    @Test
+    fun `review screen only appears when there is a conflict to decide`() {
+        // Duy, 2026-11-17 ~15:32: no conflicts means no screen at all —
+        // the restore applies straight away, never a popup per conflict.
+        val noConflicts = computeRestorePlan(
+            current(defaultPrompt = ""),
+            backup(defaultPrompt = "Be helpful.", youtubeKey = "yk"),
+        )
+        assertTrue(noConflicts.conflicts.isEmpty())
+        assertEquals(false, noConflicts.needsReview())
+        val oneConflict = computeRestorePlan(
+            current(defaultPrompt = "Mine."),
+            backup(defaultPrompt = "Backup."),
+        )
+        assertEquals(1, oneConflict.conflicts.size)
+        assertEquals(true, oneConflict.needsReview())
     }
 }
