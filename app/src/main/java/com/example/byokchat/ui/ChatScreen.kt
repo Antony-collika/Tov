@@ -287,10 +287,11 @@ fun ChatScreen(
     }
     // Turns that have an AI message on screen. A turn without one gets "Regenerate" in your message's menu.
     val turnsWithAnswer = remember(chrono) { chrono.filter { it.role == "assistant" }.map { it.turnId }.toSet() }
-    // Group chat (Phase 1 fix): one "Main" header per assistant turn — only
-    // the first assistant message of a turn carries it; later tool rounds in
-    // the same turn do not repeat it.
-    val firstAssistantOfTurn = remember(chrono) { firstAssistantMessageIds(chrono) }
+    // Group chat (Phase 1 fix, speaker-change rule 17/11/2026): a "Main"
+    // header on the first Main message of a turn, and again when Main
+    // speaks after a sub-agent in the same turn (the handover); later
+    // messages in the same speaker stretch do not repeat it.
+    val firstAssistantOfTurn = remember(chrono) { mainHeaderMessageIds(chrono) }
     val toolResults = remember(messages) {
         ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
     }
@@ -556,7 +557,8 @@ fun ChatScreen(
                             // Group chat sender header (Phase 2): a message
                             // sent by a sub-agent carries that agent's avatar
                             // and name; Main's messages carry Main's header
-                            // once per turn (first assistant message only).
+                            // at the start of a turn and again when Main
+                            // speaks after a sub-agent (handover).
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 val senderMember = m.sender?.let { subAgentMember(it) }
                                 val mm = mainMember

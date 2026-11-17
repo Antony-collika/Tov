@@ -133,19 +133,39 @@ fun defaultMembers(): List<GroupMember> = listOf(
 )
 
 /**
- * Ids of the assistant messages that start a turn: the first assistant
- * message of each turn (in chronological order) carries the "Main" sender
- * header; later tool rounds in the same turn do not repeat it. Messages
- * sent by a sub-agent (sender != null) never carry Main's header. [messages]
- * is the chat list in chronological order (the same list the screen renders,
- * before it is reversed for display).
+ * Ids of the assistant messages that carry the "Main" sender header: the
+ * first Main message of each turn, and a Main message right after a
+ * sub-agent's message in the same turn — the handover point where Main
+ * speaks again after a sub (17/11/2026: without this, Main's closing
+ * answer after a sub's report looked like the sub talking on). Later Main
+ * messages in the same speaker stretch do not repeat it, so consecutive
+ * tool rounds of Main still share one header. Messages sent by a sub-agent
+ * (sender != null) never carry Main's header; they carry their own.
+ * [messages] is the chat list in chronological order (the same list the
+ * screen renders, before it is reversed for display).
  */
-fun firstAssistantMessageIds(messages: List<MessageEntity>): Set<String> {
-    val seenTurns = mutableSetOf<String>()
-    return messages
-        .filter { it.role == "assistant" && it.sender == null && seenTurns.add(it.turnId) }
-        .map { it.id }
-        .toSet()
+fun mainHeaderMessageIds(messages: List<MessageEntity>): Set<String> {
+    val ids = mutableSetOf<String>()
+    var currentTurn: String? = null
+    var seenMainInTurn = false
+    var prevAssistantSender: String? = null
+    var prevAssistantSeen = false
+    for (m in messages) {
+        if (m.role != "assistant") continue
+        if (m.turnId != currentTurn) {
+            currentTurn = m.turnId
+            seenMainInTurn = false
+            prevAssistantSender = null
+            prevAssistantSeen = false
+        }
+        if (m.sender == null) {
+            if (!seenMainInTurn || (prevAssistantSeen && prevAssistantSender != null)) ids += m.id
+            seenMainInTurn = true
+        }
+        prevAssistantSender = m.sender
+        prevAssistantSeen = true
+    }
+    return ids
 }
 
 /** Display member for a sub-agent message (sender is the agent id stored in Room). Unknown senders fall back to the raw string, so old messages still render. */

@@ -45,7 +45,7 @@ class GroupChatTest {
             msg("a4", "t2", 6, "assistant"),
             msg("a5", "t2", 7, "assistant"),
         )
-        assertEquals(setOf("a1", "a4"), firstAssistantMessageIds(rows))
+        assertEquals(setOf("a1", "a4"), mainHeaderMessageIds(rows))
     }
 
     @Test fun headerLogicIgnoresUserMessagesAndEmptyList() {
@@ -53,8 +53,8 @@ class GroupChatTest {
             msg("u1", "t1", 1, "user"),
             msg("u2", "t2", 2, "user"),
         )
-        assertEquals(emptySet<String>(), firstAssistantMessageIds(rows))
-        assertEquals(emptySet<String>(), firstAssistantMessageIds(emptyList()))
+        assertEquals(emptySet<String>(), mainHeaderMessageIds(rows))
+        assertEquals(emptySet<String>(), mainHeaderMessageIds(emptyList()))
     }
 
     @Test fun defaultMembersAreYouAndMain() {
@@ -130,14 +130,38 @@ class GroupChatTest {
         assertEquals("Needs you", memberStatusLabel(MemberStatus.NEEDS_INPUT))
     }
 
-    @Test fun headerSkipsSubAgentMessages() {
+    // Speaker-change rule (17/11/2026): this used to expect only "a1" —
+    // one header per turn. Now Main's answer after the sub's message is
+    // the handover point, so it carries the header again ("a2"); the sub's
+    // own message still never carries Main's header.
+    @Test fun headerReturnsAfterSubAgentMessage() {
         val rows = listOf(
             msg("u1", "t1", 1, "user"),
             msg("a1", "t1", 2, "assistant"),
             msg("s1", "t1", 3, "assistant", sender = "research"),
             msg("a2", "t1", 4, "assistant"),
         )
-        assertEquals(setOf("a1"), firstAssistantMessageIds(rows))
+        assertEquals(setOf("a1", "a2"), mainHeaderMessageIds(rows))
+    }
+
+    @Test fun headerDoesNotRepeatForMainMessagesAfterHandover() {
+        val rows = listOf(
+            msg("u1", "t1", 1, "user"),
+            msg("a1", "t1", 2, "assistant"),
+            msg("s1", "t1", 3, "assistant", sender = "research"),
+            msg("a2", "t1", 4, "assistant"),
+            msg("a3", "t1", 5, "assistant"),
+        )
+        assertEquals(setOf("a1", "a2"), mainHeaderMessageIds(rows))
+    }
+
+    @Test fun headerOnMainMessageAfterLeadingSubMessage() {
+        val rows = listOf(
+            msg("u1", "t1", 1, "user"),
+            msg("s1", "t1", 2, "assistant", sender = "research"),
+            msg("a1", "t1", 3, "assistant"),
+        )
+        assertEquals(setOf("a1"), mainHeaderMessageIds(rows))
     }
 
     @Test fun subAgentMemberUsesConfigForKnownAgent() {
