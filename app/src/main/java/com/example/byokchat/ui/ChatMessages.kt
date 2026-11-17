@@ -318,11 +318,22 @@ internal fun AssistantMessage(
                 return@Column
             }
             if (shownText.isNotEmpty()) {
-                MarkdownBody(
-                    shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl,
-                    onLongPress = openMenu, anchorCoordinates = boxCoords,
-                    streaming = m.status == "streaming",
-                )
+                // Messenger-style bubble (17/11/2026, approved mockup):
+                // the AI's words sit in a grey bubble on the left, like
+                // the user's purple bubble on the right. The work pill
+                // stays a separate card below it, not inside the bubble.
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
+                    modifier = Modifier.widthIn(max = 340.dp),
+                ) {
+                    MarkdownBody(
+                        shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl,
+                        modifier = Modifier.padding(12.dp),
+                        onLongPress = openMenu, anchorCoordinates = boxCoords,
+                        streaming = m.status == "streaming",
+                    )
+                }
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
