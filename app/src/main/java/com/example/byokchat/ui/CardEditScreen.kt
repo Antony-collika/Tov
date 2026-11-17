@@ -15,8 +15,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,7 +53,6 @@ import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.ToolsSource
-import com.example.byokchat.tools.ToolsMdParseException
 import com.example.byokchat.tools.ToolsMdParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -88,22 +85,12 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // RCP (17/11/2026): thẻ System/Free đồng bộ hai chiều với file ngoài,
     // như cấu hình sub-agent — ghi chú hiện khi file vừa điền vào ô text.
     var syncNote by remember(cardId) { mutableStateOf<String?>(null) }
-    // Đợt E: thẻ Tools giữ NHIỀU file tools.md (file cũ chuyển thành danh sách 1 file).
-    var toolFiles by remember(cardId) { mutableStateOf(card?.toolFiles().orEmpty()) }
-    // Sửa luật nguồn 11/11/2026: thẻ Tools có nguồn Text (gõ trực tiếp) hoặc
-    // File (file .md đã chọn); mặc định File như thẻ cũ.
-    var toolsSource by remember(cardId) { mutableStateOf(card?.toolsSource ?: ToolsSource.FILE) }
-    var toolsPreview by remember(cardId) { mutableStateOf<String?>(null) }
-    var toolsPreviewError by remember(cardId) { mutableStateOf<String?>(null) }
-    // Đợt fix 11/11/2026 (A2): picker chọn file tools.md — như picker của
-    // thẻ System, không gõ đường dẫn tay nữa.
-    val pickToolFile = rememberCardFilePicker(
-        onPicked = { path ->
-            if (path !in toolFiles) toolFiles = toolFiles + path
-            fileError = null
-        },
-        onPickError = { fileError = it },
-    )
+    // RCP (17/11/2026): thẻ Tools chọn trong app — UID các tool đã chọn
+    // (thứ tự offer tính lúc gửi theo nhóm + registry, không phải thứ tự
+    // tích). Lỗi di trú một lần của thẻ cũ (xem LaunchedEffect dưới).
+    var selectedUids by remember(cardId) { mutableStateOf(card?.selectedToolUids?.toSet().orEmpty()) }
+    var migrationError by remember(cardId) { mutableStateOf<String?>(null) }
+    var showToolPicker by remember(cardId) { mutableStateOf(false) }
     // Đợt 6: thẻ Metadata — giá trị lưu toàn cục ở SettingsRepository (trừ
     // max tokens, theo từng provider). Chỉ hiện trường nào hãng đang dùng
     // hỗ trợ; trường hãng không có thì ẩn, không gửi bừa.
@@ -169,8 +156,8 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
         text != card.text || label != card.label || role != card.role || policy != card.policy ||
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
             turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
-            file.trim() != (card.file ?: "") || toolFiles != card.toolFiles() ||
-            toolsSource != (card?.toolsSource ?: ToolsSource.FILE) ||
+            file.trim() != (card.file ?: "") ||
+            selectedUids != (card?.selectedToolUids?.toSet() ?: emptySet()) ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             keepSignature != savedMetadata.keepThoughtSignature ||
             replayReasoning != savedMetadata.replayReasoning ||
@@ -181,49 +168,37 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Thẻ Tools CÓ Save (danh sách file) từ Đợt E.
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.LAST_TURN
 
-    // Đợt E: xem trước danh sách tool thẻ sẽ offer (đọc + parse lại mỗi khi
-    // đổi nguồn/file/văn bản). Nguồn Text parse ngay tại chỗ (không cần I/O);
-    // nguồn File đọc + parse lại như lúc gửi.
-    LaunchedEffect(toolFiles, toolsSource, text, card?.kind) {
-        if (card?.kind != CardKind.TOOLS) return@LaunchedEffect
-        toolsPreview = null
-        toolsPreviewError = null
-        val origins = container.registry.originDescriptions()
-        if (toolsSource == ToolsSource.TEXT) {
-            if (text.isBlank()) {
-                toolsPreview = "No tools — the card text is empty."
-                return@LaunchedEffect
+    /**
+     * RCP (17/11/2026): di trú MỘT LẦN cho thẻ Tools cũ — mở màn lần đầu,
+     * nếu thẻ chưa có selectedToolUids mà còn trỏ file tools.md (hoặc văn
+     * bản tools.md gõ trực tiếp), parse một lần để lấy danh sách uid rồi
+     * bỏ liên kết file (ghi lại ngay vào store, không đợi Save — để thẻ
+     * cũ không thành trống dù user thoát ra không lưu). Lỗi parse/đọc thì
+     * báo lỗi và giữ nguyên liên kết file để user sửa file rồi mở lại.
+     */
+    LaunchedEffect(cardId) {
+        val c = card ?: return@LaunchedEffect
+        if (c.kind != CardKind.TOOLS) return@LaunchedEffect
+        if (c.selectedToolUids.isNotEmpty()) return@LaunchedEffect
+        val legacyFiles = c.toolFiles()
+        val legacyText = if (c.toolsSource == ToolsSource.TEXT) c.text else ""
+        if (legacyFiles.isEmpty() && legacyText.isBlank()) return@LaunchedEffect
+        val migrated = withContext(Dispatchers.IO) {
+            runCatching {
+                val texts = legacyFiles.map { path -> container.fs.readCardFile(path) } +
+                    (if (legacyText.isNotBlank()) listOf(legacyText) else emptyList())
+                val parsed = ToolsMdParser.collectUids(texts, container.registry.originDescriptions())
+                // Thứ tự lưu: nhóm + registry mặc định (như lúc gửi).
+                container.registry.all.map { it.uid }.filter { it in parsed.toSet() }
             }
-            try {
-                val parsed = ToolsMdParser.parse(text, origins)
-                toolsPreview = if (parsed.isEmpty()) "No tools — the card text lists no tools."
-                else "Offers ${parsed.size} tool(s): " + parsed.joinToString(", ") { it.name }
-            } catch (e: ToolsMdParseException) {
-                toolsPreviewError = "In the Tools card text: ${e.message}"
-            }
-            return@LaunchedEffect
         }
-        // Nguồn File mà chưa chọn file nào thì báo ngay ở đây (lúc gửi cũng
-        // chặn với cùng lỗi này — xem RequestLayout.resolveToolFiles).
-        if (toolFiles.isEmpty()) {
-            toolsPreviewError = "No file selected for the Tools card. " +
-                "Choose one or more files (in tools.md format), or switch the card to Text input."
-            return@LaunchedEffect
-        }
-        val layout = store.storedLayout.value
-        // Ép toolsSource = FILE cho bản xem trước: user đang sửa ở nguồn File
-        // nhưng chưa Save (bố cục đã lưu có thể còn là TEXT).
-        val previewCard = layout.toolsCard()?.copy(files = toolFiles, toolsSource = ToolsSource.FILE) ?: return@LaunchedEffect
-        val previewLayout = layout.copy(cards = layout.cards.map { if (it.id == previewCard.id) previewCard else it })
-        val res = withContext(Dispatchers.IO) {
-            previewLayout.resolveToolFiles({ path -> runCatching { container.fs.readCardFile(path) } }, origins)
-        }
-        if (res.errors.isNotEmpty()) {
-            toolsPreviewError = res.errors.joinToString("\n")
-        } else {
-            val names = res.exposed.orEmpty()
-            toolsPreview = if (names.isEmpty()) "No tools — the selected files list no tools."
-            else "Offers ${names.size} tool(s): " + names.joinToString(", ") { it.name }
+        migrated.onSuccess { list ->
+            selectedUids = list.toSet()
+            store.updateCard(c.id) { it.copy(selectedToolUids = list, files = emptyList(), file = null) }
+        }.onFailure { e ->
+            migrationError = "Could not move your old tools list into the app: " +
+                (e.message ?: e.javaClass.simpleName) +
+                ". Edit the file and open this screen again, or choose tools below."
         }
     }
 
@@ -242,18 +217,16 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 compactToolResults = compact,
                 turnTags = turnTags,
                 includeErrorTurns = includeErrors,
-                // Thẻ Tools dùng danh sách files (file đơn cũ gộp vào đó);
-                // thẻ khác giữ nguyên file/files của chúng. RCP (17/11/2026):
-                // thẻ System/Free luôn giữ liên kết file đã chọn (trống =
-                // không trỏ file) — không còn chọn 1 trong 2 nguồn nữa.
+                // RCP (17/11/2026): thẻ System/Free luôn giữ liên kết file
+                // đã chọn (trống = không trỏ file). Thẻ Tools lưu danh sách
+                // uid đã chọn (nhóm + registry) và BỎ liên kết file cũ
+                // (files/file trống) — đường gửi không đọc file nữa.
                 file = if (c.kind == CardKind.TOOLS) null
                 else file.trim().ifEmpty { null },
-                files = if (c.kind == CardKind.TOOLS) {
-                    if (toolsSource == ToolsSource.TEXT) emptyList() else toolFiles
-                } else it.files,
-                // Sửa luật nguồn 11/11/2026: chỉ thẻ Tools dùng toolsSource;
-                // thẻ khác giữ nguyên giá trị đã lưu (mặc định FILE).
-                toolsSource = if (c.kind == CardKind.TOOLS) toolsSource else it.toolsSource,
+                files = if (c.kind == CardKind.TOOLS) emptyList() else it.files,
+                selectedToolUids = if (c.kind == CardKind.TOOLS) {
+                    container.registry.all.map { tool -> tool.uid }.filter { it in selectedUids }
+                } else it.selectedToolUids,
             )
         }
         if (goBack) onBack()
@@ -305,18 +278,17 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
 
     /**
      * Tạo file mẫu MỚI trong Storage/template/ rồi trỏ thẻ tới URI của file
-     * đó. Mỗi lần bấm là một file mới (quyết định 13/11/2026): tên gốc là
-     * `<loại>_template.md` (tools → tools_template.md); trùng tên thì tự
-     * thêm số, vd tools_template_(01).md, _(02)... — KHÔNG dùng lại hay ghi
-     * đè file cũ, nên dù cậu có dùng chính file mẫu đó rồi sửa hỏng thì lần
-     * bấm sau vẫn tạo ra bản chuẩn mới. Thẻ lưu URI content:// của file
-     * (đường file ngoài đã có sẵn), không lưu đường dẫn tương đối trong
-     * playground.
+     * đó (chỉ thẻ System/Free — thẻ Tools không còn file nữa, RCP
+     * 17/11/2026). Mỗi lần bấm là một file mới (quyết định 13/11/2026):
+     * tên gốc là `<loại>_template.md`; trùng tên thì tự thêm số, vd
+     * system_template_(01).md, _(02)... — KHÔNG dùng lại hay ghi đè file
+     * cũ, nên dù cậu có dùng chính file mẫu đó rồi sửa hỏng thì lần bấm
+     * sau vẫn tạo ra bản chuẩn mới. Thẻ lưu URI content:// của file (đường
+     * file ngoài đã có sẵn), không lưu đường dẫn tương đối trong playground.
      */
     fun createTemplate() {
         val c = card ?: return
         val (baseName, content) = when (c.kind) {
-            CardKind.TOOLS -> "tools_template.md" to ToolsMdParser.buildTemplate(container.registry.all)
             CardKind.SYSTEM -> "system_template.md" to templateText(c.kind)
             else -> {
                 val slug = label.trim().lowercase()
@@ -344,15 +316,11 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 uriString
             }.onSuccess { uriString ->
                 withContext(Dispatchers.Main) {
-                    if (c.kind == CardKind.TOOLS) {
-                        if (uriString !in toolFiles) toolFiles = toolFiles + uriString
-                    } else {
-                        // RCP (17/11/2026): file mẫu mới trở thành file liên
-                        // kết và nội dung mẫu điền vào ô text (như agent).
-                        file = uriString
-                        text = content
-                        syncNote = "Filled from the new template file."
-                    }
+                    // RCP (17/11/2026): file mẫu mới trở thành file liên
+                    // kết và nội dung mẫu điền vào ô text (như agent).
+                    file = uriString
+                    text = content
+                    syncNote = "Filled from the new template file."
                     fileError = null
                 }
             }.onFailure { e ->
@@ -637,81 +605,40 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     }
                 }
                 CardKind.TOOLS -> {
-                    // Đợt E: thẻ Tools có editor riêng — danh sách file tools.md,
-                    // KHÔNG mở màn quản lý tool nữa (hai tầng tách riêng: tầng
-                    // quyền ở Settings/Manage Tools, tầng RCP ở đây).
+                    // RCP (17/11/2026): thẻ Tools chỉ chọn trong app — danh
+                    // sách uid, KHÔNG còn file tools.md. Hai tầng tách riêng:
+                    // tầng quyền ở Settings/Manage Tools, tầng chọn ở đây.
                     Text(
                         "This card is not a message: it is the tool list sent with the request, " +
-                            "so its position in the panel changes nothing. Every tool listed is " +
-                            "offered to the model, in file order, then block order. A tool not " +
-                            "listed is not offered. Delete a block to hide that tool. Turn the " +
-                            "card off to offer no tools at all.",
+                            "so its position in the panel changes nothing. Every tool selected is " +
+                            "offered to the model, in the app's group order. A tool not selected " +
+                            "is not offered. Turn the card off to offer no tools at all.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    Text("Source", style = MaterialTheme.typography.labelLarge)
-                    PolicyOption(
-                        selected = toolsSource == ToolsSource.TEXT,
-                        title = "Text input",
-                        desc = "Type the tools list here, in tools.md format. Leave it empty to offer no tools.",
-                        onClick = { toolsSource = ToolsSource.TEXT },
+                    if (migrationError != null) {
+                        Text(migrationError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    }
+                    val namesByUid = container.registry.all.associate { it.uid to it.defaultName }
+                    Text(
+                        toolSelectionSummary(selectedUids, namesByUid),
+                        style = MaterialTheme.typography.bodyMedium,
                     )
-                    PolicyOption(
-                        selected = toolsSource == ToolsSource.FILE,
-                        title = "External file",
-                        desc = "Read from one or more files anywhere on this device, again on every send. Each file must list tools in tools.md format.",
-                        onClick = { toolsSource = ToolsSource.FILE },
-                    )
-                    if (toolsSource == ToolsSource.TEXT) {
-                        OutlinedTextField(
-                            value = text,
-                            onValueChange = { text = it },
-                            label = { Text("Tools list (tools.md format)") },
-                            minLines = 6,
-                            maxLines = 12,
-                            modifier = Modifier.fillMaxWidth(),
+                    TextButton(onClick = { showToolPicker = true }) { Text("Choose tools") }
+                    if (showToolPicker) {
+                        ToolPickerSheet(
+                            tools = container.registry.all,
+                            selected = selectedUids,
+                            onSelectionChange = { selectedUids = it },
+                            onDismiss = { showToolPicker = false },
                         )
-                        Text(
-                            "One block per tool, starting with \"## <name>\"; each block needs " +
-                                "uid, origin_description, name and description. Lines starting " +
-                                "with \">\" are notes.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        Text("Files", style = MaterialTheme.typography.labelLarge)
-                        if (toolFiles.isEmpty()) {
-                            Text(
-                                "(no files chosen)",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        toolFiles.forEach { path ->
-                            ToolFileRow(
-                                path = path,
-                                onOpen = { openFileAt(context, container.fs, path, onError = { fileError = it }) },
-                                onRemove = { toolFiles = toolFiles - path },
-                            )
-                        }
-                        // Đợt fix 11/11/2026 (A2): không gõ đường dẫn tay nữa —
-                        // chọn bằng hộp chọn của hệ thống (như thẻ System); các
-                        // nút xếp dọc dạng TextButton như mẫu FPilot.
-                        Column {
-                            TextButton(onClick = { pickToolFile.launch(arrayOf("*/*")) }) {
-                                Text("Choose file")
-                            }
-                            TextButton(onClick = ::createTemplate) { Text("Create template") }
-                        }
-                        if (fileError != null) {
-                            Text(fileError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                        }
                     }
                     Text("What the model will see", style = MaterialTheme.typography.labelLarge)
-                    if (toolsPreviewError != null) {
-                        Text(toolsPreviewError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    } else if (toolsPreview != null) {
-                        Text(toolsPreview!!, style = MaterialTheme.typography.bodySmall)
-                    }
+                    val offered = container.registry.all.filter { it.uid in selectedUids }
+                    Text(
+                        if (offered.isEmpty()) "No tools — nothing is offered to the model."
+                        else "Offers ${offered.size} tool(s): " + offered.joinToString(", ") { it.defaultName },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 CardKind.LAST_TURN -> {
                     Text(
@@ -874,37 +801,3 @@ private fun FileSection(
     }
 }
 
-/**
- * Một dòng file trong trình sửa thẻ Tools (đợt fix 11/11/2026, I1): hiện
- * tên file thật thay vì URI/đường dẫn đã lưu. Tên của file ngoài (URI)
- * phải tra qua nhà cung cấp nên đọc nền; chưa tra xong thì hiện đoạn cuối
- * của giá trị đã lưu.
- */
-@Composable
-private fun ToolFileRow(
-    path: String,
-    onOpen: () -> Unit,
-    onRemove: () -> Unit,
-) {
-    val fs = LocalContext.current.container.fs
-    var displayName by remember(path) { mutableStateOf(path.substringAfterLast('/').ifEmpty { path }) }
-    LaunchedEffect(path) {
-        displayName = withContext(Dispatchers.IO) { fs.cardFileDisplayName(path) }
-    }
-    Row(
-        Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            displayName,
-            modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        IconButton(onClick = onOpen) {
-            Icon(Icons.Default.OpenInNew, contentDescription = "Open file")
-        }
-        IconButton(onClick = onRemove) {
-            Icon(Icons.Default.Close, contentDescription = "Remove file")
-        }
-    }
-}

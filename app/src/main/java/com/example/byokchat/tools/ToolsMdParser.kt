@@ -82,9 +82,24 @@ object ToolsMdParser {
     }
 
     /**
+     * Thu thập uid từ các nội dung tools.md (RCP, 17/11/2026 — di trú MỘT
+     * LẦN cho thẻ Tools cũ): parse từng nội dung, gộp lại, bỏ trùng (giữ
+     * lần đầu). Ném [ToolsMdParseException] khi một nội dung lỗi — bên gọi
+     * báo lỗi và để user sửa file rồi thử lại, không tự đoán.
+     */
+    fun collectUids(texts: List<String>, origins: Map<String, String>): List<String> {
+        val seen = linkedSetOf<String>()
+        texts.forEach { text -> parse(text, origins).forEach { seen += it.uid } }
+        return seen.toList()
+    }
+
+    /**
      * File mẫu chuẩn: liệt kê TẤT CẢ tool kèm tên/mô tả gốc (như FPilot).
      * Chỉ để user lấy lại khi cần (vd sửa sai format làm parse lỗi) — app
      * KHÔNG BAO GIỜ tự ghi đè file của user bằng mẫu này.
+     * RCP (17/11/2026): không còn chỗ nào trong app tạo file mẫu tools
+     * nữa (thẻ Tools chỉ chọn trong app) — hàm này thành code chết, giữ
+     * lại vì test vẫn dùng và để sau này quyết có xóa hay không.
      */
     fun buildTemplate(tools: List<Tool>): String = buildString {
         appendLine("> Tools card. One block per tool, in the order they are offered to the model.")

@@ -110,6 +110,27 @@ class ToolsMdParserTest {
     }
 
     @Test
+    fun collectUidsMergesFilesAndDedupes() {
+        val a = "## txt.write\nuid: txt.write\nname: write_file\ndescription: Write text to a file.\n\n" +
+            "## time.now\nuid: time.now\nname: current_time\ndescription: Get the current date and time.\n"
+        val b = "## txt.read\nuid: txt.read\nname: read_file\ndescription: Read a bounded section of a UTF-8 text file. Large files require user approval.\n\n" +
+            "## txt.write\nuid: txt.write\nname: write_file\ndescription: Write text to a file.\n"
+        assertEquals(
+            listOf("txt.write", "time.now", "txt.read"),
+            ToolsMdParser.collectUids(listOf(a, b), origins),
+        )
+    }
+
+    @Test
+    fun collectUidsFailsOnABadFile() {
+        val bad = "## nope\nuid: nope\nname: nope\ndescription: No such tool.\n"
+        val e = assertThrows(ToolsMdParseException::class.java) {
+            ToolsMdParser.collectUids(listOf(bad), origins)
+        }
+        assertTrue(e.message!!.contains("nope"))
+    }
+
+    @Test
     fun templateRoundTrips() {
         val tools = listOf(
             Tool("txt.write", ToolGroup.TEXT, Risk.WRITE, "write_file", "Write text to a file.", buildJsonObject {}) { _, _ -> "" },

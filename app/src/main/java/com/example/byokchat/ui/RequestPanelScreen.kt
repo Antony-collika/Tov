@@ -68,7 +68,6 @@ import com.example.byokchat.container
 import com.example.byokchat.data.CardKind
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.RequestCard
-import com.example.byokchat.data.ToolsSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -119,10 +118,11 @@ fun RequestPanelScreen(
     val scope = rememberCoroutineScope()
     // Đợt fix 11/11/2026 (I1): tên hiển thị của file ngoài (URI) phải tra
     // qua nhà cung cấp nên đọc nền; chưa tra xong thì tóm tắt dùng đoạn
-    // cuối của giá trị đã lưu (fileName).
+    // cuối của giá trị đã lưu (fileName). RCP (17/11/2026): chỉ còn file
+    // của thẻ System/Free — thẻ Tools không trỏ file nữa.
     var cardFileNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     LaunchedEffect(layout) {
-        val sources = layout.cards.mapNotNull { it.file } + layout.cards.flatMap { it.toolFiles() }
+        val sources = layout.cards.mapNotNull { it.file }
         val missing = sources.filter { it !in cardFileNames }
         if (missing.isEmpty()) return@LaunchedEffect
         val resolved = withContext(Dispatchers.IO) {
@@ -202,7 +202,10 @@ fun RequestPanelScreen(
                         card = card,
                         isFirst = index == 0,
                         isLast = index == layout.cards.lastIndex,
-                        summary = cardSummary(card, metadata, model, currentProvider) { cardFileNames[it] ?: fileName(it) },
+                        summary = cardSummary(
+                            card, metadata, model, currentProvider,
+                            toolNames = container.registry.all.associate { it.uid to it.defaultName },
+                        ) { cardFileNames[it] ?: fileName(it) },
                         onToggle = { store.updateCard(card.id) { it.copy(enabled = !it.enabled) } },
                         onMoveUp = { store.moveCard(card.id, up = true) },
                         onMoveDown = { store.moveCard(card.id, up = false) },
@@ -356,6 +359,8 @@ private fun cardSummary(
     metadata: com.example.byokchat.ai.MetadataParams,
     model: String?,
     provider: com.example.byokchat.data.ProviderConfig?,
+    /** Tên hiển thị của tool theo uid — để tóm tắt thẻ Tools (RCP, 17/11/2026). */
+    toolNames: Map<String, String> = emptyMap(),
     /** Tên hiển thị của file thẻ trỏ tới — mặc định lấy đoạn cuối của giá trị đã lưu; màn hình truyền bản đã tra tên thật của file ngoài (I1). */
     fileDisplayName: (String) -> String = ::fileName,
 ): String = when (card.kind) {
@@ -387,16 +392,16 @@ private fun cardSummary(
         if (extras.isEmpty()) base else base + " · " + extras.joinToString(" · ")
     }
     CardKind.LAST_TURN -> "Your latest message and the tool round in progress. Always sent."
-    CardKind.TOOLS -> when (card.toolsSource) {
-        ToolsSource.TEXT -> {
-            val first = card.text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(80)
-            if (first.isNullOrBlank()) "Text input (empty — no tools)."
-            else "Text input: $first"
-        }
-        ToolsSource.FILE -> {
-            val files = card.toolFiles()
-            if (files.isEmpty()) "No file selected — the send will be blocked. Tap Edit to choose tools.md files."
-            else "Tools from: " + files.joinToString(", ") { fileDisplayName(it) }
+    // RCP (17/11/2026): thẻ Tools chỉ chọn trong app (selectedToolUids).
+    // Thẻ cũ còn trỏ file mà chưa di trú thì nhắc mở màn sửa để chuyển.
+    CardKind.TOOLS -> when {
+        card.selectedToolUids.isEmpty() && card.toolFiles().isNotEmpty() ->
+            "Your old tools list has not been moved yet — tap Edit to move it into the app."
+        card.selectedToolUids.isEmpty() -> "No tools selected — tap Edit to choose tools."
+        else -> {
+            val names = card.selectedToolUids.map { toolNames[it] ?: it }
+            val noun = if (names.size == 1) "tool" else "tools"
+            "${names.size} $noun: ${names.joinToString(", ")}"
         }
     }
 }
