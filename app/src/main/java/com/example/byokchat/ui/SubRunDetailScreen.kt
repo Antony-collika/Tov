@@ -31,6 +31,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
 import com.example.byokchat.data.MessageEntity
+import com.example.byokchat.data.SubRunEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -42,13 +43,44 @@ import kotlinx.coroutines.withContext
  * agent's settings: the avatar on the Members screen opens settings,
  * the avatar on the chat screen opens this run view.
  *
- * Shared store (17/11/2026): this screen reads ONLY the turn's existing
- * DB rows — the sub's assistant rows (sender = agent id), the tool rows
- * (args + results) and the sub's message rows. No separate store is
- * created for it: the future recall tool (context-manager phase) will
- * read this same record. Anything not in those rows is not shown here,
- * and is listed as a gap in the handoff, not filled in by guessing.
+ * Shared store (17/11/2026): when the run has a stored record in the
+ * sub_runs table, this screen reads it — title, brief, status, rounds /
+ * tokens, full report, reasoning — the SAME record get_subagent_result
+ * reads (one store, two readers). Runs from before the table existed
+ * have no record and fall back to the turn's message rows only (the
+ * sub's assistant rows, the tool rows and the sub's message rows), as
+ * this screen did before. Anything not in either source is not shown
+ * here, and is not filled in by guessing.
  */
+/** What the run detail screen shows from a stored run record: the same
+ * record get_subagent_result reads — one store, two readers. Pure, so it
+ * can be unit-tested without Android. */
+data class SubRunDetail(
+    val title: String,
+    val agentName: String,
+    val turnNo: Int,
+    val status: String,
+    val brief: String,
+    val rounds: Int,
+    val tokens: Int,
+    val fullReport: String,
+    val reasoning: String,
+    val error: String?,
+)
+
+fun SubRunEntity.toDetail(): SubRunDetail = SubRunDetail(
+    title = title,
+    agentName = agentName,
+    turnNo = turnNo,
+    status = status,
+    brief = brief,
+    rounds = rounds,
+    tokens = tokens,
+    fullReport = fullReport,
+    reasoning = reasoning,
+    error = error,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubRunDetailScreen(
@@ -60,11 +92,21 @@ fun SubRunDetailScreen(
     val container = LocalContext.current.container
     val member = remember(agentId) { subAgentMember(agentId) }
     var rows by remember { mutableStateOf<List<MessageEntity>>(emptyList()) }
+    var record by remember { mutableStateOf<SubRunEntity?>(null) }
     LaunchedEffect(conversationId, turnId, agentId) {
-        rows = withContext(Dispatchers.IO) {
+        val loaded = withContext(Dispatchers.IO) {
             container.db.messages().getAll(conversationId).filter { it.turnId == turnId }
         }
+        rows = loaded
+        // The stored record for this run, when one exists: the turn number
+        // comes from the turn's rows (same turn, same number). Runs from
+        // before the table existed have no record — the screen then shows
+        // only the rows, as before.
+        record = withContext(Dispatchers.IO) {
+            loaded.firstOrNull()?.turnNo?.let { container.db.subRuns().get(conversationId, agentId, it) }
+        }
     }
+    val detail = remember(record) { record?.toDetail() }
     // The sub's own rows (sender = the agent id) plus the tool-result rows
     // of the same turn, which carry no sender. Everything else in the
     // turn (Main's calls, the user's message) stays out.
@@ -95,6 +137,33 @@ fun SubRunDetailScreen(
                     Column {
                         Text(member.name, style = MaterialTheme.typography.titleMedium)
                         Text(member.role, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            // The stored record, when one exists: title, brief, status,
+            // rounds / tokens, reasoning and the full report — the same
+            // record get_subagent_result reads. The pills and bubbles below
+            // still come from the turn's message rows.
+            detail?.let { d ->
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(d.title, style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "${d.status.replace('_', ' ')} · ${d.rounds} rounds · ~${d.tokens} tokens",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text("Task", style = MaterialTheme.typography.labelLarge)
+                        Text(d.brief, style = MaterialTheme.typography.bodyMedium)
+                        if (d.reasoning.isNotBlank()) {
+                            Text("Reasoning", style = MaterialTheme.typography.labelLarge)
+                            Text(d.reasoning, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Text("Full report", style = MaterialTheme.typography.labelLarge)
+                        MarkdownBody(
+                            d.fullReport, color = MaterialTheme.colorScheme.onSurface, highlight = null,
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
                     }
                 }
             }
