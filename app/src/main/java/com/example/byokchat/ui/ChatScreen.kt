@@ -295,6 +295,14 @@ fun ChatScreen(
     val toolResults = remember(messages) {
         ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
     }
+    // Work pill (17/11/2026, approved mockup): consecutive tool/reasoning
+    // rows by one speaker in one turn form one segment; the pill renders
+    // on the segment's first row, the other rows of the stretch render
+    // none. The pill only groups rows already in the DB — it never adds
+    // anything to Main's request (the 400 fix still holds).
+    val segmentsByAnchor = remember(chrono, toolResults) {
+        groupWorkSegments(chrono, toolResults).associateBy { it.anchorId }
+    }
     // Bỏ dấu một lần: câu tìm và từng tin (chỉ khi đang mở thanh tìm), thay vì bỏ dấu lại mỗi lần gõ.
     val foldedQuery = remember(query) { TextUtil.fold(query) }
     val foldedTexts = remember(chrono, searchOpen) {
@@ -570,7 +578,8 @@ fun ChatScreen(
                                     }
                                 }
                                 AssistantMessage(
-                                m, generating, hl, edit, actions, toolResults,
+                                m, generating, hl, edit, actions,
+                                workSegment = segmentsByAnchor[m.id],
                                 showActions = m.id == lastAnswerId,
                                 errorFix = fix,
                                 onErrorFix = { f ->

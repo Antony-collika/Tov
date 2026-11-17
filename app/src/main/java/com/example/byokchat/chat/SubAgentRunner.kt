@@ -278,10 +278,18 @@ class SubAgentRunner(
                         } else {
                             // Written lazily at the first work call, not
                             // before the loop, so a greeting sent in the
-                            // same round stays before the cards.
+                            // same round stays before the cards. The round's
+                            // reasoning rides on the same row (17/11/2026):
+                            // providers that return readable reasoning
+                            // (DeepSeek via Custom) show it as a step in
+                            // the sub's pill; Gemini returns none, so the
+                            // pill holds tool calls only — never invented.
                             if (!toolRowWritten) {
                                 runCatching {
-                                    writeSubToolCalls(conversationId, turnId, turnNo, agent, workCalls)
+                                    writeSubToolCalls(
+                                        conversationId, turnId, turnNo, agent, workCalls,
+                                        reasoningText = reasoning.toString().takeIf { it.isNotBlank() },
+                                    )
                                 }
                                 toolRowWritten = true
                             }
@@ -561,13 +569,14 @@ class SubAgentRunner(
 
     /**
      * One assistant row per round holding the round's real tool calls, so
-     * the chat shows them as tool cards under the sub's header (the same
-     * ToolCards Main's rounds use). Blank text: the row is only the cards.
-     * Written before the first call runs, so while the turn generates the
-     * card reads "Running…"; each result row below flips its card to Done.
-     * Status is "done" at once, so a Stop never deletes the row as a
-     * streaming placeholder — the engine's markTurnInterrupted instead
-     * writes Interrupted markers for calls with no result yet.
+     * the chat shows them in the sub's work pill under the sub's header
+     * (the same pill Main's rounds use). Blank text: the row is only the
+     * pill's steps. Written before the first call runs, so while the turn
+     * generates the pill reads "Running…"; each result row below flips
+     * its step to Done. Status is "done" at once, so a Stop never deletes
+     * the row as a streaming placeholder — the engine's
+     * markTurnInterrupted instead writes Interrupted markers for calls
+     * with no result yet.
      */
     private suspend fun writeSubToolCalls(
         conversationId: String,
@@ -575,6 +584,7 @@ class SubAgentRunner(
         turnNo: Int,
         agent: SubAgentConfig,
         workCalls: List<AiToolCall>,
+        reasoningText: String? = null,
     ) {
         val msgDao = db.messages()
         msgDao.upsert(
@@ -588,6 +598,7 @@ class SubAgentRunner(
                 text = "",
                 sender = agent.id,
                 toolCallsJson = json.encodeToString(callsSer, workCalls),
+                reasoningText = reasoningText,
                 status = "done",
                 createdAt = System.currentTimeMillis(),
             ),

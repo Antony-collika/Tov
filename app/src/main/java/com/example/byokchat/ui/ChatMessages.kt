@@ -236,7 +236,8 @@ internal fun AssistantMessage(
     hl: Highlight?,
     edit: EditState?,
     actions: Actions,
-    toolResults: ToolResults,
+    /** The work segment whose pill renders on this message (null except on the segment's first row). */
+    workSegment: WorkSegment? = null,
     showActions: Boolean,
     errorFix: ErrorFix?,
     onErrorFix: (ErrorFix) -> Unit,
@@ -257,8 +258,6 @@ internal fun AssistantMessage(
     onNewChat: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    // Đợt provider 12/11/2026: khối gập "Suy luận" mở hay đóng (theo từng tin).
-    var reasoningOpen by remember(m.id) { mutableStateOf(false) }
     // Snapshot of the text taken when "Select text" is chosen, so it does not change under your finger while the AI is still typing.
     var selectText by remember { mutableStateOf<String?>(null) }
     val haptic = LocalHapticFeedback.current
@@ -327,33 +326,12 @@ internal fun AssistantMessage(
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
-            // Đợt provider 12/11/2026: khối gập "Suy luận" — chữ suy luận của
-            // hãng (OpenAI / máy chủ tương thích) lưu cùng tin, hiện dạng text
-            // thường (không markdown — suy luận không phải câu trả lời).
-            // Chỉ hiện khi tin đã lưu xong: lúc đang stream suy luận chưa
-            // lưu, tránh hiện nội dung nửa chừng.
-            if (!m.reasoningText.isNullOrBlank() && m.status != "streaming") {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        Modifier.clickable { reasoningOpen = !reasoningOpen },
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            if (reasoningOpen) "▾ Suy luận" else "▸ Suy luận",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (reasoningOpen) {
-                        Text(
-                            m.reasoningText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            if (m.toolCallsJson != null) ToolCards(m, toolResults, generating)
+            // Work pill (17/11/2026, approved mockup): the agent's tool
+            // calls and readable reasoning live in one expandable pill
+            // now — the old per-tool cards and the separate "Suy luận"
+            // block are gone. Reasoning only appears when the provider
+            // really returned readable text (never invented).
+            if (workSegment != null) WorkPill(workSegment, generating)
             if (m.status == "error") {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
