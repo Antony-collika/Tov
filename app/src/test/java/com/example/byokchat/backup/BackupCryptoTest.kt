@@ -39,7 +39,7 @@ class BackupCryptoTest {
         try {
             decryptBackupFile(envelope, "wrong".toCharArray())
             fail("expected WrongPasswordOrCorrupt")
-        } catch (e: BackupDecryptError.WrongPasswordOrCorrupt) {
+        } catch (e: BackupOpenError.WrongPasswordOrCorrupt) {
             // expected
         }
     }
@@ -55,7 +55,7 @@ class BackupCryptoTest {
         try {
             decryptBackupFile(tampered, "pw".toCharArray())
             fail("expected WrongPasswordOrCorrupt")
-        } catch (e: BackupDecryptError.WrongPasswordOrCorrupt) {
+        } catch (e: BackupOpenError.WrongPasswordOrCorrupt) {
             // expected
         }
     }
@@ -67,7 +67,7 @@ class BackupCryptoTest {
         try {
             decryptBackupFile("hello, this is not JSON", "pw".toCharArray())
             fail("expected NotABackup")
-        } catch (e: BackupDecryptError.NotABackup) {
+        } catch (e: BackupOpenError.NotABackup) {
             // expected
         }
     }
@@ -80,7 +80,7 @@ class BackupCryptoTest {
         try {
             decryptBackupFile(envelope, "pw".toCharArray())
             fail("expected NeedsAppUpdate")
-        } catch (e: BackupDecryptError.NeedsAppUpdate) {
+        } catch (e: BackupOpenError.NeedsAppUpdate) {
             // expected
         }
     }

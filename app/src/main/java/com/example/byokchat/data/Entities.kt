@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -20,6 +21,7 @@ fun isDefaultTitle(title: String): Boolean = title == DEFAULT_TITLE || title == 
 /** Title to show in the UI: old Vietnamese placeholder titles are shown as "New chat". */
 fun displayTitle(title: String): String = if (title == LEGACY_DEFAULT_TITLE) DEFAULT_TITLE else title
 
+@Serializable
 @Entity(tableName = "conversations")
 data class ConversationEntity(
     @PrimaryKey val id: String,
@@ -46,6 +48,7 @@ data class ConversationEntity(
  * role: "user" | "assistant" | "tool"
  * status: "done" | "streaming" | "error"
  */
+@Serializable
 @Entity(
     tableName = "messages",
     foreignKeys = [ForeignKey(
@@ -110,6 +113,7 @@ data class MessageEntity(
     val reasoningProvider: String? = null,
 )
 
+@Serializable
 @Entity(tableName = "notes")
 data class NoteEntity(
     @PrimaryKey val id: String,
@@ -119,6 +123,7 @@ data class NoteEntity(
     val updatedAt: Long,
 )
 
+@Serializable
 @Entity(tableName = "todos")
 data class TodoEntity(
     @PrimaryKey val id: String,
@@ -134,6 +139,7 @@ data class TodoEntity(
  * `position`: 0 = mới nhất; đọc theo position tăng dần.
  * Xóa cuộc trò chuyện thì các hàng này xóa theo (CASCADE).
  */
+@Serializable
 @Entity(
     tableName = "recently_played",
     foreignKeys = [ForeignKey(
@@ -167,6 +173,7 @@ data class RecentlyPlayedEntity(
  * and reads take the latest. Deleting the conversation deletes its rows
  * (CASCADE).
  */
+@Serializable
 @Entity(
     tableName = "sub_runs",
     foreignKeys = [ForeignKey(

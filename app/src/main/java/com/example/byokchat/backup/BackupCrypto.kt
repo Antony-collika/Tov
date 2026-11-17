@@ -52,12 +52,12 @@ data class BackupEnvelope(
 )
 
 /** Why a backup file could not be opened. Messages are shown to the user as-is. */
-sealed class BackupDecryptError(message: String) : Exception(message) {
+sealed class BackupOpenError(message: String) : Exception(message) {
     /** Not a Tov backup at all (wrong format, unreadable JSON, unknown cipher/kdf). */
-    class NotABackup : BackupDecryptError("This is not a Tov backup file.")
+    class NotABackup : BackupOpenError("This is not a Tov backup file.")
 
     /** Made by a newer version of the app than this one. */
-    class NeedsAppUpdate : BackupDecryptError(
+    class NeedsAppUpdate : BackupOpenError(
         "This backup was made by a newer version of the app. Update the app to restore it."
     )
 
@@ -66,7 +66,10 @@ sealed class BackupDecryptError(message: String) : Exception(message) {
      * damaged file are indistinguishable, so the message says exactly
      * that instead of inventing a reason.
      */
-    class WrongPasswordOrCorrupt : BackupDecryptError("Wrong password or the file is damaged.")
+    class WrongPasswordOrCorrupt : BackupOpenError("Wrong password or the file is damaged.")
+
+    /** Decrypted fine, but the content inside (ZIP / backup.json) is broken. */
+    class Damaged : BackupOpenError("This backup file is damaged.")
 }
 
 private val envelopeJson = Json { ignoreUnknownKeys = true; prettyPrint = true }
@@ -140,22 +143,22 @@ fun backupFileVersion(text: String): Int? = runCatching {
 /**
  * Decrypt a backup file's envelope text under [password] and return the
  * plaintext ZIP bytes. The password array is wiped before returning.
- * Throws [BackupDecryptError]: [BackupDecryptError.NotABackup] when the
- * file is not a Tov backup, [BackupDecryptError.NeedsAppUpdate] when it
- * was made by a newer app version, [BackupDecryptError.WrongPasswordOrCorrupt]
+ * Throws [BackupOpenError]: [BackupOpenError.NotABackup] when the
+ * file is not a Tov backup, [BackupOpenError.NeedsAppUpdate] when it
+ * was made by a newer app version, [BackupOpenError.WrongPasswordOrCorrupt]
  * when the password is wrong or the file was damaged.
  */
 fun decryptBackupFile(envelopeText: String, password: CharArray): ByteArray {
     val envelope = try {
         envelopeJson.decodeFromString<BackupEnvelope>(envelopeText)
     } catch (e: Exception) {
-        throw BackupDecryptError.NotABackup()
+        throw BackupOpenError.NotABackup()
     }
     if (envelope.format != BACKUP_FORMAT || envelope.cipher != BACKUP_CIPHER || envelope.kdf != BACKUP_KDF) {
-        throw BackupDecryptError.NotABackup()
+        throw BackupOpenError.NotABackup()
     }
-    if (envelope.version > BACKUP_FORMAT_VERSION) throw BackupDecryptError.NeedsAppUpdate()
-    if (envelope.version < BACKUP_FORMAT_VERSION) throw BackupDecryptError.NotABackup()
+    if (envelope.version > BACKUP_FORMAT_VERSION) throw BackupOpenError.NeedsAppUpdate()
+    if (envelope.version < BACKUP_FORMAT_VERSION) throw BackupOpenError.NotABackup()
     val salt: ByteArray
     val nonce: ByteArray
     val ciphertext: ByteArray
@@ -164,18 +167,18 @@ fun decryptBackupFile(envelopeText: String, password: CharArray): ByteArray {
         nonce = unb64(envelope.nonce)
         ciphertext = unb64(envelope.ciphertext)
     } catch (e: IllegalArgumentException) {
-        throw BackupDecryptError.NotABackup()
+        throw BackupOpenError.NotABackup()
     }
-    if (salt.size != SALT_BYTES || nonce.size != NONCE_BYTES) throw BackupDecryptError.NotABackup()
+    if (salt.size != SALT_BYTES || nonce.size != NONCE_BYTES) throw BackupOpenError.NotABackup()
     val key = deriveKey(password, salt, envelope.iterations)
     try {
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(GCM_TAG_BITS, nonce))
         return cipher.doFinal(ciphertext)
     } catch (e: AEADBadTagException) {
-        throw BackupDecryptError.WrongPasswordOrCorrupt()
+        throw BackupOpenError.WrongPasswordOrCorrupt()
     } catch (e: Exception) {
-        throw BackupDecryptError.WrongPasswordOrCorrupt()
+        throw BackupOpenError.WrongPasswordOrCorrupt()
     } finally {
         password.fill('\u0000')
         key.fill(0)
