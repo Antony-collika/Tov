@@ -54,13 +54,21 @@ data class BackupData(
     val youtubeKey: String = "",
     /** Per-tool edits (mode + edited description), by tool uid. */
     val toolPrefs: Map<String, ToolPref> = emptyMap(),
+    /**
+     * Name + description the model sees of every tool, by tool uid
+     * (Duy, 2026-11-17 ~15:17: at restore, a tool whose backup name or
+     * description differs from this device's is asked about). Names are
+     * always the code defaults, so in practice only descriptions differ
+     * — unless the app versions renamed a tool or rewrote its default
+     * description — but the ask rule covers both.
+     */
+    val toolNames: Map<String, String> = emptyMap(),
+    val toolDescriptions: Map<String, String> = emptyMap(),
     /** The sub-agent team (agents.json content). */
     val agents: List<SubAgentConfig> = emptyList(),
     val defaultPrompt: String = "",
-    /** ThemeMode name ("SYSTEM" / "LIGHT" / "DARK"). */
-    val theme: String = "SYSTEM",
-    val maxToolRounds: Int = 12,
-    val requestLogEnabled: Boolean = true,
+    // NOTE: theme, max tool rounds and the request log are NOT backed up
+    // (Duy, 2026-11-17 ~15:18) — neither saved nor asked about.
     /** Display names only — SAF folder permissions cannot be restored, so
      * these only remind the user which folders to pick again. */
     val playgroundFolderNames: List<String> = emptyList(),
@@ -102,7 +110,8 @@ fun decodeBackupData(bytes: ByteArray): BackupData {
         throw BackupOpenError.Damaged()
     }
     if (data.version > BACKUP_DATA_VERSION) throw BackupOpenError.NeedsAppUpdate()
-    if (data.version < BACKUP_DATA_VERSION) throw BackupOpenError.Damaged()
+    // Older versions still read: every field has a default, and the
+    // loader ignores unknown fields — an old backup works on a newer app.
     return data
 }
 

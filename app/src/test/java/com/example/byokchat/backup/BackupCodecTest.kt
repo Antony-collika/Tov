@@ -37,7 +37,10 @@ class BackupCodecTest {
         val decoded = decodeBackupData(json.toByteArray(Charsets.UTF_8))
         assertEquals("hi", decoded.defaultPrompt)
         assertEquals(emptyList<ConversationEntity>(), decoded.conversations)
-        assertEquals("SYSTEM", decoded.theme)
+        // Theme is not backed up at all (Duy, 2026-11-17): an old backup
+        // that still carries it is read fine, the field is just ignored.
+        val withTheme = """{"version":1,"dbVersion":11,"theme":"DARK","maxToolRounds":20}"""
+        decodeBackupData(withTheme.toByteArray(Charsets.UTF_8))
     }
 
     @Test
@@ -105,6 +108,25 @@ class BackupCodecTest {
         } catch (e: BackupOpenError.Damaged) {
             // expected
         }
+    }
+
+    @Test
+    fun `tool names and descriptions round-trip`() {
+        val data = BackupData(
+            toolNames = mapOf("fs.list" to "List directory"),
+            toolDescriptions = mapOf("fs.list" to "List the files in a folder."),
+        )
+        val decoded = decodeBackupData(encodeBackupData(data))
+        assertEquals("List directory", decoded.toolNames["fs.list"])
+        assertEquals("List the files in a folder.", decoded.toolDescriptions["fs.list"])
+    }
+
+    @Test
+    fun `older backup data version still reads`() {
+        // An old backup reads on a newer app: missing fields take
+        // defaults instead of failing.
+        val json = """{"version":0,"dbVersion":10,"defaultPrompt":"old"}"""
+        assertEquals("old", decodeBackupData(json.toByteArray(Charsets.UTF_8)).defaultPrompt)
     }
 
     @Test
