@@ -222,8 +222,8 @@ class ChatEngine(
             var reasoningProvider: String? = null
             var error: String? = null
             var cancelled: CancellationException? = null
-            // Danh sách tool đã parse từ file tools.md của lượt này (null =
-            // chưa resolve); vòng gọi tool sau khối try cũng cần nó để map tên.
+            // Danh sách tool của lượt này (null = chưa resolve); vòng gọi
+            // tool sau khối try cũng cần nó để map tên gọi về uid.
             var exposed: List<com.example.byokchat.tools.ParsedTool>? = null
             try {
                 // Nhà cung cấp và mô hình dùng cho mọi cuộc trò chuyện đều là lựa chọn toàn cục trong Settings.
@@ -257,19 +257,18 @@ class ChatEngine(
                     runCatching { fs?.readCardFile(path) ?: error("No AI playground folder has been chosen.") }
                 }
                 val (layout, fileErrors) = withContext(Dispatchers.IO) { baseLayout.resolveFiles(readFile) }
-                // Đợt E phần A: file tools.md của thẻ Tools cũng đọc + parse
-                // lại mỗi lần gửi. Parse lỗi thì CHẶN lần gửi và báo rõ lỗi
-                // (như FPilot) — không gửi với danh sách tool sai.
-                val toolsResolution = withContext(Dispatchers.IO) {
-                    layout.resolveToolFiles(readFile, tools.originDescriptions())
+                layoutStore?.setFileErrors(fileErrors)
+                // RCP (17/11/2026): thẻ Tools chỉ chọn trong app — không
+                // còn parse file tools.md. exposed là danh sách tool của
+                // lượt này (tên + mô tả hiệu dụng, theo thứ tự registry),
+                // để map tên gọi về uid và để tool không được chọn thì
+                // không chạy được (xem ToolRegistry.execute).
+                val selectedUids = if (repair == RepairMode.NO_TOOLS) emptyList()
+                else layout.toolsCard()?.takeIf { it.enabled }?.selectedToolUids.orEmpty()
+                val defsForUids = tools.definitionsForUids(selectedUids)
+                exposed = defsForUids.map { (uid, def) ->
+                    com.example.byokchat.tools.ParsedTool(uid, def.name, def.description)
                 }
-                layoutStore?.setFileErrors(fileErrors + toolsResolution.errors)
-                if (toolsResolution.errors.isNotEmpty()) {
-                    throw AiException(
-                        "The Tools card file could not be used:\n" + toolsResolution.errors.joinToString("\n"),
-                    )
-                }
-                exposed = toolsResolution.exposed
                 // Đợt bỏ provider: Retry NO_TOOLS thì không offer tool nào ở
                 // lượt này (model trả lời từ chữ trong lịch sử).
                 val toolDefs = if (repair == RepairMode.NO_TOOLS) emptyList()
