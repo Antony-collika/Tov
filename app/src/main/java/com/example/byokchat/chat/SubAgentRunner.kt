@@ -29,6 +29,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.util.UUID
@@ -119,6 +120,9 @@ class SubAgentRunner(
 
     /** Serializes sub_runs.meta.json writes (one file per session; runs are sequential per conversation, but two conversations could write at once). */
     private val metaMutex = Mutex()
+
+    private val json = Json { ignoreUnknownKeys = true }
+    private val callsSer = ListSerializer(AiToolCall.serializer())
 
     suspend fun run(
         agent: SubAgentConfig,
@@ -256,11 +260,36 @@ class SubAgentRunner(
                         reasoningReplay = replayJson,
                         reasoningProvider = if (reasoning.isNotBlank() || replayJson != null) reasoningProvider else null,
                     )
+                    // The sub's real tool calls are shown in the chat as
+                    // tool cards under the sub's header, like Main's
+                    // (17/11/2026): one assistant row per round holds the
+                    // round's work calls, one tool row per call holds its
+                    // result. send_message is not a card — its messages
+                    // already are. The rows carry sender = the agent id,
+                    // so ContextBuilder drops them from Main's request
+                    // (the 400 fix) and sanitize drops the orphan tool
+                    // results; Preview shows exactly what is sent.
+                    val workCalls = calls.filter { it.name != SEND_TOOL_NAME }
+                        .map { it.copy(uid = tools.uidForName(it.name, exposed)) }
+                    var toolRowWritten = false
                     for (call in calls) {
                         val outcome = if (call.name == SEND_TOOL_NAME) {
                             handleSend(call, agent, conversationId, turnId, turnNo, mainOutbox, sentToUser)
                         } else {
-                            tools.execute(call, turnId, exposed, conversationId)
+                            // Written lazily at the first work call, not
+                            // before the loop, so a greeting sent in the
+                            // same round stays before the cards.
+                            if (!toolRowWritten) {
+                                runCatching {
+                                    writeSubToolCalls(conversationId, turnId, turnNo, agent, workCalls)
+                                }
+                                toolRowWritten = true
+                            }
+                            val result = tools.execute(call, turnId, exposed, conversationId)
+                            runCatching {
+                                writeSubToolResult(conversationId, turnId, turnNo, call, result)
+                            }
+                            result
                         }
                         toolCalls += call.name
                         subMessages += AiMessage(
@@ -527,6 +556,68 @@ class SubAgentRunner(
             agentId = agent.id, agentName = agent.name, brief = userBrief, detailed = detailed,
             status = status, rounds = rounds, tokensUsed = tokensUsed,
             toolCalls = toolCalls.toList(), startedAt = startedAt, finishedAt = finishedAt, error = error,
+        )
+    }
+
+    /**
+     * One assistant row per round holding the round's real tool calls, so
+     * the chat shows them as tool cards under the sub's header (the same
+     * ToolCards Main's rounds use). Blank text: the row is only the cards.
+     * Written before the first call runs, so while the turn generates the
+     * card reads "Running…"; each result row below flips its card to Done.
+     * Status is "done" at once, so a Stop never deletes the row as a
+     * streaming placeholder — the engine's markTurnInterrupted instead
+     * writes Interrupted markers for calls with no result yet.
+     */
+    private suspend fun writeSubToolCalls(
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        agent: SubAgentConfig,
+        workCalls: List<AiToolCall>,
+    ) {
+        val msgDao = db.messages()
+        msgDao.upsert(
+            MessageEntity(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversationId,
+                turnId = turnId,
+                turnNo = turnNo,
+                seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                role = "assistant",
+                text = "",
+                sender = agent.id,
+                toolCallsJson = json.encodeToString(callsSer, workCalls),
+                status = "done",
+                createdAt = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    /** One tool-result row per real tool call, keyed by the call id so the card above finds its result. Same shape as Main's tool rows. */
+    private suspend fun writeSubToolResult(
+        conversationId: String,
+        turnId: String,
+        turnNo: Int,
+        call: AiToolCall,
+        outcome: ToolOutcome,
+    ) {
+        val msgDao = db.messages()
+        msgDao.upsert(
+            MessageEntity(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversationId,
+                turnId = turnId,
+                turnNo = turnNo,
+                seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                role = "tool",
+                text = outcome.resultText,
+                toolCallId = call.id,
+                toolUid = outcome.uid,
+                toolName = call.name,
+                toolIsError = outcome.isError,
+                createdAt = System.currentTimeMillis(),
+            ),
         )
     }
 
