@@ -191,6 +191,21 @@ class SettingsRepository(context: Context) {
         // DuckDuckGo không có ngăn key: ô nhập bị ẩn nên không gọi tới đây.
     }
 
+    /** All per-engine web search keys ("BRAVE" / "TAVILY" / "SERPER"), for backup export. */
+    fun searchKeysSnapshot(): Map<String, String> {
+        ensureSecureLoaded() // không đọc key cũ khi chưa đọc xong
+        return searchKeys.toMap()
+    }
+
+    /** Write one engine's search key directly (backup restore). Unknown engines are ignored. */
+    fun setSearchKeyForEngine(engine: String, key: String) {
+        ensureSecureLoaded() // không ghi đè khi chưa đọc xong
+        if (engine !in searchKeys) return
+        searchKeys[engine] = key
+        secure.edit().putString("search_key_${engine.lowercase()}", key).apply()
+        if (_searchProvider.value == engine) _searchKey.value = key
+    }
+
     /**
      * YouTube Data API v3 key (YouTube tools, 2026-11-13): nhập trong màn
      * Web search, cùng chỗ với key tìm kiếm web — không làm màn riêng.

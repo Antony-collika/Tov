@@ -82,6 +82,9 @@ class ToolRegistry(
         prefs.update(t.uid) { it.copy(mode = if (m == t.defaultMode) null else m.name) }
     }
 
+    /** All per-tool edits (mode + edited description), for backup export. */
+    fun toolPrefsSnapshot(): Map<String, ToolPref> = prefs.prefs.value
+
     /** Mô tả gốc của một tham số trong code (null nếu tham số không có mô tả). */
     fun defaultParamDescription(t: Tool, param: String): String? {
         val props = t.schema["properties"] as? JsonObject ?: return null
