@@ -106,6 +106,39 @@ class SubAgentsTest {
         val decoded = json.decodeFromString(SubRunRecord.serializer(), encodeSubRunRecord(record))
         assertEquals(record, decoded)
     }
+
+    @Test fun receiptKeepsTitleTurnAndRecallHintNotTheFullReport() {
+        val receipt = buildSubRunReceipt("Monica", "monica", "Find cheerful morning music", 3, SubRunStatus.DONE)
+        assertTrue(receipt.contains("Monica"))
+        assertTrue(receipt.contains("\"Find cheerful morning music\""))
+        assertTrue(receipt.contains("Turn: 3"))
+        assertTrue(receipt.contains("done"))
+        assertTrue(receipt.contains("get_subagent_result"))
+        assertTrue(receipt.contains("\"monica\""))
+        assertTrue(!receipt.contains("Morning Coffee"))
+    }
+
+    @Test fun receiptNamesTheStatusForAnInterruptedRun() {
+        val receipt = buildSubRunReceipt("Bob", "bob", "Find football news", 5, SubRunStatus.INTERRUPTED)
+        assertTrue(receipt.contains("interrupted"))
+        assertTrue(receipt.contains("Turn: 5"))
+    }
+
+    @Test fun subRunToolCallsRoundTripThroughJson() {
+        val calls = listOf(
+            SubRunToolCall("youtube_search", "{\"q\": \"lofi morning\"}"),
+            SubRunToolCall("youtube_media_play", "{\"url\": \"https://www.youtube.com/watch?v=abc\"}"),
+        )
+        assertEquals(calls, decodeSubRunToolCalls(encodeSubRunToolCalls(calls)))
+        assertEquals(emptyList<SubRunToolCall>(), decodeSubRunToolCalls("not json"))
+        assertEquals(emptyList<SubRunToolCall>(), decodeSubRunToolCalls(""))
+    }
+
+    @Test fun subRunStringsRoundTripThroughJson() {
+        val values = listOf("First message to Main.", "Second message.")
+        assertEquals(values, decodeSubRunStrings(encodeSubRunStrings(values)))
+        assertEquals(emptyList<String>(), decodeSubRunStrings("not json"))
+    }
 }
 
 /** Tests for SubAgentStore: empty team on first launch, save/load, corrupt file, Research drop. */
