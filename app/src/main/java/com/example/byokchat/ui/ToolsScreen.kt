@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,8 +27,6 @@ import com.example.byokchat.tools.Tool
 import com.example.byokchat.tools.ToolGroup
 import com.example.byokchat.tools.ToolMode
 import com.example.byokchat.tools.ToolRegistry
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -97,9 +96,9 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item {
                 Text(
-                    "Tap a tool to see its UID, its original name and description, the name and description the model sees " +
-                        "from the Tools card file, and its mode. The name and description the model sees are managed in the " +
-                        "tools.md file (Request panel → Tools card), not here. Mode changes apply from the next message you send.",
+                    "Tap a tool to see its UID, its original name and description, the name and description the model sees, " +
+                        "and its mode. The description the model sees can be edited here (tap the tool to open it); the name " +
+                        "is fixed. Changes apply from the next message you send.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),
@@ -233,15 +232,23 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
     val registry = container.registry
     val tool: Tool? = registry.tool(uid)
     val prefs by container.toolPrefs.prefs.collectAsState()
-    // Tên/mô tả hiệu dụng từ file tools.md của thẻ Tools (nếu tool có trong file).
-    val fileExposure = rememberToolsFileExposure()
+    // RCP (17/11/2026): mô tả model thấy sửa được tại đây (không còn qua
+    // file tools.md). Lưu khi ô mất focus hoặc khi rời màn hình — màn này
+    // không có nút Save, như chế độ Auto/Ask/Off lưu ngay khi bấm.
+    var descText by remember(uid) { mutableStateOf(tool?.let { registry.effectiveDescription(it) }.orEmpty()) }
+    var descFocused by remember(uid) { mutableStateOf(false) }
+    fun saveDescription() {
+        val t = tool ?: return
+        if (descText != registry.effectiveDescription(t)) registry.setDescription(t, descText)
+    }
 
+    BackHandler { saveDescription(); onBack() }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (tool == null) "Tool" else tool.defaultName) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    IconButton(onClick = { saveDescription(); onBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
             )
         },
@@ -252,7 +259,7 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
         }
         // Read prefs so the screen refreshes when the mode changes.
         val mode = remember(prefs) { registry.mode(tool) }
-        val exposed = fileExposure[tool.uid]
+        val hasOverride = prefs[tool.uid]?.description != null
 
         Column(
             Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
@@ -303,45 +310,47 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
 
             HorizontalDivider()
             Text("What the AI sees", style = MaterialTheme.typography.titleSmall)
-            if (exposed != null) {
-                Text("Name (from the Tools card file)", style = MaterialTheme.typography.labelLarge)
-                Text(exposed.name, style = MaterialTheme.typography.bodyLarge)
-                Text("Description (from the Tools card file)", style = MaterialTheme.typography.labelLarge)
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
-                    Text(exposed.description, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
-                }
-                Text(
-                    "This tool is listed in the Tools card file, so the model sees this name and description. " +
-                        "Edit the file (Request panel → Tools card) to change them.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            } else {
-                Text("Name (original)", style = MaterialTheme.typography.labelLarge)
-                Text(tool.defaultName, style = MaterialTheme.typography.bodyLarge)
-                Text("Description (original)", style = MaterialTheme.typography.labelLarge)
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium) {
-                    Text(tool.defaultDescription, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
-                }
-                Text(
-                    "This tool is not listed in any Tools card file, so the model sees the original name and description. " +
-                        "Add it to a tools.md file (Request panel → Tools card) to give it a different name or description.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            Text("Name", style = MaterialTheme.typography.labelLarge)
+            Text(tool.defaultName, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                "The name is fixed — it cannot be changed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text("Description (what the AI sees)", style = MaterialTheme.typography.labelLarge)
+            OutlinedTextField(
+                value = descText,
+                onValueChange = { descText = it },
+                minLines = 3,
+                maxLines = 8,
+                modifier = Modifier.fillMaxWidth()
+                    .onFocusChanged { focus ->
+                        if (descFocused && !focus.isFocused) saveDescription()
+                        descFocused = focus.isFocused
+                    },
+            )
+            if (hasOverride) {
+                TextButton(onClick = {
+                    descText = tool.defaultDescription
+                    registry.setDescription(tool, tool.defaultDescription)
+                }) { Text("Use original description") }
             }
+            Text(
+                "The model sees this description. Edit it here — the original description above stays as a reference.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             HorizontalDivider()
             Text("Parameters", style = MaterialTheme.typography.labelLarge)
             Text(
-                "What each parameter means to the AI. The descriptions come from the app and cannot be changed here — " +
-                    "a tools.md file cannot change a tool's parameters either.",
+                "What each parameter means to the AI. The descriptions come from the app and cannot be changed here.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ParametersSection(tool)
             Text(
-                "The way the tool works is handled by the app. When the AI calls a tool by the name in the file, " +
+                "The way the tool works is handled by the app. The model calls a tool by its name, " +
                     "the app maps it back to the UID, so older conversations keep working.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -349,28 +358,6 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
             Spacer(Modifier.height(24.dp))
         }
     }
-}
-
-/**
- * Tên/mô tả hiệu dụng của từng tool theo file tools.md của thẻ Tools (Đợt E):
- * uid -> ParsedTool, chỉ gồm các tool có trong file đang dùng. Đọc + parse
- * lại mỗi khi bố cục đổi; lỗi đọc/parse thì coi như không có file (hiện tên gốc).
- */
-@Composable
-private fun rememberToolsFileExposure(): Map<String, com.example.byokchat.tools.ParsedTool> {
-    val container = LocalContext.current.container
-    var exposure by remember { mutableStateOf<Map<String, com.example.byokchat.tools.ParsedTool>>(emptyMap()) }
-    val layout by container.layoutStore.effectiveLayout.collectAsState()
-    LaunchedEffect(layout) {
-        exposure = withContext(Dispatchers.IO) {
-            val res = layout.resolveToolFiles(
-                { path -> runCatching { container.fs.readCardFile(path) } },
-                container.registry.originDescriptions(),
-            )
-            res.exposed?.associateBy { it.uid }.orEmpty()
-        }
-    }
-    return exposure
 }
 
 /** Danh sách tham số của công cụ, chỉ xem (Đợt E: bỏ sửa mô tả tham số). */
