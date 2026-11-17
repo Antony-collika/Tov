@@ -266,7 +266,7 @@ class ChatEngine(
                 // lựa chọn đã lưu thì mặc định chọn hết (tắt thẻ mới là
                 // không offer tool nào).
                 val selectedUids = if (repair == RepairMode.NO_TOOLS) emptyList()
-                else layout.toolsCard()?.takeIf { it.enabled }?.effectiveSelectedToolUids(tools.all.map { it.uid }).orEmpty()
+                else layout.toolsCard()?.takeIf { it.enabled }?.effectiveSelectedToolUids(tools.allUids()).orEmpty()
                 val defsForUids = tools.definitionsForUids(selectedUids)
                 exposed = defsForUids.map { (uid, def) ->
                     com.example.byokchat.tools.ParsedTool(uid, def.name, def.description)

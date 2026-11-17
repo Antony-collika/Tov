@@ -161,6 +161,8 @@ class ToolRegistry(
     override fun originDescriptions(): Map<String, String> =
         all.associate { it.uid to it.defaultDescription }
 
+    override fun allUids(): List<String> = all.map { it.uid }
+
     /**
      * Tool definitions cho các uid đã cho (RCP, 17/11/2026): theo thứ tự
      * nhóm + registry mặc định (KHÔNG theo thứ tự uid truyền vào — thứ tự

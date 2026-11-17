@@ -32,6 +32,12 @@ interface ToolRuntime {
     fun estimateToolTokens(): Int
     /** Tool definitions for the given uids, in registry order (not the order the uids were given), with the effective description. Only tools that are available are returned. */
     fun definitionsForUids(uids: List<String>): List<Pair<String, ToolDef>>
-    /** uid -> mô tả gốc của mọi tool; chỉ còn dùng cho di trú một lần của thẻ Tools cũ (đối chiếu origin_description khi parse file cũ). */
+    /** uid -> mô tả gốc của mọi tool; 17/11/2026 — bỏ hẳn file tools.md ngoài: không còn chỗ nào trong app dùng nữa, chỉ còn ToolsMdParser (chỉ test dùng). */
     fun originDescriptions(): Map<String, String>
+    /**
+     * UID của mọi tool trong registry, theo thứ tự nhóm + registry mặc
+     * định (17/11/2026): thẻ Tools chưa có lựa chọn nào lưu thì mặc định
+     * chọn hết — xem RequestCard.effectiveSelectedToolUids.
+     */
+    fun allUids(): List<String>
 }
