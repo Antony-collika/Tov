@@ -79,6 +79,10 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE role != 'tool' AND status != 'streaming'")
     suspend fun allChatMessages(): List<MessageEntity>
 
+    /** Every message row, including tool results and streaming/error rows — backup must keep them all. */
+    @Query("SELECT * FROM messages")
+    suspend fun all(): List<MessageEntity>
+
     /** Như allChatMessages nhưng chỉ của một cuộc: để tìm kiếm nạp từng cuộc một, không nạp hết vào RAM. */
     @Query("SELECT * FROM messages WHERE conversationId = :cid AND role != 'tool' AND status != 'streaming'")
     suspend fun chatMessagesOf(cid: String): List<MessageEntity>
@@ -181,6 +185,14 @@ interface SubRunDao {
 
     @Insert
     suspend fun insert(row: SubRunEntity)
+
+    /** Every stored run — backup dump. */
+    @Query("SELECT * FROM sub_runs")
+    suspend fun all(): List<SubRunEntity>
+
+    /** Restore: rows whose id already exists are skipped, not overwritten. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAllIgnore(rows: List<SubRunEntity>)
 }
 
 /** "Recently played": lịch sử phát lại theo từng cuộc trò chuyện (2026-11-14). */
@@ -189,8 +201,16 @@ interface RecentlyPlayedDao {
     @Query("SELECT * FROM recently_played WHERE conversationId = :cid ORDER BY position ASC")
     suspend fun getAll(cid: String): List<RecentlyPlayedEntity>
 
+    /** Every row — backup dump. */
+    @Query("SELECT * FROM recently_played")
+    suspend fun all(): List<RecentlyPlayedEntity>
+
     @Insert
     suspend fun insertAll(rows: List<RecentlyPlayedEntity>)
+
+    /** Restore: rows whose id already exists are skipped, not overwritten. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAllIgnore(rows: List<RecentlyPlayedEntity>)
 
     @Query("DELETE FROM recently_played WHERE conversationId = :cid")
     suspend fun deleteAll(cid: String)
