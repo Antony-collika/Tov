@@ -1,6 +1,7 @@
 package com.example.byokchat.ai
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -20,9 +21,15 @@ import java.util.concurrent.atomic.AtomicReference
  * network error — otherwise the sub run is recorded FAILED and Main gets
  * a tool error instead of "Interrupted by the user."
  *
- * The server sends one event, then holds the connection open, so the
- * client is blocked in a read when it is cancelled — the same position
+ * The server sends one chunked event, then holds the connection open, so
+ * the client is blocked in a read when it is cancelled — the same position
  * as a sub reading a live provider stream when the user presses Stop.
+ * Chunked framing matches what real SSE servers send; an unframed body
+ * would let the cancelled read end as a clean EOF instead of an error.
+ *
+ * The client job runs on [Dispatchers.IO]: the test thread blocks on the
+ * latch, so a job launched on the runBlocking event loop could never run
+ * (it deadlocked the first version of this test — no event ever arrived).
  */
 class SseCancelTest {
 
@@ -34,8 +41,11 @@ class SseCancelTest {
             try {
                 server.accept().use { socket ->
                     val out = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), Charsets.UTF_8))
-                    out.write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n")
-                    out.write("data: {\"hello\":1}\n\n")
+                    val payload = "data: {\"hello\":1}\n\n"
+                    out.write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n")
+                    out.write(payload.toByteArray(Charsets.UTF_8).size.toString(16) + "\r\n")
+                    out.write(payload)
+                    out.write("\r\n")
                     out.flush()
                     // Hold the stream open: the client reads nothing more
                     // until it is cancelled. Daemon thread, so a slow
@@ -48,7 +58,7 @@ class SseCancelTest {
         }.also { it.isDaemon = true; it.start() }
         try {
             val thrown = AtomicReference<Throwable?>(null)
-            val job = launch {
+            val job = launch(Dispatchers.IO) {
                 try {
                     Http.client.sseFlow(
                         Request.Builder().url("http://127.0.0.1:${server.localPort}/").build(),
