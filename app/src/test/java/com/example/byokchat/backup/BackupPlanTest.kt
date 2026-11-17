@@ -31,7 +31,7 @@ class BackupPlanTest {
     private fun chat(id: String) = ConversationEntity(id, "Chat $id", 100, 200)
 
     private fun message(id: String, convId: String, imagePaths: String = "[]") =
-        MessageEntity(id, convId, "t1", 1, 1L, "user", "hello", imagePaths = imagePaths, createdAt = 100)
+        MessageEntity(id = id, conversationId = convId, turnId = "t1", turnNo = 1, seq = 1L, role = "user", text = "hello", imagePaths = imagePaths, createdAt = 100)
 
     private fun current(
         providers: List<ProviderConfig> = emptyList(),

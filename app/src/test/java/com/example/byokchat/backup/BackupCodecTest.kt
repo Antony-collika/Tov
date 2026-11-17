@@ -22,7 +22,7 @@ class BackupCodecTest {
                 ConversationEntity("c1", "Chat one", 100, 200, parentId = null, pinned = true),
             ),
             messages = listOf(
-                MessageEntity("m1", "c1", "t1", 1, 1L, "user", "hello", createdAt = 100),
+                MessageEntity(id = "m1", conversationId = "c1", turnId = "t1", turnNo = 1, seq = 1L, role = "user", text = "hello", createdAt = 100),
             ),
             notes = listOf(NoteEntity("n1", "Note", "content", 100, 100)),
             images = mapOf("/old/path/a.jpg" to "images/a.jpg"),

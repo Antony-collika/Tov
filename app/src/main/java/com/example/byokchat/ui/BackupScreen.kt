@@ -230,7 +230,7 @@ fun BackupScreen(onBack: () -> Unit) {
                     pendingImages = imageMap
                     plan = computed
                 } else {
-                    error = failure ?: "Could not open the backup file."
+                    error = failure ?: "Could not read the backup contents."
                 }
             }
         }

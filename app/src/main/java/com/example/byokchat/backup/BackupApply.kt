@@ -130,7 +130,10 @@ suspend fun applyRestorePlan(
             }
             id.startsWith("agent:") -> {
                 backup.agents.firstOrNull { it.id == id.removePrefix("agent:") }
-                    ?.let { agentStore.updateAgent(it).onFailure { _ -> skipped += "Sub-agent ${it.name}" } }
+                    ?.let { agent ->
+                        agentStore.updateAgent(agent)
+                            .onFailure { skipped += "Sub-agent ${agent.name}" }
+                    }
             }
             id.startsWith("toolPref:") -> {
                 val uid = id.removePrefix("toolPref:")
