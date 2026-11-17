@@ -7,7 +7,6 @@ import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.NoteEntity
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.RecentlyPlayedEntity
-import com.example.byokchat.data.RequestLayout
 import com.example.byokchat.data.SubRunEntity
 import com.example.byokchat.data.TodoEntity
 import com.example.byokchat.tools.ToolPref
@@ -28,9 +27,11 @@ const val BACKUP_DB_VERSION = 11
 /**
  * The whole backup, as stored in backup.json inside the encrypted ZIP.
  * DB only (Duy, 2026-11-17): no files from the playground, no session
- * files, no SAF permissions. External-file links (a System/Free card's
- * `file`, an agent's `configFile`) are kept as plain strings only — the
- * files themselves are not in the backup.
+ * files, no SAF permissions. The Request Control Panel layout is NOT
+ * backed up at all (Duy, 2026-11-17 ~15:16: it is easy to set up again,
+ * not worth backing up) — no `layout`, no selected tool uids. An agent's
+ * `configFile` link is kept as a plain string only — the file itself is
+ * not in the backup.
  *
  * Every field has a default so an older backup still reads on a newer
  * app (the loader uses ignoreUnknownKeys too).
@@ -53,13 +54,9 @@ data class BackupData(
     val youtubeKey: String = "",
     /** Per-tool edits (mode + edited description), by tool uid. */
     val toolPrefs: Map<String, ToolPref> = emptyMap(),
-    /** Uids of the tools selected on the Tools card. */
-    val selectedToolUids: List<String> = emptyList(),
     /** The sub-agent team (agents.json content). */
     val agents: List<SubAgentConfig> = emptyList(),
     val defaultPrompt: String = "",
-    /** Whole request-panel layout, or null when none was stored. */
-    val layout: RequestLayout? = null,
     /** ThemeMode name ("SYSTEM" / "LIGHT" / "DARK"). */
     val theme: String = "SYSTEM",
     val maxToolRounds: Int = 12,
