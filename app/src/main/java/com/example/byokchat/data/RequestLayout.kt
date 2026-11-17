@@ -3,9 +3,6 @@ package com.example.byokchat.data
 import com.example.byokchat.ai.ToolDef
 import com.example.byokchat.chat.SystemPart
 import com.example.byokchat.chat.SystemSource
-import com.example.byokchat.tools.ParsedTool
-import com.example.byokchat.tools.ToolsMdParseException
-import com.example.byokchat.tools.ToolsMdParser
 import kotlinx.serialization.Serializable
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -57,20 +54,23 @@ data class RequestCard(
      */
     val file: String? = null,
     /**
-     * Thẻ Tools (Đợt E): danh sách file đã chọn, theo thứ tự — mỗi file là
-     * URI "content://..." của file ngoài hoặc đường dẫn tương đối trong
-     * AI playground (đợt fix 11/11/2026, I1). App gộp (hợp) tất cả tool trong
-     * các file rồi đưa cho model: theo thứ tự file đã chọn, trong mỗi file
-     * theo thứ tự khối. Giữ tương thích ngược với [file]: thẻ Tools cũ chỉ
-     * có [file] thì coi như danh sách 1 file (xem [toolFiles]).
+     * Thẻ Tools (RCP, 17/11/2026): UID các tool đã chọn trong app. Chỉ
+     * tool trong danh sách này mới được offer cho model, theo nhóm + thứ
+     * tự registry mặc định (không theo thứ tự user tích — thứ tự tính lúc
+     * gửi, xem definitionsForUids). Rỗng = không offer tool nào.
+     */
+    val selectedToolUids: List<String> = emptyList(),
+    /**
+     * Thẻ Tools (Đợt E, CŨ — chỉ còn để di trú một lần): danh sách file
+     * tools.md đã chọn. RCP (17/11/2026) bỏ parse file: mở màn sửa thẻ
+     * lần đầu thì parse MỘT LẦN để lấy uid rồi bỏ liên kết file (xem
+     * CardEditScreen); đường gửi không đọc các trường này nữa.
      */
     val files: List<String> = emptyList(),
     /**
-     * Thẻ Tools: nguồn nội dung — TEXT (gõ trực tiếp vào thẻ, parse như
-     * tools.md) hay FILE (các file đã chọn, định dạng tools.md). Mặc định
-     * FILE (thẻ cũ chỉ có file). Nguồn FILE mà chưa chọn file nào thì lần
-     * gửi bị chặn (xem resolveToolFiles); nguồn TEXT để trống thì 0 tool,
-     * không lỗi.
+     * Thẻ Tools (CŨ — chỉ còn để di trú một lần, xem [files]): nguồn nội
+     * dung trước đây — TEXT (gõ trực tiếp vào thẻ) hay FILE (các file đã
+     * chọn). Đường gửi không đọc nữa.
      */
     val toolsSource: ToolsSource = ToolsSource.FILE,
 ) {
@@ -271,110 +271,10 @@ data class RequestLayout(val cards: List<RequestCard>) {
     }
 
     /**
-     * Kết quả resolve nguồn tools.md của thẻ Tools (Đợt E; luật nguồn sửa
-     * theo quyết định 11/11/2026).
-     * - exposed == null: đường "legacy" offer tất cả tool đã bỏ hẳn
-     *   (quyết định 13) — không còn chỗ nào tạo ra null nữa; giữ kiểu
-     *   nullable để tương thích với ToolRegistry. Không có thẻ Tools cho
-     *   danh sách rỗng (xóa thẻ = 0 tool, xem resolveToolFiles).
-     * - exposed == danh sách rỗng: thẻ Tools tắt, nguồn Text để trống,
-     *   hoặc file rỗng → 0 tool.
-     * - errors rỗng = resolve được hết; có lỗi thì exposed rỗng và lần gửi
-     *   bị chặn (báo lỗi rõ ràng thay vì gửi với danh sách tool sai).
-     */
-    data class ToolsResolution(val exposed: List<ParsedTool>?, val errors: List<String>)
-
-    /**
-     * Đợt E: resolve danh sách tool của thẻ Tools theo nguồn đã chọn.
-     * Parse lại mỗi lần gửi (gọi ở đầu mỗi lần gửi + trước preview, như
-     * resolveFiles). Luật nguồn (quyết định 11/11/2026):
-     * - Nguồn Text: parse văn bản trong thẻ như tools.md. Để trống → 0
-     *   tool, KHÔNG lỗi, vẫn gửi được. Lỗi cú pháp → báo lỗi, chặn gửi.
-     * - Nguồn File: đọc + parse các file tools.md đã chọn, gộp lại theo
-     *   thứ tự file đã chọn, trong mỗi file theo thứ tự khối. Chưa chọn
-     *   file nào → BÁO LỖI + chặn gửi (không còn đường "legacy" offer tất
-     *   cả tool). File rỗng được phép (0 tool); chỉ báo lỗi khi không
-     *   parse được.
-     * - Cùng một tool ở hai file: mô tả GIỐNG HỆT nhau thì gộp bình thường
-     *   (dedupe, giữ khối đầu tiên); mô tả KHÁC nhau thì BÁO LỖI nêu rõ tool
-     *   nào và ở file nào, KHÔNG tự chọn một bên.
-     * - Không có thẻ Tools → 0 tool, KHÔNG lỗi, vẫn gửi được (quyết định
-     *   11/11/2026: xóa thẻ là ý định của user — không gửi tool; app không
-     *   tự fallback offer-all sau lưng user). Đường "legacy" offer tất cả
-     *   tool đã bỏ hẳn (quyết định 13); thẻ Tools tắt → 0 tool.
-     */
-    fun resolveToolFiles(
-        readFile: (String) -> Result<String>,
-        origins: Map<String, String>,
-    ): ToolsResolution {
-        // Không có thẻ Tools: user đã xóa thẻ = không muốn gửi tool nào.
-        // 0 tool, KHÔNG lỗi, vẫn gửi được (quyết định 11/11/2026). Đường
-        // "legacy" offer tất cả tool đã bỏ hẳn (quyết định 13).
-        val card = toolsCard() ?: return ToolsResolution(emptyList(), emptyList())
-        if (!card.enabled) return ToolsResolution(emptyList(), emptyList())
-        if (card.toolsSource == ToolsSource.TEXT) {
-            // Nguồn Text: parse văn bản trong thẻ như tools.md. Để trống
-            // thì 0 tool, không lỗi; lỗi cú pháp thì chặn gửi như file
-            // không parse được.
-            if (card.text.isBlank()) return ToolsResolution(emptyList(), emptyList())
-            return try {
-                ToolsResolution(ToolsMdParser.parse(card.text, origins), emptyList())
-            } catch (e: ToolsMdParseException) {
-                ToolsResolution(emptyList(), listOf("In the Tools card text: ${e.message}"))
-            }
-        }
-        val files = card.toolFiles()
-        // Nguồn File mà chưa chọn file nào thì chặn gửi + báo rõ (quyết
-        // định 11/11/2026): không còn đường "legacy" offer tất cả tool.
-        if (files.isEmpty()) {
-            return ToolsResolution(
-                emptyList(),
-                listOf(
-                    "No file selected for the Tools card. " +
-                        "Choose one or more tools.md files, or switch the card to Text input.",
-                ),
-            )
-        }
-        val errors = mutableListOf<String>()
-        val merged = mutableListOf<ParsedTool>()
-        val seenByUid = mutableMapOf<String, ParsedTool>()
-        val seenInFile = mutableMapOf<String, String>()
-        for (path in files) {
-            val text = readFile(path).fold(
-                onSuccess = { it },
-                onFailure = { e ->
-                    errors += "Could not read the Tools card file '$path': ${e.message}"
-                    null
-                },
-            ) ?: continue
-            val parsed = try {
-                ToolsMdParser.parse(text, origins)
-            } catch (e: ToolsMdParseException) {
-                errors += "In tools file '$path': ${e.message}"
-                null
-            } ?: continue
-            for (tool in parsed) {
-                val prev = seenByUid[tool.uid]
-                if (prev == null) {
-                    seenByUid[tool.uid] = tool
-                    seenInFile[tool.uid] = path
-                    merged += tool
-                } else if (prev.name != tool.name || prev.description != tool.description) {
-                    errors += "Tool \"${tool.uid}\" is described differently in '${seenInFile[tool.uid]}' and '$path'. " +
-                        "Fix the files so they agree, or remove the tool from one of them."
-                }
-                // Giống hệt nhau thì gộp bình thường (dedupe).
-            }
-        }
-        if (errors.isNotEmpty()) return ToolsResolution(emptyList(), errors)
-        return ToolsResolution(merged, emptyList())
-    }
-
-    /**
-     * Lọc danh sách công cụ đã resolve theo thẻ Tools.
+     * Lọc danh sách công cụ đã chọn theo thẻ Tools (RCP, 17/11/2026).
      * - Thẻ Tools tắt = không offer công cụ nào.
-     * - Không có thẻ Tools = không offer công cụ nào (resolveToolFiles đã
-     *   trả danh sách rỗng nên defs vào đây cũng rỗng). Đường "legacy"
+     * - Không có thẻ Tools = không offer công cụ nào (đường gửi đã cho
+     *   danh sách rỗng nên defs vào đây cũng rỗng). Đường "legacy"
      *   offer-all đã bỏ hẳn (quyết định 13).
      * - Thẻ Time KHÔNG lọc tool nữa (Đợt 2, quyết định 1): time.now luôn
      *   được offer như một tool bình thường; tắt time.now ở tầng quản lý
