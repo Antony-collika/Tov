@@ -13,12 +13,11 @@ data class ToolOutcome(
 /** Cầu nối giữa vòng chat và các công cụ. */
 interface ToolRuntime {
     /**
-     * Danh sách công cụ đưa cho model.
-     * @param exposed null = đường "legacy" (CHỈ khi chưa chọn playground folder —
-     *   fs == null): mọi tool Settings cho phép, tên/mô tả gốc. Không có
-     *   thẻ Tools KHÔNG còn cho null nữa (xóa thẻ = 0 tool). Khác null =
-     *   chỉ các tool parse được từ file tools.md của thẻ Tools, đúng thứ
-     *   tự file/khối. Danh sách rỗng = 0 tool.
+     * Danh sách công cụ đưa cho model (RCP, 17/11/2026).
+     * @param exposed null = không có tool nào (không còn đường "legacy"
+     *   offer tất cả tool). Khác null = chỉ các tool trong danh sách đã
+     *   chọn, đúng thứ tự đó; mô tả lấy từ mô tả hiệu dụng (override trong
+     *   ToolPrefs thắng). Danh sách rỗng = 0 tool.
      *   Tool tắt ở Settings (mode OFF) vẫn được offer trong cả hai đường
      *   (quyết định 8, Đợt E); chỉ chặn lúc gọi trong [execute].
      */
@@ -26,13 +25,13 @@ interface ToolRuntime {
     suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>? = null, conversationId: String? = null): ToolOutcome
     /** The run for this turn is over: forget turn-scoped permissions ("Allow all in this turn"). */
     fun endTurn(turnId: String)
-    /** UID của tool mà model gọi bằng [name] (tên trong file nếu có, không thì tên gốc). */
+    /** UID của tool mà model gọi bằng [name] (tên trong danh sách đã chọn nếu có, không thì tên gốc). */
     fun uidForName(name: String, exposed: List<ParsedTool>? = null): String?
-    /** Tên model thấy của tool [uid] (tên trong file nếu có, không thì tên gốc). */
+    /** Tên model thấy của tool [uid] (tên trong danh sách đã chọn nếu có, không thì tên gốc). */
     fun nameForUid(uid: String, exposed: List<ParsedTool>? = null): String?
     fun estimateToolTokens(): Int
-    /** Tool definitions for the given uids (default name/description/schema), for a sub-agent's own tool set. Only tools that are available are returned. */
+    /** Tool definitions for the given uids, in registry order (not the order the uids were given), with the effective description. Only tools that are available are returned. */
     fun definitionsForUids(uids: List<String>): List<Pair<String, ToolDef>>
-    /** uid -> mô tả gốc của mọi tool, để parse tools.md đối chiếu origin_description. */
+    /** uid -> mô tả gốc của mọi tool; chỉ còn dùng cho di trú một lần của thẻ Tools cũ (đối chiếu origin_description khi parse file cũ). */
     fun originDescriptions(): Map<String, String>
 }

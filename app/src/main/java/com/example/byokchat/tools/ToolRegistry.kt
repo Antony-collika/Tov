@@ -23,9 +23,10 @@ import kotlin.coroutines.EmptyCoroutineContext
 /**
  * Danh sách toàn bộ công cụ + cầu nối với vòng chat.
  * - UID cố định do app đặt; tên/mô tả GỐC lấy từ code, không bao giờ mất.
- *   Tên/mô tả model nhìn thấy chỉ còn đến từ file tools.md của thẻ Tools
- *   (đường "legacy" khi chưa chọn playground folder — fs == null — thì dùng tên/mô
- *   tả gốc; xóa thẻ Tools = 0 tool).
+ *   Tên model thấy luôn là tên gốc; mô tả model thấy là mô tả gốc, trừ
+ *   khi user sửa trong Manage tools (ToolPrefs.description) — thẻ Tools
+ *   chỉ chọn tool nào được offer, không còn đổi tên/mô tả qua file tools.md
+ *   nữa (RCP, 17/11/2026). Xóa thẻ Tools = 0 tool.
  * - Chế độ Auto/Ask/Off (tầng quyền) vẫn ở trong app (ToolPrefs); tool tắt
  *   vẫn được offer cho model, chỉ chặn lúc gọi (quyết định 8, Đợt E).
  * - Mọi thay đổi trong ToolPrefs có hiệu lực từ request kế tiếp (definitions() đọc lại mỗi lần).
@@ -48,13 +49,28 @@ class ToolRegistry(
     fun tool(uid: String): Tool? = byUid[uid]
 
     /**
-     * Tên/mô tả GỐC của tool, lấy từ code (Đợt E, quyết định 5): không bao
-     * giờ mất, file tools.md không ghi đè. Tên/mô tả model thấy chỉ còn
-     * đến từ file tools.md của thẻ Tools (xem definitions(exposed)); các
-     * override tên/mô tả cũ trong ToolPrefs không còn hiệu lực nữa.
+     * Tên model thấy của tool: luôn là tên gốc trong code (Đợt E, quyết
+     * định 5) — tên không sửa được, kể cả trong Manage tools.
      */
     fun effectiveName(t: Tool): String = t.defaultName
-    fun effectiveDescription(t: Tool): String = t.defaultDescription
+
+    /**
+     * Mô tả model thấy của tool: mô tả sửa trong Manage tools nếu có
+     * (RCP, 17/11/2026), không thì mô tả gốc trong code.
+     */
+    fun effectiveDescription(t: Tool): String =
+        resolveEffectiveDescription(t.defaultDescription, prefs.get(t.uid).description)
+
+    /**
+     * Lưu mô tả user sửa trong Manage tools. Text trống hoặc giống hệt mô
+     * tả gốc thì xóa override (về mặc định) thay vì lưu trùng.
+     */
+    fun setDescription(t: Tool, text: String) {
+        val trimmed = text.trim()
+        prefs.update(t.uid) {
+            it.copy(description = if (trimmed.isEmpty() || trimmed == t.defaultDescription) null else trimmed)
+        }
+    }
 
     fun mode(t: Tool): ToolMode {
         val m = prefs.get(t.uid).mode?.let { runCatching { ToolMode.valueOf(it) }.getOrNull() } ?: t.defaultMode
@@ -76,7 +92,7 @@ class ToolRegistry(
     /**
      * Mô tả tham số mà AI nhìn thấy (Đợt E, quyết định 5): luôn là mô tả
      * gốc trong code. Các override mô tả tham số cũ trong ToolPrefs không
-     * còn hiệu lực nữa — file tools.md cũng không đổi được schema tham số.
+     * còn hiệu lực nữa; tham số cũng không sửa được trong Manage tools.
      */
     fun paramDescription(t: Tool, param: String): String =
         defaultParamDescription(t, param).orEmpty()
@@ -94,13 +110,14 @@ class ToolRegistry(
     // ---------- ToolRuntime ----------
 
     /**
-     * Danh sách công cụ đưa cho model (Đợt E).
-     * - exposed == null (legacy, CHỈ khi chưa chọn playground folder — fs == null):
-     *   mọi tool dùng được, tên/mô tả/schema gốc. Không có thẻ Tools
-     *   KHÔNG còn cho null nữa (xóa thẻ = 0 tool).
-     * - exposed != null: chỉ các tool trong file, đúng thứ tự file/khối,
-     *   tên/mô tả từ file, schema tham số lấy từ tool thật theo uid (file
-     *   không đổi được schema).
+     * Danh sách công cụ đưa cho model (RCP, 17/11/2026).
+     * - exposed == null: không còn đường nào tạo ra null nữa (thẻ Tools
+     *   chỉ chọn trong app; xóa thẻ = 0 tool) — coi như không có tool nào,
+     *   giữ lại để tương thích chữ ký.
+     * - exposed != null: chỉ các tool trong danh sách đã chọn, đúng thứ tự
+     *   đó; tên lấy từ danh sách, mô tả lấy từ mô tả hiệu dụng (override
+     *   trong ToolPrefs thắng mô tả trong danh sách), schema tham số lấy từ
+     *   tool thật theo uid.
      * - Cả hai đường đều KHÔNG lọc tool mode OFF (quyết định 8): tool tắt
      *   vẫn được offer, chỉ chặn lúc gọi trong execute(). Chỉ lọc tool
      *   không dùng được (chưa chọn playground folder / thiếu API key) vì model có
@@ -109,42 +126,53 @@ class ToolRegistry(
     override suspend fun definitions(exposed: List<ParsedTool>?): List<ToolDef> {
         withContext(Dispatchers.IO) { env.fs.refreshIfStale() }
         return if (exposed == null) {
-            all.filter { isAvailable(it) }
-                .map { ToolDef(it.defaultName, it.defaultDescription, effectiveSchema(it)) }
+            emptyList()
         } else {
             exposed.mapNotNull { parsed ->
-                val tool = byUid[parsed.uid] ?: return@mapNotNull null // uid đã kiểm tra lúc parse; phòng thủ.
-                if (!isAvailable(tool)) null else ToolDef(parsed.name, parsed.description, effectiveSchema(tool))
+                val tool = byUid[parsed.uid] ?: return@mapNotNull null // uid đã kiểm tra lúc chọn; phòng thủ.
+                if (!isAvailable(tool)) null else ToolDef(parsed.name, effectiveDescription(tool), effectiveSchema(tool))
             }
         }
     }
 
     /**
-     * Map tên model gọi -> uid thật. Khi có file: CHỈ tra trong file (tool
-     * không trong file thì không được offer nên cũng không chạy được, kể cả
-     * khi tên đó trùng tên gốc của một tool khác). Khi legacy: tra tên gốc.
+     * Map tên model gọi -> uid thật. Khi có danh sách đã chọn: CHỈ tra
+     * trong đó (tool không được chọn thì không được offer nên cũng không
+     * chạy được, kể cả khi tên đó trùng tên gốc của một tool khác). Khi
+     * không có danh sách: tra tên gốc.
      */
     override fun uidForName(name: String, exposed: List<ParsedTool>?): String? =
         if (exposed != null) exposed.firstOrNull { it.name == name }?.uid
         else all.firstOrNull { it.defaultName == name }?.uid
 
-    /** Tên model thấy của một uid: tên trong file nếu có, không thì tên gốc. */
+    /** Tên model thấy của một uid: tên trong danh sách đã chọn nếu có, không thì tên gốc. */
     override fun nameForUid(uid: String, exposed: List<ParsedTool>?): String? =
         exposed?.firstOrNull { it.uid == uid }?.name ?: byUid[uid]?.defaultName
 
+    /**
+     * uid -> mô tả gốc của mọi tool. Chỉ còn dùng cho di trú một lần của
+     * thẻ Tools cũ (parse file tools.md cũ để lấy uid) — xem
+     * ToolsMdParser.collectUids.
+     */
     override fun originDescriptions(): Map<String, String> =
         all.associate { it.uid to it.defaultDescription }
 
-    override fun definitionsForUids(uids: List<String>): List<Pair<String, ToolDef>> =
-        uids.mapNotNull { uid ->
-            byUid[uid]?.takeIf { isAvailable(it) }?.let { tool ->
-                uid to ToolDef(tool.defaultName, tool.defaultDescription, tool.schema)
-            }
-        }
+    /**
+     * Tool definitions cho các uid đã cho (RCP, 17/11/2026): theo thứ tự
+     * nhóm + registry mặc định (KHÔNG theo thứ tự uid truyền vào — thứ tự
+     * user tích không phải thứ tự offer), tên gốc + mô tả hiệu dụng
+     * (override trong ToolPrefs nếu có), schema hiệu dụng. Chỉ tool dùng
+     * được mới trả về. Main và sub dùng chung (sub cũng thấy mô tả đã sửa).
+     */
+    override fun definitionsForUids(uids: List<String>): List<Pair<String, ToolDef>> {
+        val wanted = uids.toSet()
+        return all.filter { it.uid in wanted && isAvailable(it) }
+            .map { it.uid to ToolDef(it.defaultName, effectiveDescription(it), effectiveSchema(it)) }
+    }
 
     override fun estimateToolTokens(): Int =
         all.filter { isAvailable(it) }
-            .sumOf { TokenEstimator.text(it.defaultName + it.defaultDescription + effectiveSchema(it).toString()) }
+            .sumOf { TokenEstimator.text(it.defaultName + effectiveDescription(it) + effectiveSchema(it).toString()) }
 
     /**
      * Kiểm tra giới hạn ghi của AI (Đợt E, quyết định 6 + quyết định 14). Trả về câu báo lỗi
@@ -218,8 +246,9 @@ class ToolRegistry(
     override suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>?, conversationId: String?): ToolOutcome {
         // Mỗi lần chạy công cụ bắt đầu với bộ nhớ đệm metadata sạch (xem WorkspaceFs).
         env.fs.clearMeta()
-        // Tôn trọng danh sách file (Đợt E): tên model gọi phải nằm trong file
-        // (hoặc là tên gốc khi legacy); tool không được offer thì không chạy.
+        // Tôn trọng danh sách đã chọn (RCP): tên model gọi phải nằm trong
+        // danh sách (hoặc là tên gốc khi không có danh sách); tool không
+        // được offer thì không chạy.
         val tool = if (exposed != null) {
             exposed.firstOrNull { it.name == call.name }?.uid?.let(byUid::get)
         } else {
