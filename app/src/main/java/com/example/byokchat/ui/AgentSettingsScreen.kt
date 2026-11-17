@@ -352,7 +352,7 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                 ToolPickerSheet(
                     tools = pickableTools,
                     selected = toolUids,
-                    onToggle = { uid -> toolUids = if (uid in toolUids) toolUids - uid else toolUids + uid },
+                    onSelectionChange = { toolUids = it },
                     onDismiss = { showToolPicker = false },
                 )
             }
