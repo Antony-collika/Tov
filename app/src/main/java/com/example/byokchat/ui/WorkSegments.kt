@@ -47,10 +47,13 @@ private fun parseCalls(toolCallsJson: String?): List<AiToolCall> =
  *
  * A row contributes when it holds tool calls or readable reasoning. Rows
  * that contribute and follow each other with the same (turnId, sender)
- * merge into one segment; any other row — a user message, a plain text
- * message (a greeting, a final answer), a tool-result row — breaks the
- * stretch. A text-only message therefore never becomes a step, and
- * `send_message` never becomes one either: its messages already are.
+ * merge into one segment; a user message or a plain text message (a
+ * greeting, a final answer) breaks the stretch. A tool-result row never
+ * breaks it: it sits between the rounds in the DB (call row, result row,
+ * next call row) and is the answer to the step above it, so the rounds
+ * on both sides still belong to one stretch. A text-only message
+ * therefore never becomes a step, and `send_message` never becomes one
+ * either: its messages already are.
  * Within one row the reasoning step comes first (the model thinks, then
  * calls), then that round's calls in order. Tool results attach from
  * [results] by call id; a call with no result yet is still a step, so the
@@ -87,6 +90,11 @@ fun groupWorkSegments(messages: List<MessageEntity>, results: ToolResults): List
         }
     }
     for (m in messages) {
+        // A tool-result row is the answer to the step above it; it neither
+        // contributes a step nor breaks the stretch (17/11/2026: without
+        // this, a sub's two rounds split into two pills because the
+        // result row sits between them in the DB).
+        if (m.role == "tool") continue
         if (m.role != "assistant") {
             flush()
             continue
