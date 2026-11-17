@@ -224,8 +224,9 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         }
         app.layoutStore.setFileErrors(fileErrors)
         // RCP (17/11/2026): như đường gửi — thẻ Tools chỉ chọn trong app,
-        // không còn parse file tools.md.
-        val selectedUids = layout.toolsCard()?.takeIf { it.enabled }?.selectedToolUids.orEmpty()
+        // không còn parse file tools.md. Thẻ chưa có lựa chọn đã lưu thì
+        // mặc định chọn hết.
+        val selectedUids = layout.toolsCard()?.takeIf { it.enabled }?.effectiveSelectedToolUids(app.registry.all.map { it.uid }).orEmpty()
         val defsForUids = app.registry.definitionsForUids(selectedUids)
         val exposed = defsForUids.map { (uid, def) ->
             com.example.byokchat.tools.ParsedTool(uid, def.name, def.description)

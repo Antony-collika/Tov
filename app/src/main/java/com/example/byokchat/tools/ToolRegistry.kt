@@ -153,9 +153,10 @@ class ToolRegistry(
         exposed?.firstOrNull { it.uid == uid }?.name ?: byUid[uid]?.defaultName
 
     /**
-     * uid -> mô tả gốc của mọi tool. Chỉ còn dùng cho di trú một lần của
-     * thẻ Tools cũ (parse file tools.md cũ để lấy uid) — xem
-     * ToolsMdParser.collectUids.
+     * uid -> mô tả gốc của mọi tool. 17/11/2026 — bỏ hẳn file tools.md
+     * ngoài: không còn chỗ nào trong app dùng nữa (chỉ còn
+     * ToolsMdParser.collectUids, mà cũng chỉ test dùng). Giữ lại vì là
+     * một phần của ToolRuntime, để sau này quyết có xóa hay không.
      */
     override fun originDescriptions(): Map<String, String> =
         all.associate { it.uid to it.defaultDescription }

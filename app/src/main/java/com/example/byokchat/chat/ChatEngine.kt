@@ -262,9 +262,11 @@ class ChatEngine(
                 // còn parse file tools.md. exposed là danh sách tool của
                 // lượt này (tên + mô tả hiệu dụng, theo thứ tự registry),
                 // để map tên gọi về uid và để tool không được chọn thì
-                // không chạy được (xem ToolRegistry.execute).
+                // không chạy được (xem ToolRegistry.execute). Thẻ chưa có
+                // lựa chọn đã lưu thì mặc định chọn hết (tắt thẻ mới là
+                // không offer tool nào).
                 val selectedUids = if (repair == RepairMode.NO_TOOLS) emptyList()
-                else layout.toolsCard()?.takeIf { it.enabled }?.selectedToolUids.orEmpty()
+                else layout.toolsCard()?.takeIf { it.enabled }?.effectiveSelectedToolUids(tools.all.map { it.uid }).orEmpty()
                 val defsForUids = tools.definitionsForUids(selectedUids)
                 exposed = defsForUids.map { (uid, def) ->
                     com.example.byokchat.tools.ParsedTool(uid, def.name, def.description)

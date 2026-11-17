@@ -226,8 +226,19 @@ class RequestLayoutTest {
     // ---------- RCP (17/11/2026): thẻ Tools chọn trong app, không parse file ----------
 
     @Test
-    fun toolsCardDefaultsToNoToolsSelected() {
+    fun emptyToolsSelectionDefaultsToAllTools() {
+        // 17/11/2026 — bỏ hẳn file tools.md: thẻ chưa có lựa chọn nào lưu
+        // (mới, cũ, thêm lại) thì mặc định chọn hết; tắt thẻ mới là không
+        // offer tool nào.
+        val all = listOf("time.now", "txt.read", "web.search")
+        assertEquals(all, RequestLayout.defaultLayout("x").toolsCard()?.effectiveSelectedToolUids(all))
         assertEquals(emptyList<String>(), RequestLayout.defaultLayout("x").toolsCard()?.selectedToolUids)
+    }
+
+    @Test
+    fun savedToolsSelectionIsKeptAsIs() {
+        val card = RequestCard(RequestLayout.TOOLS_ID, CardKind.TOOLS, selectedToolUids = listOf("txt.read"))
+        assertEquals(listOf("txt.read"), card.effectiveSelectedToolUids(listOf("time.now", "txt.read", "web.search")))
     }
 
     @Test
@@ -242,26 +253,6 @@ class RequestLayoutTest {
             json.encodeToString(RequestCard.serializer(), card),
         )
         assertEquals(listOf("time.now", "txt.read"), decoded.selectedToolUids)
-    }
-
-    @Test
-    fun oldToolsCardWithoutSelectedToolUidsDecodesToEmptyButKeepsLegacyFiles() {
-        // Thẻ cũ (trước RCP) không có trường selectedToolUids — decode ra
-        // rỗng, nhưng files/toolsSource cũ vẫn đọc được để di trú một lần.
-        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-        val decoded = json.decodeFromString(
-            RequestCard.serializer(),
-            """{"id":"tools","kind":"TOOLS","files":["a.md"],"toolsSource":"FILE"}""",
-        )
-        assertEquals(emptyList<String>(), decoded.selectedToolUids)
-        assertEquals(listOf("a.md"), decoded.toolFiles())
-        assertEquals(ToolsSource.FILE, decoded.toolsSource)
-    }
-
-    @Test
-    fun legacyToolsFileFieldStillWorksAsOneFile() {
-        val card = RequestCard(RequestLayout.TOOLS_ID, CardKind.TOOLS, file = "old.md")
-        assertEquals(listOf("old.md"), card.toolFiles())
     }
 
     @Test

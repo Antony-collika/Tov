@@ -2,8 +2,10 @@ package com.example.byokchat.tools
 
 /**
  * Parser cho file tools.md của thẻ Tools (Đợt E, quyết định 4/5/7).
- * RCP (17/11/2026): chỉ còn dùng cho di trú MỘT LẦN của thẻ Tools cũ
- * (collectUids) — đường gửi không parse file nữa.
+ * 17/11/2026 — BỎ HẲN file tools.md ngoài: không còn chỗ nào trong app
+ * đọc file hay gọi parser này nữa ([parse], [collectUids] và
+ * [buildTemplate] chỉ còn test dùng). GIỮ nguyên, không xóa lặng — như
+ * tiền lệ [buildTemplate] trước đây — để sau này quyết có xóa hay không.
  *
  * Định dạng (mượn FPilot, xem file mẫu workspace/user/files/tools.md):
  * - Một khối cho mỗi tool, bắt đầu bằng "## <tên>"; thứ tự khối = thứ tự
@@ -86,8 +88,10 @@ object ToolsMdParser {
     /**
      * Thu thập uid từ các nội dung tools.md (RCP, 17/11/2026 — di trú MỘT
      * LẦN cho thẻ Tools cũ): parse từng nội dung, gộp lại, bỏ trùng (giữ
-     * lần đầu). Ném [ToolsMdParseException] khi một nội dung lỗi — bên gọi
-     * báo lỗi và để user sửa file rồi thử lại, không tự đoán.
+     * lần đầu). Ném [ToolsMdParseException] khi một nội dung lỗi.
+     * 17/11/2026 — bỏ hẳn file tools.md ngoài: không còn chỗ nào trong
+     * app gọi hàm này nữa, chỉ còn test dùng; GIỮ nguyên như [parse] và
+     * [buildTemplate].
      */
     fun collectUids(texts: List<String>, origins: Map<String, String>): List<String> {
         val seen = linkedSetOf<String>()
@@ -99,9 +103,8 @@ object ToolsMdParser {
      * File mẫu chuẩn: liệt kê TẤT CẢ tool kèm tên/mô tả gốc (như FPilot).
      * Chỉ để user lấy lại khi cần (vd sửa sai format làm parse lỗi) — app
      * KHÔNG BAO GIỜ tự ghi đè file của user bằng mẫu này.
-     * RCP (17/11/2026): không còn chỗ nào trong app tạo file mẫu tools
-     * nữa (thẻ Tools chỉ chọn trong app) — hàm này thành code chết, giữ
-     * lại vì test vẫn dùng và để sau này quyết có xóa hay không.
+     * 17/11/2026 — bỏ hẳn file tools.md ngoài: không còn chỗ nào trong
+     * app gọi hàm này nữa, chỉ còn test dùng; GIỮ nguyên.
      */
     fun buildTemplate(tools: List<Tool>): String = buildString {
         appendLine("> Tools card. One block per tool, in the order they are offered to the model.")

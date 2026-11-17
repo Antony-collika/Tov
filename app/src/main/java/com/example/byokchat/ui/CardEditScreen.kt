@@ -52,8 +52,6 @@ import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.ProviderType
-import com.example.byokchat.data.ToolsSource
-import com.example.byokchat.tools.ToolsMdParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -87,9 +85,15 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     var syncNote by remember(cardId) { mutableStateOf<String?>(null) }
     // RCP (17/11/2026): thẻ Tools chọn trong app — UID các tool đã chọn
     // (thứ tự offer tính lúc gửi theo nhóm + registry, không phải thứ tự
-    // tích). Lỗi di trú một lần của thẻ cũ (xem LaunchedEffect dưới).
-    var selectedUids by remember(cardId) { mutableStateOf(card?.selectedToolUids?.toSet().orEmpty()) }
-    var migrationError by remember(cardId) { mutableStateOf<String?>(null) }
+    // tích). Thẻ chưa có lựa chọn đã lưu thì mặc định chọn hết (xem
+    // RequestCard.effectiveSelectedToolUids) — chỉ bỏ tick những cái
+    // không muốn; tắt thẻ thì không offer tool nào.
+    val allToolUids = remember { container.registry.all.map { it.uid } }
+    val initialSelectedUids = remember(cardId) {
+        if (card?.kind == CardKind.TOOLS) card.effectiveSelectedToolUids(allToolUids).toSet()
+        else card?.selectedToolUids?.toSet().orEmpty()
+    }
+    var selectedUids by remember(cardId) { mutableStateOf(initialSelectedUids) }
     var showToolPicker by remember(cardId) { mutableStateOf(false) }
     // Đợt 6: thẻ Metadata — giá trị lưu toàn cục ở SettingsRepository (trừ
     // max tokens, theo từng provider). Chỉ hiện trường nào hãng đang dùng
@@ -157,7 +161,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
             lastTurns != card.lastTurns.toString() || compact != card.compactToolResults ||
             turnTags != card.turnTags || includeErrors != card.includeErrorTurns ||
             file.trim() != (card.file ?: "") ||
-            selectedUids != card.selectedToolUids.toSet() ||
+            selectedUids != initialSelectedUids ||
             effort != savedMetadata.effort || stopText != savedMetadata.stopSequences.joinToString("\n") ||
             keepSignature != savedMetadata.keepThoughtSignature ||
             replayReasoning != savedMetadata.replayReasoning ||
@@ -167,40 +171,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // Thẻ Time/Last turn không có gì để Save (sửa trực tiếp hoặc chỉ đọc).
     // Thẻ Tools CÓ Save (danh sách file) từ Đợt E.
     val hasSave = card != null && card.kind != CardKind.TIME && card.kind != CardKind.LAST_TURN
-
-    /**
-     * RCP (17/11/2026): di trú MỘT LẦN cho thẻ Tools cũ — mở màn lần đầu,
-     * nếu thẻ chưa có selectedToolUids mà còn trỏ file tools.md (hoặc văn
-     * bản tools.md gõ trực tiếp), parse một lần để lấy danh sách uid rồi
-     * bỏ liên kết file (ghi lại ngay vào store, không đợi Save — để thẻ
-     * cũ không thành trống dù user thoát ra không lưu). Lỗi parse/đọc thì
-     * báo lỗi và giữ nguyên liên kết file để user sửa file rồi mở lại.
-     */
-    LaunchedEffect(cardId) {
-        val c = card ?: return@LaunchedEffect
-        if (c.kind != CardKind.TOOLS) return@LaunchedEffect
-        if (c.selectedToolUids.isNotEmpty()) return@LaunchedEffect
-        val legacyFiles = c.toolFiles()
-        val legacyText = if (c.toolsSource == ToolsSource.TEXT) c.text else ""
-        if (legacyFiles.isEmpty() && legacyText.isBlank()) return@LaunchedEffect
-        val migrated = withContext(Dispatchers.IO) {
-            runCatching {
-                val texts = legacyFiles.map { path -> container.fs.readCardFile(path) } +
-                    (if (legacyText.isNotBlank()) listOf(legacyText) else emptyList())
-                val parsed = ToolsMdParser.collectUids(texts, container.registry.originDescriptions())
-                // Thứ tự lưu: nhóm + registry mặc định (như lúc gửi).
-                container.registry.all.map { it.uid }.filter { it in parsed.toSet() }
-            }
-        }
-        migrated.onSuccess { list ->
-            selectedUids = list.toSet()
-            store.updateCard(c.id) { it.copy(selectedToolUids = list, files = emptyList(), file = null) }
-        }.onFailure { e ->
-            migrationError = "Could not move your old tools list into the app: " +
-                (e.message ?: e.javaClass.simpleName) +
-                ". Edit the file and open this screen again, or choose tools below."
-        }
-    }
 
     BackHandler(enabled = dirty) { confirmDiscard = true }
     val goBack: () -> Unit = { if (dirty) confirmDiscard = true else onBack() }
@@ -219,11 +189,10 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                 includeErrorTurns = includeErrors,
                 // RCP (17/11/2026): thẻ System/Free luôn giữ liên kết file
                 // đã chọn (trống = không trỏ file). Thẻ Tools lưu danh sách
-                // uid đã chọn (nhóm + registry) và BỎ liên kết file cũ
-                // (files/file trống) — đường gửi không đọc file nữa.
+                // uid đã chọn (nhóm + registry); file cũ (nếu thẻ cũ còn
+                // trỏ) thì bỏ — đường gửi không đọc file nữa.
                 file = if (c.kind == CardKind.TOOLS) null
                 else file.trim().ifEmpty { null },
-                files = if (c.kind == CardKind.TOOLS) emptyList() else it.files,
                 selectedToolUids = if (c.kind == CardKind.TOOLS) {
                     container.registry.all.map { tool -> tool.uid }.filter { it in selectedUids }
                 } else it.selectedToolUids,
@@ -608,16 +577,17 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     // RCP (17/11/2026): thẻ Tools chỉ chọn trong app — danh
                     // sách uid, KHÔNG còn file tools.md. Hai tầng tách riêng:
                     // tầng quyền ở Settings/Manage Tools, tầng chọn ở đây.
+                    // Chưa có lựa chọn đã lưu thì mặc định chọn hết; bỏ hết
+                    // tick cũng coi như chọn hết — tắt thẻ mới là không
+                    // offer tool nào.
                     Text(
                         "This card is not a message: it is the tool list sent with the request, " +
                             "so its position in the panel changes nothing. Every tool selected is " +
-                            "offered to the model, in the app's group order. A tool not selected " +
-                            "is not offered. Turn the card off to offer no tools at all.",
+                            "offered to the model, in the app's group order. A card with no saved " +
+                            "choice offers all tools — uncheck the ones you don't want. " +
+                            "Turn the card off to offer no tools at all.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
-                    if (migrationError != null) {
-                        Text(migrationError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                    }
                     val namesByUid = container.registry.all.associate { it.uid to it.defaultName }
                     Text(
                         toolSelectionSummary(selectedUids, namesByUid),

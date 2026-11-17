@@ -393,11 +393,10 @@ private fun cardSummary(
     }
     CardKind.LAST_TURN -> "Your latest message and the tool round in progress. Always sent."
     // RCP (17/11/2026): thẻ Tools chỉ chọn trong app (selectedToolUids).
-    // Thẻ cũ còn trỏ file mà chưa di trú thì nhắc mở màn sửa để chuyển.
+    // Chưa có lựa chọn đã lưu thì mặc định chọn hết — panel hiện "All".
     CardKind.TOOLS -> when {
-        card.selectedToolUids.isEmpty() && card.toolFiles().isNotEmpty() ->
-            "Your old tools list has not been moved yet — tap Edit to move it into the app."
-        card.selectedToolUids.isEmpty() -> "No tools selected — tap Edit to choose tools."
+        card.selectedToolUids.isEmpty() ->
+            "All ${toolNames.size} tools — tap Edit to choose fewer."
         else -> {
             val names = card.selectedToolUids.map { toolNames[it] ?: it }
             val noun = if (names.size == 1) "tool" else "tools"

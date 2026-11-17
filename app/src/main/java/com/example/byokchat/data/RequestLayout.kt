@@ -10,9 +10,6 @@ import java.time.format.DateTimeFormatter
 /** Loại thẻ trong Request panel (Đợt C). Thứ tự thẻ trong danh sách là thứ tự gửi. */
 enum class CardKind { METADATA, SYSTEM, TIME, FREE, HISTORY, LAST_TURN, TOOLS }
 
-/** Nguồn nội dung CŨ của thẻ Tools (RCP, 17/11/2026 — chỉ còn để di trú một lần): gõ trực tiếp vào thẻ (TEXT) hay file (FILE). Đường gửi không đọc nữa. */
-enum class ToolsSource { TEXT, FILE }
-
 /** Vai của thẻ Free khi gửi. */
 enum class FreeRole { SYSTEM, USER }
 
@@ -57,25 +54,22 @@ data class RequestCard(
      * Thẻ Tools (RCP, 17/11/2026): UID các tool đã chọn trong app. Chỉ
      * tool trong danh sách này mới được offer cho model, theo nhóm + thứ
      * tự registry mặc định (không theo thứ tự user tích — thứ tự tính lúc
-     * gửi, xem definitionsForUids). Rỗng = không offer tool nào.
+     * gửi, xem definitionsForUids). Rỗng = chưa có lựa chọn nào lưu — coi
+     * như chọn hết (xem [effectiveSelectedToolUids]); muốn không offer
+     * tool nào thì tắt thẻ, không phải bỏ hết tick.
      */
     val selectedToolUids: List<String> = emptyList(),
-    /**
-     * Thẻ Tools (Đợt E, CŨ — chỉ còn để di trú một lần): danh sách file
-     * tools.md đã chọn. RCP (17/11/2026) bỏ parse file: mở màn sửa thẻ
-     * lần đầu thì parse MỘT LẦN để lấy uid rồi bỏ liên kết file (xem
-     * CardEditScreen); đường gửi không đọc các trường này nữa.
-     */
-    val files: List<String> = emptyList(),
-    /**
-     * Thẻ Tools (CŨ — chỉ còn để di trú một lần, xem [files]): nguồn nội
-     * dung trước đây — TEXT (gõ trực tiếp vào thẻ) hay FILE (các file đã
-     * chọn). Đường gửi không đọc nữa.
-     */
-    val toolsSource: ToolsSource = ToolsSource.FILE,
 ) {
-    /** File tools.md CŨ của thẻ Tools (chỉ còn để di trú một lần): [files] nếu có, không thì [file] cũ. */
-    fun toolFiles(): List<String> = if (files.isNotEmpty()) files else listOfNotNull(file)
+    /**
+     * UID thật sự được offer cho model (17/11/2026 — bỏ hẳn file
+     * tools.md ngoài): đã lưu lựa chọn thì dùng danh sách đó; chưa có
+     * lựa chọn nào lưu (thẻ mới, thẻ cũ từ trước khi có lựa chọn, thẻ
+     * thêm lại) thì mặc định chọn hết — [allUids] theo thứ tự registry.
+     * Người dùng chỉ bỏ tick những cái không muốn; tắt thẻ thì không
+     * offer tool nào.
+     */
+    fun effectiveSelectedToolUids(allUids: List<String>): List<String> =
+        if (selectedToolUids.isEmpty()) allUids else selectedToolUids
     /** Tên hiển thị trên Panel. Đợt 8: thẻ System cũng dùng label khi user đặt tên (màn sửa có ô Name); mặc định vẫn là "System". */
     fun displayName(): String = when (kind) {
         CardKind.METADATA -> "Metadata"
