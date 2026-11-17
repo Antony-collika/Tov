@@ -115,13 +115,14 @@ class ModelPickerSheetTest {
         assertTrue(isGroupExpanded("openai", "terra", setOf("openai")))
         assertFalse(isGroupExpanded("openai", "", setOf("openai")))
         assertTrue(isGroupExpanded("azure", "", setOf("openai")))
-        assertTrue(isGroupExpanded("azure", "  ", setOf("azure", "gemini")))
+        // Whitespace-only query trims to empty: no search, collapsed stays collapsed.
+        assertFalse(isGroupExpanded("azure", "  ", setOf("azure", "gemini")))
     }
 
     @Test
     fun pinnedRespectsChipFilter() {
         val all = visiblePinnedModels(providers, "", null)
-        assertEquals(listOf("openai" to "gpt-6.1-terra"), all)
+        assertEquals(listOf(openAi to "gpt-6.1-terra"), all)
         assertTrue(visiblePinnedModels(providers, "", "azure").isEmpty())
     }
 
@@ -129,11 +130,11 @@ class ModelPickerSheetTest {
     fun pinnedSearchMatchesProviderName() {
         val pinned = provider("p", "Bedrock", listOf("a", "b"), listOf("a", "b"))
         assertEquals(
-            listOf("p" to "a", "p" to "b"),
+            listOf(pinned to "a", pinned to "b"),
             visiblePinnedModels(listOf(pinned), "bedrock", null),
         )
         assertEquals(
-            listOf("p" to "a"),
+            listOf(pinned to "a"),
             visiblePinnedModels(listOf(pinned), "a", null),
         )
         assertTrue(visiblePinnedModels(listOf(pinned), "zzz", null).isEmpty())
