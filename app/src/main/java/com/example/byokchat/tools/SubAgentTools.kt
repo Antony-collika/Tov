@@ -9,11 +9,13 @@ import kotlinx.serialization.json.JsonObject
 /**
  * Tool that lets Main delegate a task to a sub-agent (Phase 2: synchronous
  * — Main waits for the result). The sub runs inside this tool call: a
- * detailed report comes back as the tool's result (Main reads it in the
- * next round), and a brief report is shown to the user as the sub-agent's
- * own message (the sub sends it with its send_message tool). Dismiss is
- * implicit: when the tool returns, the run is over and the sub leaves the
- * member list (it stays in the team).
+ * short receipt comes back as the tool's result (agent, task title, turn
+ * number, status), and the full report is stored in the sub_runs table —
+ * Main reads it back with get_subagent_result when it needs the details
+ * (context manager, 17/11/2026). A brief report is shown to the user as
+ * the sub-agent's own message (the sub sends it with its send_message
+ * tool). Dismiss is implicit: when the tool returns, the run is over and
+ * the sub leaves the member list (it stays in the team).
  *
  * Phase 3: the agent list is built from the loaded team, never hardcoded.
  * The tool's description stays generic on purpose — tools.md checks it
@@ -38,7 +40,7 @@ object SubAgentTools {
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "delegate_to_subagent",
-            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs synchronously — you wait for it to finish. It returns a detailed report as this tool's result, and shows a brief report to the user as its own message. Give a clear brief with exactly what to find and what to include. The sub-agent greets the user itself when it starts. Do not delegate tasks the agent's tools cannot do.",
+            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs synchronously — you wait for it to finish. It returns a short receipt (agent, task title, turn number, status) as this tool's result; the full result is stored and can be read back with get_subagent_result. Give a one-line title for the task plus a clear brief with exactly what to find and what to include. The sub-agent greets the user itself when it starts. Do not delegate tasks the agent's tools cannot do.",
             schema = delegateSchema(teamProvider()),
             schemaProvider = { delegateSchema(teamProvider()) },
         ) { _, args ->
@@ -54,11 +56,12 @@ object SubAgentTools {
             if (!agent.enabled) {
                 throw ToolException("Sub-agent '${agent.name}' is turned off. Turn it on in the agent settings to call it.")
             }
+            val title = args.reqStr("title")
             val brief = args.reqStr("brief")
             val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")
             val turnId = currentTurnId() ?: throw ToolException("No turn is running.")
             val handoffStartedAt = System.currentTimeMillis()
-            val result = runner.run(agent, brief, conversationId, turnId)
+            val result = runner.run(agent, title, brief, conversationId, turnId)
             // Handoff step (16/11/2026): the run returned — the next step
             // is the engine recording this result in the chat history.
             // Logged before the FAILED check, so a failed run is traced too.
@@ -67,7 +70,7 @@ object SubAgentTools {
                 "agent=${agent.id} status=${result.status} took=${System.currentTimeMillis() - handoffStartedAt}ms",
             )
             if (result.status == SubRunStatus.FAILED) throw ToolException(result.detailed)
-            result.detailed
+            result.receipt
         },
     )
 
@@ -87,6 +90,7 @@ object SubAgentTools {
         }
         return schema {
             str("agent", agentDesc, required = true, enum = enabled.map { it.id }.takeIf { it.isNotEmpty() })
+            str("title", "One-line title for the task, e.g. \"Find cheerful morning music\". The title stays in your context as the receipt; the detailed instructions go in 'brief'.", required = true)
             str("brief", "The task: exactly what the sub-agent should do and what to include in its report.", required = true)
         }
     }

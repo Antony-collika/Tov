@@ -1,6 +1,8 @@
 package com.example.byokchat.chat
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -146,7 +148,7 @@ data class SubRunResult(
     val agentName: String,
     /** Brief report, shown to the user as the sub-agent's own message. */
     val brief: String,
-    /** Detailed report, returned to Main as the delegate tool's result. */
+    /** Detailed report, stored in the sub_runs table (and returned to Main as a tool error when the run failed). */
     val detailed: String,
     val status: SubRunStatus,
     val rounds: Int,
@@ -157,7 +159,49 @@ data class SubRunResult(
     val startedAt: Long,
     val finishedAt: Long,
     val error: String? = null,
+    /** One-line title Main gave the task when delegating. */
+    val title: String,
+    /** Stable turn number of Main's turn this run belongs to. */
+    val turnNo: Int,
+    /** Short receipt, returned to Main as the delegate tool's result. */
+    val receipt: String,
 )
+
+/** One tool call in a stored run: name + arguments (JSON string). Results
+ * stay in the turn's message rows; the full report carries the outcome. */
+@Serializable
+data class SubRunToolCall(val name: String, val args: String)
+
+private val subRunToolCallsSer = ListSerializer(SubRunToolCall.serializer())
+private val subRunStringsSer = ListSerializer(String.serializer())
+
+/** Encode a run's tool calls (with arguments) for the sub_runs table. */
+fun encodeSubRunToolCalls(calls: List<SubRunToolCall>): String =
+    Json.encodeToString(subRunToolCallsSer, calls)
+
+/** Decode a run's tool calls; bad data reads back as an empty list. */
+fun decodeSubRunToolCalls(json: String): List<SubRunToolCall> =
+    runCatching { Json.decodeFromString(subRunToolCallsSer, json) }.getOrDefault(emptyList())
+
+/** Encode a run's messages to Main for the sub_runs table. */
+fun encodeSubRunStrings(values: List<String>): String =
+    Json.encodeToString(subRunStringsSer, values)
+
+/** Decode a run's messages to Main; bad data reads back as an empty list. */
+fun decodeSubRunStrings(json: String): List<String> =
+    runCatching { Json.decodeFromString(subRunStringsSer, json) }.getOrDefault(emptyList())
+
+/**
+ * The short receipt Main keeps in its context after a delegate (context
+ * manager, 17/11/2026): who ran, what the task was called, which turn it
+ * was, and how to read the full result back. The full report stays in
+ * the stored run record, out of Main's context until it asks for it.
+ * Pure, so it can be unit-tested without Android.
+ */
+fun buildSubRunReceipt(agentName: String, agentId: String, title: String, turnNo: Int, status: SubRunStatus): String =
+    "Sub-agent $agentName finished: ${status.name.lowercase().replace('_', ' ')}. " +
+        "Task: \"$title\". Turn: $turnNo. " +
+        "To read the full result, call get_subagent_result with agent \"$agentId\" and turn $turnNo."
 
 /** One line of sub_runs.meta.json (JSONL): one entry per sub run in a session. */
 @Serializable

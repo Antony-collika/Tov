@@ -10,6 +10,7 @@ import com.example.byokchat.ai.Role
 import com.example.byokchat.ai.ToolDef
 import com.example.byokchat.data.AppDatabase
 import com.example.byokchat.data.MessageEntity
+import com.example.byokchat.data.SubRunEntity
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.SettingsRepository
@@ -54,12 +55,15 @@ data class ActiveSubRun(
  * the brief (an agent may opt into seeing Main's recent history).
  *
  * Flow: loop tool rounds (own round cap + token budget) → on finish,
- * return the detailed report to Main (the delegate tool's result). The
- * sub greets the user itself, with its send_message tool at the start of
- * its first round (taught in its system prompt) — Main never scripts the
- * greeting. Every run is recorded in sub_runs.meta.json in the session
- * folder. Dismiss is implicit here: when the run ends, the sub leaves
- * the member list (it stays in the team and can be called again).
+ * return a short receipt to Main (the delegate tool's result) and store
+ * the full report in the sub_runs table, so Main can read it back later
+ * with get_subagent_result instead of carrying it in its context
+ * (context manager, 17/11/2026). The sub greets the user itself, with
+ * its send_message tool at the start of its first round (taught in its
+ * system prompt) — Main never scripts the greeting. Every run is also
+ * recorded in sub_runs.meta.json in the session folder. Dismiss is
+ * implicit here: when the run ends, the sub leaves the member list (it
+ * stays in the team and can be called again).
  *
  * Talking to the user (Phase 3): the sub's plain text goes only to Main.
  * A message reaches the group chat ONLY when the sub calls its
@@ -126,6 +130,7 @@ class SubAgentRunner(
 
     suspend fun run(
         agent: SubAgentConfig,
+        title: String,
         brief: String,
         conversationId: String,
         turnId: String,
@@ -142,6 +147,14 @@ class SubAgentRunner(
         // for the detailed report) and to the user (already in the chat).
         val mainOutbox = mutableListOf<String>()
         val sentToUser = mutableListOf<String>()
+        // Readable reasoning across all rounds, including the final round
+        // that answers without a tool call (its reasoning used to be
+        // dropped: the loop only kept reasoning on rounds with tool
+        // calls, on the round's tool-call row).
+        val allReasoning = StringBuilder()
+        // Work tool calls with their arguments, for the stored run record
+        // (send_message is not work — its messages already are).
+        val workCallRecords = mutableListOf<SubRunToolCall>()
         var status = SubRunStatus.DONE
         var error: String? = null
         var finalText = ""
@@ -247,6 +260,10 @@ class SubAgentRunner(
                             is AiEvent.ToolCalls -> calls = ev.calls
                         }
                     }
+                    // Keep this round's reasoning even when it ends the
+                    // run: the final round answers without tool calls, so
+                    // nothing below would carry it into the stored record.
+                    allReasoning.append(reasoning)
                     if (calls.isEmpty()) {
                         finalText = text.toString()
                         break
@@ -276,6 +293,7 @@ class SubAgentRunner(
                         val outcome = if (call.name == SEND_TOOL_NAME) {
                             handleSend(call, agent, conversationId, turnId, turnNo, mainOutbox, sentToUser)
                         } else {
+                            workCallRecords += SubRunToolCall(call.name, call.argsJson)
                             // Written lazily at the first work call, not
                             // before the loop, so a greeting sent in the
                             // same round stays before the cards. The round's
@@ -357,16 +375,16 @@ class SubAgentRunner(
             _activeSubs.update { it - conversationId }
             subJobs.update { it - conversationId }
         }
-        // End the run: brief message + meta record. On cancellation this
-        // must still land, so it runs NonCancellable; a write failure never
-        // hides the original outcome (finishOrFallback always returns a
-        // result).
+        // End the run: brief message + stored record + meta record. On
+        // cancellation this must still land, so it runs NonCancellable; a
+        // write failure never hides the original outcome (finishOrFallback
+        // always returns a result).
         val result = if (cancelled) {
             withContext(NonCancellable) {
-                finishOrFallback(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser)
+                finishOrFallback(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, allReasoning.toString(), workCallRecords)
             }
         } else {
-            finishOrFallback(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser)
+            finishOrFallback(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, allReasoning.toString(), workCallRecords)
         }
         _sessionSubTokens.update { it + (conversationId to (it[conversationId] ?: 0) + result.tokensUsed) }
         // Handoff step (16/11/2026): the run returned — the next step is
@@ -470,6 +488,7 @@ class SubAgentRunner(
      */
     private suspend fun finishOrFallback(
         agent: SubAgentConfig,
+        title: String,
         brief: String,
         conversationId: String,
         turnId: String,
@@ -483,9 +502,11 @@ class SubAgentRunner(
         toolCalls: List<String>,
         mainOutbox: List<String>,
         sentToUser: List<String>,
+        reasoning: String,
+        workCallRecords: List<SubRunToolCall>,
     ): SubRunResult {
         return try {
-            finish(agent, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser)
+            finish(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, reasoning, workCallRecords)
         } catch (e: Exception) {
             SubRunResult(
                 agentId = agent.id, agentName = agent.name,
@@ -496,6 +517,8 @@ class SubAgentRunner(
                 status = status, rounds = rounds, tokensUsed = tokensUsed,
                 toolCalls = toolCalls.toList(), startedAt = startedAt,
                 finishedAt = System.currentTimeMillis(), error = error,
+                title = title, turnNo = turnNo,
+                receipt = buildSubRunReceipt(agent.name, agent.id, title, turnNo, status),
             )
         }
     }
@@ -504,11 +527,13 @@ class SubAgentRunner(
      * End a run: the brief for the user (the last message the sub sent with
      * send_message, or a fallback from its final answer when it never sent
      * one — written as the sub's own message only then, since sent ones
-     * are already in the chat), the detailed report for Main (final answer
-     * plus any messages the sub sent to Main), and the meta record.
+     * are already in the chat), the detailed report (stored in the sub_runs
+     * table for Main to read back, plus the meta file record), and the
+     * short receipt Main keeps in its context.
      */
     private suspend fun finish(
         agent: SubAgentConfig,
+        title: String,
         brief: String,
         conversationId: String,
         turnId: String,
@@ -522,6 +547,8 @@ class SubAgentRunner(
         toolCalls: List<String>,
         mainOutbox: List<String>,
         sentToUser: List<String>,
+        reasoning: String,
+        workCallRecords: List<SubRunToolCall>,
     ): SubRunResult {
         val finishedAt = System.currentTimeMillis()
         val detail = finalText.trim()
@@ -556,6 +583,34 @@ class SubAgentRunner(
         if (!alreadySent && userBrief.isNotBlank()) {
             writeSubMessage(conversationId, turnId, turnNo, agent, userBrief)
         }
+        // The stored run record and the journal file are written together,
+        // so they cannot drift apart: the table is what reads use (the
+        // recall tool, the run detail screen), the file stays the
+        // user-readable journal. A failed table write must not hide the
+        // receipt — the file record still lands, and the receipt still
+        // returns (the run just cannot be read back from the table).
+        runCatching {
+            db.subRuns().insert(
+                SubRunEntity(
+                    conversationId = conversationId,
+                    turnNo = turnNo,
+                    agent = agent.id,
+                    agentName = agent.name,
+                    title = title,
+                    brief = brief,
+                    status = status.name.lowercase(),
+                    rounds = rounds,
+                    tokens = tokensUsed,
+                    toolCallsJson = encodeSubRunToolCalls(workCallRecords),
+                    messagesToMainJson = encodeSubRunStrings(mainOutbox),
+                    fullReport = detailed,
+                    reasoning = reasoning,
+                    error = error,
+                    startedAt = startedAt,
+                    finishedAt = finishedAt,
+                ),
+            )
+        }
         writeMetaRecord(
             conversationId, agent, brief, status, rounds, tokensUsed, toolCalls,
             startedAt, finishedAt, detail.take(500), error, sentToUser.size, mainOutbox,
@@ -564,6 +619,8 @@ class SubAgentRunner(
             agentId = agent.id, agentName = agent.name, brief = userBrief, detailed = detailed,
             status = status, rounds = rounds, tokensUsed = tokensUsed,
             toolCalls = toolCalls.toList(), startedAt = startedAt, finishedAt = finishedAt, error = error,
+            title = title, turnNo = turnNo,
+            receipt = buildSubRunReceipt(agent.name, agent.id, title, turnNo, status),
         )
     }
 
