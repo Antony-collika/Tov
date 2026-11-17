@@ -151,7 +151,11 @@ fun AppNav() {
                     onStorage = { nav.navigate("settings-storage") },
                     onAppearance = { nav.navigate("settings-appearance") },
                     onDiagnostics = { nav.navigate("diagnostics") },
+                    onBackup = { nav.navigate("backup") },
                 )
+            }
+            composable("backup") {
+                BackupScreen(onBack = { nav.popBackStack() })
             }
             composable("diagnostics") {
                 DiagnosticsScreen(

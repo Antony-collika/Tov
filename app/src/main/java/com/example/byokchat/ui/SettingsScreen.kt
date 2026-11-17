@@ -47,6 +47,7 @@ fun SettingsScreen(
     onStorage: () -> Unit,
     onAppearance: () -> Unit,
     onDiagnostics: () -> Unit,
+    onBackup: () -> Unit,
 ) {
     val context = LocalContext.current
     val container = context.container
@@ -92,8 +93,13 @@ fun SettingsScreen(
             )
             SettingsCard(
                 title = "Manage tools",
-                summary = "Turn tools on or off and choose how much control you keep. The name and description the AI sees are managed in the Tools card file.",
+                summary = "Turn tools on or off and choose how much control you keep. Edit the name and description the AI sees here.",
                 onClick = onTools,
+            )
+            SettingsCard(
+                title = "Backup",
+                summary = "Save your providers and keys, sub-agents, chats, notes and tool edits into one encrypted file — or restore one.",
+                onClick = onBackup,
             )
             SettingsCard(
                 title = "Diagnostics",
