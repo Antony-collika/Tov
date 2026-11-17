@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -279,19 +280,31 @@ class SubAgentRunner(
                 status = SubRunStatus.INTERRUPTED
                 error = "Stopped from the Members screen."
             } else {
-                // Stop pressed mid-run: the run is recorded as interrupted, then
-                // the cancellation propagates so Main's turn settles as
-                // interrupted.
+                // Stop pressed mid-run: the run is recorded as interrupted,
+                // then the cancellation propagates so Main's turn settles
+                // as interrupted. It was FAILED before, so a stop looked
+                // like a failure in the run record and the brief
+                // ("couldn't finish") instead of a stop (17/11/2026).
                 cancelled = true
-                status = SubRunStatus.FAILED
+                status = SubRunStatus.INTERRUPTED
                 error = "Interrupted by the user."
             }
         } catch (e: Exception) {
             // A provider/network error must not leave the sub stuck as
             // "Working" with no report: the run ends as failed, with the
-            // brief telling the user what happened.
-            status = SubRunStatus.FAILED
-            error = e.message ?: e.toString()
+            // brief telling the user what happened. But if the job is no
+            // longer active, the run was cancelled and the failure is not
+            // a CancellationException (e.g. a stream read that raced the
+            // Stop press): that is still an interruption, not a failure,
+            // so Main is told the user stopped it.
+            if (!currentCoroutineContext().isActive) {
+                cancelled = true
+                status = SubRunStatus.INTERRUPTED
+                error = "Interrupted by the user."
+            } else {
+                status = SubRunStatus.FAILED
+                error = e.message ?: e.toString()
+            }
         } finally {
             // A bare child Job blocks its parent's completion (16/11/2026):
             // the delegate tool runs under withContext (ToolRegistry), and

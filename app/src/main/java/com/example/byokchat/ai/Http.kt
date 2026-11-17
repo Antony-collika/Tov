@@ -85,7 +85,13 @@ fun OkHttpClient.sseFlow(
         if (currentCoroutineContext().isActive) {
             throw AiException(networkErrorMessage(e.message ?: e.javaClass.simpleName))
         } else {
-            throw e
+            // The read failed because the coroutine was cancelled (Stop
+            // press: OkHttp cancels the call, the read throws a raw
+            // IOException). Surface it as a cancellation, never as a
+            // network error, so a Stop is seen as a stop, not a failure —
+            // the sub run is recorded INTERRUPTED and Main is told
+            // "Interrupted by the user." (17/11/2026).
+            throw CancellationException("Cancelled")
         }
     } finally {
         handle?.dispose()
