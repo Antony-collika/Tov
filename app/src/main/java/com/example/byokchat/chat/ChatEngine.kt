@@ -263,8 +263,8 @@ class ChatEngine(
                 // lượt này (tên + mô tả hiệu dụng, theo thứ tự registry),
                 // để map tên gọi về uid và để tool không được chọn thì
                 // không chạy được (xem ToolRegistry.execute). Thẻ chưa có
-                // lựa chọn đã lưu thì mặc định chọn hết (tắt thẻ mới là
-                // không offer tool nào).
+                // lựa chọn đã lưu thì mặc định chọn hết (đã lưu rỗng thì
+                // không offer tool nào, như tắt thẻ — sửa 17/11/2026).
                 val selectedUids = if (repair == RepairMode.NO_TOOLS) emptyList()
                 else layout.toolsCard()?.takeIf { it.enabled }?.effectiveSelectedToolUids(tools.allUids()).orEmpty()
                 val defsForUids = tools.definitionsForUids(selectedUids)

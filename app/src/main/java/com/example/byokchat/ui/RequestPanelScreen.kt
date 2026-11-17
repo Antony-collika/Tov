@@ -393,10 +393,14 @@ private fun cardSummary(
     }
     CardKind.LAST_TURN -> "Your latest message and the tool round in progress. Always sent."
     // RCP (17/11/2026): thẻ Tools chỉ chọn trong app (selectedToolUids).
-    // Chưa có lựa chọn đã lưu thì mặc định chọn hết — panel hiện "All".
+    // Chưa có lựa chọn đã lưu (null) thì mặc định chọn hết — panel hiện
+    // "All"; đã lưu rỗng thì 0 tools — panel hiện "No tools" (sửa
+    // 17/11/2026: rỗng đã lưu khác với chưa lưu).
     CardKind.TOOLS -> when {
-        card.selectedToolUids.isEmpty() ->
+        card.selectedToolUids == null ->
             "All ${toolNames.size} tools — tap Edit to choose fewer."
+        card.selectedToolUids.isEmpty() ->
+            "No tools — nothing is offered to the model."
         else -> {
             val names = card.selectedToolUids.map { toolNames[it] ?: it }
             val noun = if (names.size == 1) "tool" else "tools"

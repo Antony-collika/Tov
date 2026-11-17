@@ -6,6 +6,7 @@ import com.example.byokchat.chat.SystemSource
 import kotlinx.serialization.json.buildJsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -226,13 +227,21 @@ class RequestLayoutTest {
     // ---------- RCP (17/11/2026): thẻ Tools chọn trong app, không parse file ----------
 
     @Test
-    fun emptyToolsSelectionDefaultsToAllTools() {
+    fun noSavedToolsSelectionDefaultsToAllTools() {
         // 17/11/2026 — bỏ hẳn file tools.md: thẻ chưa có lựa chọn nào lưu
-        // (mới, cũ, thêm lại) thì mặc định chọn hết; tắt thẻ mới là không
-        // offer tool nào.
+        // (null: mới, cũ, thêm lại) thì mặc định chọn hết.
         val all = listOf("time.now", "txt.read", "web.search")
         assertEquals(all, RequestLayout.defaultLayout("x").toolsCard()?.effectiveSelectedToolUids(all))
-        assertEquals(emptyList<String>(), RequestLayout.defaultLayout("x").toolsCard()?.selectedToolUids)
+        assertNull(RequestLayout.defaultLayout("x").toolsCard()?.selectedToolUids)
+    }
+
+    @Test
+    fun savedEmptyToolsSelectionMeansZeroTools() {
+        // Sửa 17/11/2026 (Duy: bỏ hết tick rồi Save = 0 tools, tương đương
+        // tắt thẻ): đã lưu rỗng khác với chưa lưu — rỗng đã lưu là 0 tools,
+        // không phải chọn hết.
+        val card = RequestCard(RequestLayout.TOOLS_ID, CardKind.TOOLS, selectedToolUids = emptyList())
+        assertEquals(emptyList<String>(), card.effectiveSelectedToolUids(listOf("time.now", "txt.read", "web.search")))
     }
 
     @Test
@@ -253,6 +262,33 @@ class RequestLayoutTest {
             json.encodeToString(RequestCard.serializer(), card),
         )
         assertEquals(listOf("time.now", "txt.read"), decoded.selectedToolUids)
+    }
+
+    @Test
+    fun savedEmptyToolsSelectionRoundTripsAsEmptyNotNull() {
+        // Rỗng đã lưu phải sống qua JSON thành rỗng (không hóa thành null):
+        // encode ghi "selectedToolUids": [] rõ ràng, decode giữ nguyên [].
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val card = RequestCard(RequestLayout.TOOLS_ID, CardKind.TOOLS, selectedToolUids = emptyList())
+        val decoded = json.decodeFromString(
+            RequestCard.serializer(),
+            json.encodeToString(RequestCard.serializer(), card),
+        )
+        assertEquals(emptyList<String>(), decoded.selectedToolUids)
+        assertEquals(emptyList<String>(), decoded.effectiveSelectedToolUids(listOf("time.now")))
+    }
+
+    @Test
+    fun toolsSelectionMissingFromJsonMeansNoSavedChoice() {
+        // JSON cũ không có khóa selectedToolUids thì decode thành null
+        // (chưa lưu) — mặc định chọn hết, không phải 0 tools.
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+        val decoded = json.decodeFromString(
+            RequestCard.serializer(),
+            """{"id":"tools","kind":"TOOLS"}""",
+        )
+        assertNull(decoded.selectedToolUids)
+        assertEquals(listOf("time.now"), decoded.effectiveSelectedToolUids(listOf("time.now")))
     }
 
     @Test

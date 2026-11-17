@@ -141,19 +141,41 @@ class RequestLayoutStore(context: Context, private val settings: SettingsReposit
     private fun load(): RequestLayout {
         val raw = plain.getString("layout_json", null)
             ?: return RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value)
-        val decoded = runCatching { json.decodeFromString(RequestLayout.serializer(), raw) }
+        var decoded = runCatching { json.decodeFromString(RequestLayout.serializer(), raw) }
             .getOrDefault(RequestLayout.layoutFromSettings(settings.defaultSystemPrompt.value))
+        var changed = false
+        // 17/11/2026: thẻ Tools lưu rỗng từ trước bản sửa (lúc đó rỗng
+        // nghĩa là "chưa lưu" = chọn hết) không phải lựa chọn đã lưu —
+        // rỗng cũ nghĩa là chưa lưu, chuyển thành null để mặc định chọn
+        // hết. Chỉ làm MỘT LẦN (cờ tools_empty_migrated): sau bản sửa,
+        // rỗng đã lưu là lựa chọn thật (0 tools) và phải giữ nguyên.
+        if (!plain.getBoolean("tools_empty_migrated", false)) {
+            val migrated = decoded.copy(
+                cards = decoded.cards.map {
+                    if (it.kind == CardKind.TOOLS && it.selectedToolUids != null && it.selectedToolUids.isEmpty()) {
+                        it.copy(selectedToolUids = null)
+                    } else it
+                }
+            )
+            if (migrated != decoded) {
+                decoded = migrated
+                changed = true
+            }
+            plain.edit().putBoolean("tools_empty_migrated", true).apply()
+        }
         // Đợt 6: bố cục lưu từ trước chưa có thẻ Metadata — thêm vào đầu,
         // giữ nguyên mọi thẻ còn lại (kể cả thứ tự user đã sắp), rồi lưu lại
         // để lần sau không migrate nữa. Bố cục nào Metadata đã có nhưng
         // không ở đầu thì KHÔNG tự sửa: validate() báo lỗi và chat dùng mặc
         // định như các lỗi bố cục khác.
         if (decoded.cards.none { it.kind == CardKind.METADATA }) {
-            val migrated = decoded.copy(
+            decoded = decoded.copy(
                 cards = listOf(RequestCard(RequestLayout.METADATA_ID, CardKind.METADATA)) + decoded.cards
             )
-            plain.edit().putString("layout_json", json.encodeToString(RequestLayout.serializer(), migrated)).apply()
-            return migrated
+            changed = true
+        }
+        if (changed) {
+            plain.edit().putString("layout_json", json.encodeToString(RequestLayout.serializer(), decoded)).apply()
         }
         return decoded
     }

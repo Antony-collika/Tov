@@ -54,22 +54,23 @@ data class RequestCard(
      * Thẻ Tools (RCP, 17/11/2026): UID các tool đã chọn trong app. Chỉ
      * tool trong danh sách này mới được offer cho model, theo nhóm + thứ
      * tự registry mặc định (không theo thứ tự user tích — thứ tự tính lúc
-     * gửi, xem definitionsForUids). Rỗng = chưa có lựa chọn nào lưu — coi
-     * như chọn hết (xem [effectiveSelectedToolUids]); muốn không offer
-     * tool nào thì tắt thẻ, không phải bỏ hết tick.
+     * gửi, xem definitionsForUids). Null = chưa có lựa chọn nào lưu — coi
+     * như chọn hết (xem [effectiveSelectedToolUids]); danh sách rỗng = đã
+     * lưu lựa chọn rỗng (bỏ hết tick rồi Save) — 0 tools, tương đương tắt
+     * thẻ. Hai trường hợp này khác nhau, đừng gộp (sửa 17/11/2026).
      */
-    val selectedToolUids: List<String> = emptyList(),
+    val selectedToolUids: List<String>? = null,
 ) {
     /**
      * UID thật sự được offer cho model (17/11/2026 — bỏ hẳn file
-     * tools.md ngoài): đã lưu lựa chọn thì dùng danh sách đó; chưa có
-     * lựa chọn nào lưu (thẻ mới, thẻ cũ từ trước khi có lựa chọn, thẻ
-     * thêm lại) thì mặc định chọn hết — [allUids] theo thứ tự registry.
-     * Người dùng chỉ bỏ tick những cái không muốn; tắt thẻ thì không
-     * offer tool nào.
+     * tools.md ngoài): chưa có lựa chọn nào lưu (null — thẻ mới, thẻ cũ
+     * từ trước khi có lựa chọn, thẻ thêm lại) thì mặc định chọn hết —
+     * [allUids] theo thứ tự registry; đã lưu lựa chọn (kể cả rỗng) thì
+     * dùng đúng danh sách đó — rỗng nghĩa là 0 tools. Người dùng chỉ bỏ
+     * tick những cái không muốn; tắt thẻ thì không offer tool nào.
      */
     fun effectiveSelectedToolUids(allUids: List<String>): List<String> =
-        if (selectedToolUids.isEmpty()) allUids else selectedToolUids
+        selectedToolUids ?: allUids
     /** Tên hiển thị trên Panel. Đợt 8: thẻ System cũng dùng label khi user đặt tên (màn sửa có ô Name); mặc định vẫn là "System". */
     fun displayName(): String = when (kind) {
         CardKind.METADATA -> "Metadata"

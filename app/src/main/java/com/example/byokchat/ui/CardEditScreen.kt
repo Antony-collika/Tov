@@ -86,8 +86,8 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
     // RCP (17/11/2026): thẻ Tools chọn trong app — UID các tool đã chọn
     // (thứ tự offer tính lúc gửi theo nhóm + registry, không phải thứ tự
     // tích). Thẻ chưa có lựa chọn đã lưu thì mặc định chọn hết (xem
-    // RequestCard.effectiveSelectedToolUids) — chỉ bỏ tick những cái
-    // không muốn; tắt thẻ thì không offer tool nào.
+    // RequestCard.effectiveSelectedToolUids); bỏ hết tick rồi Save thì
+    // lưu rỗng = 0 tools, khác với chưa lưu (sửa 17/11/2026).
     val allToolUids = remember { container.registry.all.map { it.uid } }
     val initialSelectedUids = remember(cardId) {
         if (card?.kind == CardKind.TOOLS) card.effectiveSelectedToolUids(allToolUids).toSet()
@@ -578,14 +578,13 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     // sách uid, KHÔNG còn file tools.md. Hai tầng tách riêng:
                     // tầng quyền ở Settings/Manage Tools, tầng chọn ở đây.
                     // Chưa có lựa chọn đã lưu thì mặc định chọn hết; bỏ hết
-                    // tick cũng coi như chọn hết — tắt thẻ mới là không
-                    // offer tool nào.
+                    // tick rồi Save thì không offer tool nào (như tắt thẻ).
                     Text(
                         "This card is not a message: it is the tool list sent with the request, " +
                             "so its position in the panel changes nothing. Every tool selected is " +
                             "offered to the model, in the app's group order. A card with no saved " +
                             "choice offers all tools — uncheck the ones you don't want. " +
-                            "Turn the card off to offer no tools at all.",
+                            "Uncheck all of them to offer no tools at all.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     val namesByUid = container.registry.all.associate { it.uid to it.defaultName }
