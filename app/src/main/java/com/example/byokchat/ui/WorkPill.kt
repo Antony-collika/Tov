@@ -107,20 +107,23 @@ internal fun WorkPill(
     val runningProgress = runningStep?.let { progressMap[it.call.id]?.label() }
 
     val (title, label, labelColor) = when (segmentStatus) {
-        StepStatus.WAITING -> "Chờ bạn duyệt…" to "Chờ duyệt…" to MaterialTheme.colorScheme.tertiary
+        StepStatus.WAITING -> Triple("Chờ bạn duyệt…", "Chờ duyệt…", MaterialTheme.colorScheme.tertiary)
         StepStatus.RUNNING -> {
             val summary = runningStep?.let { toolSummary(it.call.uid, displayName(it.call), it.call.argsJson) }.orEmpty()
-            "Đang gọi $summary…" to (runningProgress ?: "Đang chạy…") to MaterialTheme.colorScheme.onSurfaceVariant
+            Triple("Đang gọi $summary…", runningProgress ?: "Đang chạy…", MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        StepStatus.FAILED -> (
-            if (segment.hasTools) "Đã gọi ${segment.toolSteps.size} tool" else "Suy nghĩ"
-            ) to "Lỗi" to MaterialTheme.colorScheme.error
-        StepStatus.INTERRUPTED -> (
-            if (segment.hasTools) "Đã gọi ${segment.toolSteps.size} tool" else "Suy nghĩ"
-            ) to "Đã dừng" to MaterialTheme.colorScheme.onSurfaceVariant
-        StepStatus.DONE -> (
-            if (segment.hasTools) "Đã gọi ${segment.toolSteps.size} tool" else "Suy nghĩ"
-            ) to "Xong" to MaterialTheme.colorScheme.primary
+        StepStatus.FAILED -> Triple(
+            if (segment.hasTools) "Đã gọi ${segment.toolSteps.size} tool" else "Suy nghĩ",
+            "Lỗi", MaterialTheme.colorScheme.error,
+        )
+        StepStatus.INTERRUPTED -> Triple(
+            if (segment.hasTools) "Đã gọi ${segment.toolSteps.size} tool" else "Suy nghĩ",
+            "Đã dừng", MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        StepStatus.DONE -> Triple(
+            if (segment.hasTools) "Đã gọi ${segment.toolSteps.size} tool" else "Suy nghĩ",
+            "Xong", MaterialTheme.colorScheme.primary,
+        )
     }
 
     Surface(
