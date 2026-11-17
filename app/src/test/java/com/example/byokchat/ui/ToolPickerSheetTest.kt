@@ -52,7 +52,7 @@ class ToolPickerSheetTest {
     fun toggleGroupSelectsAllUnlessAllAreSelected() {
         val group = listOf("fs.list", "fs.tree")
         assertEquals(setOf("fs.list", "fs.tree"), toggleGroup(emptySet(), group))
-        assertEquals(setOf("fs.list", "fs.tree", "txt.read"), toggleGroup(setOf("fs.list"), group))
+        assertEquals(setOf("fs.list", "fs.tree", "txt.read"), toggleGroup(setOf("fs.list", "txt.read"), group))
         assertEquals(setOf("txt.read"), toggleGroup(setOf("fs.list", "fs.tree", "txt.read"), group))
         // A group toggle never touches tools outside the group.
         assertEquals(setOf("time.now"), toggleGroup(setOf("time.now"), group) - setOf("fs.list", "fs.tree"))
