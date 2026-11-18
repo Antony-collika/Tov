@@ -203,6 +203,17 @@ fun buildSubRunReceipt(agentName: String, agentId: String, title: String, turnNo
         "Task: \"$title\". Turn: $turnNo. " +
         "To read the full result, call get_subagent_result with agent \"$agentId\" and turn $turnNo."
 
+/**
+ * The receipt Main gets when a run STARTS (Phase 4 async): the run is
+ * still going, so there is no status yet — just the agent, the task
+ * title and the turn number, so Main can read the full result back with
+ * get_subagent_result once the sub-agent's message arrives.
+ */
+fun buildSubRunStartedReceipt(agentName: String, agentId: String, title: String, turnNo: Int): String =
+    "Sub-agent $agentName started: \"$title\". Turn: $turnNo. " +
+        "The run is still going — its result arrives as the sub-agent's own message in the chat. " +
+        "To read the full result, call get_subagent_result with agent \"$agentId\" and turn $turnNo."
+
 /** One line of sub_runs.meta.json (JSONL): one entry per sub run in a session. */
 @Serializable
 data class SubRunRecord(

@@ -3,21 +3,23 @@ package com.example.byokchat.tools
 import com.example.byokchat.chat.DiagnosticsLog
 import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.chat.SubAgentRunner
-import com.example.byokchat.chat.SubRunStatus
+import com.example.byokchat.chat.SubStopSource
+import com.example.byokchat.chat.buildSubRunStartedReceipt
 import com.example.byokchat.chat.decodeSubRunToolCalls
 import com.example.byokchat.data.SubRunEntity
 import kotlinx.serialization.json.JsonObject
 
 /**
- * Tool that lets Main delegate a task to a sub-agent (Phase 2: synchronous
- * — Main waits for the result). The sub runs inside this tool call: a
- * short receipt comes back as the tool's result (agent, task title, turn
- * number, status), and the full report is stored in the sub_runs table —
- * Main reads it back with get_subagent_result when it needs the details
- * (context manager, 17/11/2026). A brief report is shown to the user as
- * the sub-agent's own message (the sub sends it with its send_message
- * tool). Dismiss is implicit: when the tool returns, the run is over and
- * the sub leaves the member list (it stays in the team).
+ * Tool that lets Main delegate a task to a sub-agent (Phase 4: async —
+ * Main never waits for the result). The sub runs in the background: a
+ * short receipt comes back as this tool's result at once (agent, task
+ * title, turn number), and the full report is stored in the sub_runs
+ * table when the run finishes — Main reads it back with
+ * get_subagent_result when it needs the details (context manager,
+ * 17/11/2026). A brief report is shown to the user as the sub-agent's
+ * own message (the sub sends it with its send_message tool). Dismiss is
+ * implicit: when the run ends, the sub leaves the member list (it stays
+ * in the team).
  *
  * Phase 3: the agent list is built from the loaded team, never hardcoded.
  * The tool's description stays generic on purpose — tools.md checks it
@@ -42,10 +44,10 @@ object SubAgentTools {
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "delegate_to_subagent",
-            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs synchronously — you wait for it to finish. It returns a short receipt (agent, task title, turn number, status) as this tool's result; the full result is stored and can be read back with get_subagent_result. Give a one-line title for the task plus a clear brief with exactly what to find and what to include. The sub-agent greets the user itself when it starts. Do not delegate tasks the agent's tools cannot do.",
+            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs in the background — you do not wait for it. This tool returns a short receipt (agent, task title, turn number) right away; the sub-agent's result arrives later as its own message in the chat, and the full result is stored for get_subagent_result. Give a one-line title for the task plus a clear brief with exactly what to find and what to include. The sub-agent greets the user itself when it starts. An agent runs one task at a time — delegating to a busy agent is refused. Do not delegate tasks the agent's tools cannot do.",
             schema = delegateSchema(teamProvider()),
             schemaProvider = { delegateSchema(teamProvider()) },
-        ) { _, args ->
+        ) { env, args ->
             val runner = subRunner() ?: throw ToolException("Sub-agents are not available right now.")
             val team = teamProvider()
             val agentId = args.reqStr("agent")
@@ -62,17 +64,42 @@ object SubAgentTools {
             val brief = args.reqStr("brief")
             val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")
             val turnId = currentTurnId() ?: throw ToolException("No turn is running.")
+            // The turn number for the receipt: the turn's own rows carry
+            // it (the user row is written before the tool runs); the
+            // maxTurnNo fallback only covers a turn with no rows yet.
+            val turnNo = env.db.messages().getTurn(conversationId, turnId).firstOrNull()?.turnNo
+                ?: ((env.db.messages().maxTurnNo(conversationId) ?: 0) + 1)
             val handoffStartedAt = System.currentTimeMillis()
-            val result = runner.run(agent, title, brief, conversationId, turnId)
-            // Handoff step (16/11/2026): the run returned — the next step
-            // is the engine recording this result in the chat history.
-            // Logged before the FAILED check, so a failed run is traced too.
+            // Phase 4: the run starts in the background and this tool
+            // returns at once — Main never waits for the result.
+            runner.startRun(agent, title, brief, conversationId, turnId)
+                ?: throw ToolException("Sub-agent '${agent.name}' is already running a task. Wait for it to finish, or stop it first with stop_subagent.")
+            // Handoff step (16/11/2026): the run started — the next step
+            // is the engine recording this receipt in the chat history.
             diagnosticsLog?.handoff(
-                "delegate.handler.return", conversationId, turnId,
-                "agent=${agent.id} status=${result.status} took=${System.currentTimeMillis() - handoffStartedAt}ms",
+                "delegate.handler.start", conversationId, turnId,
+                "agent=${agent.id} took=${System.currentTimeMillis() - handoffStartedAt}ms",
             )
-            if (result.status == SubRunStatus.FAILED) throw ToolException(result.detailed)
-            result.receipt
+            buildSubRunStartedReceipt(agent.name, agent.id, title, turnNo)
+        },
+        Tool(
+            uid = "sub.stop",
+            group = ToolGroup.AGENTS,
+            risk = Risk.READ,
+            defaultName = "stop_subagent",
+            defaultDescription = "Stop a running sub-agent. The sub-agent stops immediately; this tool returns the report of the work it completed so far (its partial results).",
+            schema = stopSchema(teamProvider()),
+            schemaProvider = { stopSchema(teamProvider()) },
+        ) { _, args ->
+            val runner = subRunner() ?: throw ToolException("Sub-agents are not available right now.")
+            val agentId = args.reqStr("agent")
+            val agentName = teamProvider().firstOrNull { it.id == agentId }?.name ?: agentId
+            val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")
+            // One meaning only: stop immediately. To let a sub-agent
+            // finish, simply do not call this tool.
+            val result = runner.stopAgent(conversationId, agentId, SubStopSource.MAIN)
+                ?: throw ToolException("Sub-agent '$agentName' is not running right now.")
+            result.detailed
         },
         Tool(
             uid = "sub.recall",
@@ -153,6 +180,25 @@ object SubAgentTools {
         return schema {
             str("agent", agentDesc, required = true, enum = enabled.map { it.id }.takeIf { it.isNotEmpty() })
             int("turn", "The turn number from the delegate receipt, e.g. 3.", required = true)
+        }
+    }
+
+    /**
+     * Schema for the stop tool, built from the loaded team like the
+     * delegate's: the `agent` enum is the enabled agents' ids, as a hint
+     * for Main. The handler does NOT reject other ids — a run stays
+     * stoppable after its agent was turned off or removed. Pure, so it
+     * can be unit-tested without Android.
+     */
+    fun stopSchema(agents: List<SubAgentConfig>): JsonObject {
+        val enabled = agents.filter { it.enabled }
+        val agentDesc = if (enabled.isEmpty()) {
+            "Which running sub-agent to stop. No sub-agents are enabled right now."
+        } else {
+            "Which running sub-agent to stop. Available: " + enabled.joinToString("; ") { "${it.id} — ${it.description}" }
+        }
+        return schema {
+            str("agent", agentDesc, required = true, enum = enabled.map { it.id }.takeIf { it.isNotEmpty() })
         }
     }
 
