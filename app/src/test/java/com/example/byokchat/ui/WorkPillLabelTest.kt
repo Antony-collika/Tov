@@ -15,6 +15,16 @@ class WorkPillLabelTest {
     private fun tool(uid: String, args: String) = WorkStep.Tool(AiToolCall("c1", "some_name", args, uid = uid), null)
 
     @Test
+    fun pillElapsedShowsSecondsMinutesAndHours() {
+        assertEquals("0 giây", formatPillElapsed(0))
+        assertEquals("0 giây", formatPillElapsed(-1000))
+        assertEquals("5 giây", formatPillElapsed(5_000))
+        assertEquals("59 giây", formatPillElapsed(59_900))
+        assertEquals("1 phút 20 giây", formatPillElapsed(80_000))
+        assertEquals("1:05:30", formatPillElapsed(3_930_000))
+    }
+
+    @Test
     fun readFileNamesTheFile() {
         val step = tool("txt.read", """{"path":"note/cách tìm kiếm.md"}""")
         assertEquals("Đọc file note/cách tìm kiếm.md", stepPhrase(step))

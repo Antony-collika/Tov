@@ -118,6 +118,17 @@ class SubAgentsTest {
         assertTrue(!receipt.contains("Morning Coffee"))
     }
 
+    @Test fun startedReceiptHasNoStatusYetButTheRecallHint() {
+        val receipt = buildSubRunStartedReceipt("Monica", "monica", "Find cheerful morning music", 3)
+        assertTrue(receipt.contains("Monica"))
+        assertTrue(receipt.contains("\"Find cheerful morning music\""))
+        assertTrue(receipt.contains("Turn: 3"))
+        assertTrue(receipt.contains("started"))
+        assertTrue(!receipt.contains("finished"))
+        assertTrue(receipt.contains("get_subagent_result"))
+        assertTrue(receipt.contains("\"monica\""))
+    }
+
     @Test fun receiptNamesTheStatusForAnInterruptedRun() {
         val receipt = buildSubRunReceipt("Bob", "bob", "Find football news", 5, SubRunStatus.INTERRUPTED)
         assertTrue(receipt.contains("interrupted"))

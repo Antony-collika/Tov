@@ -164,6 +164,30 @@ class HistoryMdParserTest {
     }
 
     @Test
+    fun parsesLateSubMessageAnchorLine() {
+        val md = """
+            ---
+            session: 591577e3
+            title: "Hi"
+            created: 2026-11-10T17:26:12Z
+            ---
+
+            ## T1 user
+            {"id":"11111111-1111-1111-1111-111111111111"}
+            Find cheerful music.
+
+            ## T2 assistant (Monica)
+            {"id":"22222222-2222-2222-2222-222222222222"}
+            ↩ tìm nhạc xưa
+            Found three cheerful songs.
+        """.trimIndent()
+        val parsed = HistoryMdParser.parseMd(md)
+        assertEquals("tìm nhạc xưa", parsed.messages[1].taskTitle)
+        assertEquals("Found three cheerful songs.", parsed.messages[1].text)
+        assertEquals(null, parsed.messages[0].taskTitle)
+    }
+
+    @Test
     fun parsesAssistantHeadingWithSenderName() {
         val md = """
             ---

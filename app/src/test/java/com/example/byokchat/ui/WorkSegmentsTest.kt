@@ -53,6 +53,22 @@ class WorkSegmentsTest {
     private fun results(vararg toolRows: MessageEntity) =
         ToolResults(toolRows.filter { it.toolCallId != null }.associateBy { it.toolCallId!! })
 
+    @Test fun segmentCarriesStartAndLastActivity() {
+        val firstCalls = calls("web_search")
+        val secondCalls = calls("web_fetch")
+        val rows = listOf(
+            row("a1", "t1", 100, toolCallsJson = firstCalls),
+            row("r1", "t1", 150, role = "tool", toolCallId = "c0", text = "ok"),
+            row("a2", "t1", 200, toolCallsJson = secondCalls),
+        )
+        val segments = groupWorkSegments(rows, results(rows[1]))
+        assertEquals(1, segments.size)
+        // Start = the first call row; last activity = the latest row or
+        // result (the second call, still running, is the newest row).
+        assertEquals(100, segments[0].startedAt)
+        assertEquals(200, segments[0].lastActivityAt)
+    }
+
     @Test fun mainTwoToolRoundsFormOneSegmentInOrder() {
         val rows = listOf(
             row("u1", "t1", 1, role = "user", text = "mở nhạc gì vui vui đi"),

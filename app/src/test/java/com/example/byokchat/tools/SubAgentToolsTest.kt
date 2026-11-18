@@ -61,13 +61,13 @@ class SubAgentToolsTest {
     }
 
     @Test fun sendMessageIsNotInTheRegistry_MainCannotCallIt() {
-        // The registry is what Main sees: the delegate and the recall are
-        // the only sub tools in it. send_message is offered by the runner
-        // to subs only, so Main can never call it — but it is still shown
-        // in the agent settings as a built-in row, so the user knows the
-        // sub has it.
+        // The registry is what Main sees: the delegate, the stop and the
+        // recall are the only sub tools in it. send_message is offered by
+        // the runner to subs only, so Main can never call it — but it is
+        // still shown in the agent settings as a built-in row, so the user
+        // knows the sub has it.
         val tools = SubAgentTools.build({ null })
-        assertEquals(listOf("sub.delegate", "sub.recall"), tools.map { it.uid })
+        assertEquals(listOf("sub.delegate", "sub.stop", "sub.recall"), tools.map { it.uid })
         assertTrue(tools.none { it.uid == SubAgentRunner.SEND_TOOL_UID })
         assertTrue(tools.none { it.defaultName == SubAgentRunner.SEND_TOOL_NAME })
         assertEquals("sub.send", SubAgentRunner.SEND_TOOL_UID)
@@ -81,6 +81,18 @@ class SubAgentToolsTest {
         assertEquals("string", (title["type"] as JsonPrimitive).content)
         val required = (schema["required"] as JsonArray).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         assertEquals(listOf("agent", "title", "brief"), required)
+    }
+
+    @Test fun stopSchemaListsEnabledAgentsOnly() {
+        val review = testAgent(id = "review", name = "Review", description = "Reviews a draft.")
+        val schema = SubAgentTools.stopSchema(listOf(testAgent(), review, testAgent(id = "off", name = "Off").copy(enabled = false)))
+        assertEquals(listOf("research", "review"), enumOf(schema))
+    }
+
+    @Test fun stopSchemaHasRequiredAgentParamOnly() {
+        val schema = SubAgentTools.stopSchema(listOf(testAgent()))
+        val required = (schema["required"] as JsonArray).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        assertEquals(listOf("agent"), required)
     }
 
     @Test fun recallSchemaListsEnabledAgentsOnly() {

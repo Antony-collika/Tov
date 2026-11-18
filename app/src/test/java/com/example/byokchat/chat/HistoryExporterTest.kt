@@ -212,6 +212,26 @@ class HistoryExporterTest {
     }
 
     @Test
+    fun lateSubMessageRendersAnchorLineAndRoundTrips() {
+        installReviewAgent()
+        val conv = ConversationEntity("conv-abcdefgh", "Test chat", 1_700_000_000_000, 1_700_000_000_000)
+        val rows = listOf(
+            msg("m1", "t1", 1, "user", "Find cheerful music."),
+            msg("m2", "t1", 2, "assistant", "Hi, I'm Monica.", { copy(sender = "review") }),
+            msg("m3", "t2", 3, "assistant", "Found three cheerful songs.", { copy(sender = "review", taskTitle = "tìm nhạc xưa") }),
+        )
+        val out = HistoryExporter.renderHistory(conv, rows)
+
+        assertTrue(out.contains("## T2 assistant (Review)\n{\"id\":\"m3\"}\n↩ tìm nhạc xưa\nFound three cheerful songs."))
+        // Round-trip: the parser reads the anchor back, and the greeting
+        // (no anchor) keeps a null taskTitle.
+        val parsed = HistoryMdParser.parseMd(out)
+        assertEquals("tìm nhạc xưa", parsed.messages[2].taskTitle)
+        assertEquals("Found three cheerful songs.", parsed.messages[2].text)
+        assertEquals(null, parsed.messages[1].taskTitle)
+    }
+
+    @Test
     fun historyFileNames() {
         // Fork khi regenerate (15/11/2026): nhánh 0 = tên gốc, N ≥ 1 = _(NN).
         assertEquals("history.md", HistoryExporter.historyFileName(0))
