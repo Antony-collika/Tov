@@ -116,6 +116,12 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
     /** Truy cập được = có ít nhất 1 folder truy cập được (đọc + ghi). Công cụ tệp vẫn chạy với các folder còn tốt. */
     private fun computeAccess(): Boolean = accessDetails().any { it.ok }
 
+    /** Display name of a picked folder tree (the folder's own name, or the last path segment). Null when it cannot be read. */
+    fun treeFolderName(uri: Uri): String? =
+        runCatching { DocumentFile.fromTreeUri(ctx, uri)?.name }.getOrNull()?.takeIf { it.isNotBlank() }
+            ?: runCatching { DocumentsContract.getTreeDocumentId(uri).substringAfterLast(':').substringAfterLast('/') }
+                .getOrNull()?.takeIf { it.isNotBlank() }
+
     /**
      * Thêm một folder vào playground (handoff §4.2). Chạy chặn, gọi từ luồng nền (đọc tên folder).
      * Thứ tự bắt buộc: (1) tính tên folder mới; (2) so với tên các folder đã có
@@ -124,9 +130,7 @@ class WorkspaceFs(private val ctx: Context, private val settings: SettingsReposi
      * Chọn lại đúng URI cũ cũng là trùng tên — và tuyệt đối không nhả quyền của URI đó.
      */
     fun addFolder(uri: Uri): AddFolderResult {
-        val name = runCatching { DocumentFile.fromTreeUri(ctx, uri)?.name }.getOrNull()?.takeIf { it.isNotBlank() }
-            ?: runCatching { DocumentsContract.getTreeDocumentId(uri).substringAfterLast(':').substringAfterLast('/') }
-                .getOrNull()?.takeIf { it.isNotBlank() }
+        val name = treeFolderName(uri)
             ?: return AddFolderResult.Failed("Could not read the folder name.")
         if (playgroundNameConflict(rootNames(), name)) return AddFolderResult.NameConflict(name)
         return runCatching {

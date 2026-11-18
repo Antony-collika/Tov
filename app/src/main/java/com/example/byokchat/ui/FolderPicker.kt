@@ -53,3 +53,36 @@ fun rememberSessionFolderPicker(onPicked: () -> Unit = {}): () -> Unit {
     }
     return { launcher.launch(null) }
 }
+
+/**
+ * Folder picker for an agent's workspace folder (GĐ4 batch): picks a
+ * system folder, adds it to the AI playground, and returns its display
+ * name — the name is what the agent settings store. A folder that is
+ * already in the playground (same name) is fine: the agent just uses
+ * that folder. The result comes back on the main thread.
+ */
+@Composable
+fun rememberAgentFolderPicker(
+    onPicked: (String) -> Unit,
+    onPickError: (String) -> Unit = {},
+): () -> Unit {
+    val fs = LocalContext.current.container.fs
+    val scope = rememberCoroutineScope()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                val name = fs.treeFolderName(uri)
+                if (name == null) {
+                    withContext(Dispatchers.Main) { onPickError("Could not read the folder name.") }
+                    return@launch
+                }
+                when (val res = fs.addFolder(uri)) {
+                    is WorkspaceFs.AddFolderResult.Added -> withContext(Dispatchers.Main) { onPicked(name) }
+                    is WorkspaceFs.AddFolderResult.NameConflict -> withContext(Dispatchers.Main) { onPicked(res.name) }
+                    is WorkspaceFs.AddFolderResult.Failed -> withContext(Dispatchers.Main) { onPickError(res.message) }
+                }
+            }
+        }
+    }
+    return { launcher.launch(null) }
+}

@@ -90,6 +90,7 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
     var history by remember(key) { mutableStateOf(agent?.historyVisibility ?: HistoryVisibility.BRIEF_ONLY) }
     var enabled by remember(key) { mutableStateOf(agent?.enabled ?: true) }
     var error by remember { mutableStateOf<String?>(null) }
+    var folderError by remember { mutableStateOf<String?>(null) }
     var showDelete by remember { mutableStateOf(false) }
     var showModelPicker by remember { mutableStateOf(false) }
     var showToolPicker by remember { mutableStateOf(false) }
@@ -151,6 +152,14 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
         },
         onPickError = { configFileError = it },
         writeAccess = true,
+    )
+
+    // Pick the workspace folder with the system folder picker (GĐ4
+    // batch): no more typing a folder name by hand. Picking adds the
+    // folder to the AI playground; the agent just stores its name.
+    val pickAgentFolder = rememberAgentFolderPicker(
+        onPicked = { name -> workspaceFolder = name; folderError = null },
+        onPickError = { folderError = it },
     )
 
     // Display name of the linked file (a URI needs a provider lookup).
@@ -321,10 +330,26 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                 label = { Text("System prompt") },
                 modifier = Modifier.fillMaxWidth(), minLines = 4,
             )
-            OutlinedTextField(
-                value = workspaceFolder, onValueChange = { workspaceFolder = it },
-                label = { Text("Workspace folder") }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+            Text("Workspace folder", style = MaterialTheme.typography.labelLarge)
+            if (workspaceFolder.isBlank()) {
+                Text("(no folder chosen)", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text(workspaceFolder, style = MaterialTheme.typography.bodyMedium)
+            }
+            Text(
+                "The sub works inside this folder in the AI playground; picking a folder adds it to the playground.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Row {
+                TextButton(onClick = pickAgentFolder) { Text(if (workspaceFolder.isBlank()) "Choose folder" else "Change folder") }
+                if (workspaceFolder.isNotBlank()) {
+                    TextButton(onClick = { workspaceFolder = ""; folderError = null }) { Text("Clear folder") }
+                }
+            }
+            if (folderError != null) {
+                Text(folderError!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
             OutlinedTextField(
                 value = roundCapText, onValueChange = { roundCapText = it.filter { c -> c.isDigit() } },
                 label = { Text("Max rounds per run (${SubAgentConfig.MIN_ROUND_CAP}–${SubAgentConfig.MAX_ROUND_CAP})") },
