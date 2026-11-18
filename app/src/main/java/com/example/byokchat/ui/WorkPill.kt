@@ -1,12 +1,5 @@
 package com.example.byokchat.ui
 
-import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -18,12 +11,13 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -47,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -64,13 +59,17 @@ private enum class StepStatus { RUNNING, WAITING, DONE, FAILED, INTERRUPTED }
  * "Pill mockup v2"): a single-line pill at the top of its turn — the
  * agent's name and the latest step in short Vietnamese ("Đang đọc file
  * abc.md…", "Đã xem thời tiết Hà Nội hôm nay"), never file contents or
- * tool results. Tap it for the table of steps: a bottom sheet with two
- * detents (50% on open, 100% on drag up, still leaving the status bar),
- * and tap one step to slide right into its detail page. Reasoning
- * appears only when the provider really returned readable text — never
- * invented. The pill only renders when the turn has tool calls or
- * readable reasoning (a plain answer has no pill); the grouping lives in
- * WorkSegments and is unchanged.
+ * tool results. Tap it and the table of steps expands INLINE at the
+ * pill's position in the chat (18/11/2026, "Luồng pill nở tại chỗ"):
+ * max 8x the pill's height (~384dp, ~6-7 rows); shorter lists wrap to
+ * content, longer ones scroll inside the expanded table. Tap a step
+ * to open its detail in a bottom sheet that always opens at a fixed
+ * 50% height (even when the detail is short — the empty space below
+ * is accepted, like Claude) and can always be dragged to 100%.
+ * Reasoning appears only when the provider really returned readable
+ * text — never invented. The pill only renders when the turn has tool
+ * calls or readable reasoning (a plain answer has no pill); the
+ * grouping lives in WorkSegments and is unchanged.
  */
 @Composable
 internal fun WorkPill(
@@ -131,12 +130,14 @@ internal fun WorkPill(
         StepStatus.DONE -> latestStep?.let { pillLabel(it, running = false, done = true, agentNameFor) } ?: "Xong"
     }
 
-    var sheetOpen by remember(segment.anchorId) { mutableStateOf(false) }
+    var expanded by remember(segment.anchorId) { mutableStateOf(false) }
+    var detailStep by remember(segment.anchorId) { mutableStateOf<WorkStep?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shape = RoundedCornerShape(50),
-        modifier = Modifier.clickable { sheetOpen = true },
+        modifier = Modifier.clickable { expanded = !expanded },
     ) {
         Row(
             Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
@@ -168,132 +169,164 @@ internal fun WorkPill(
                 modifier = Modifier.widthIn(max = 220.dp),
             )
             Icon(
-                Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Xem các bước làm việc của $agentName",
+                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                contentDescription = if (expanded) "Thu lại các bước làm việc của $agentName" else "Xem các bước làm việc của $agentName",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(16.dp),
             )
         }
     }
-    if (sheetOpen) {
-        WorkSheet(
+    if (expanded) {
+        WorkStepTable(
             segment = segment,
             agentName = agentName,
             agentNameFor = agentNameFor,
-            displayName = ::displayName,
             statusOf = ::statusOf,
             progressLabel = { step -> progressMap[step.call.id]?.label() },
-            onDismiss = { sheetOpen = false },
+            onStepClick = { detailStep = it },
+        )
+    }
+    }
+    detailStep?.let { step ->
+        WorkDetailSheet(
+            step = step,
+            agentNameFor = agentNameFor,
+            displayName = ::displayName,
+            statusOf = ::statusOf,
+            onDismiss = { detailStep = null },
         )
     }
 }
 
 /**
- * Second level: the table of steps as a bottom sheet with two detents —
- * 50% on open, 100% on drag up (ModalBottomSheet's expanded state still
- * leaves the status bar visible); drag down returns to 50%, further
- * down dismisses; reopening starts at 50% again. Tap a step to slide
- * right into its detail page; back goes one level at a time.
+ * Second level: the table of steps, expanded INLINE at the pill's
+ * position in the chat (18/11/2026, "Luồng pill nở tại chỗ") — no
+ * bottom sheet for the list anymore. Max height is 8x the pill's
+ * height (~384dp, ~6-7 rows): shorter lists wrap to content, longer
+ * ones scroll inside the table, with a hint that more rows remain.
+ * Tap a step to open its detail in a bottom sheet.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun WorkSheet(
+private fun WorkStepTable(
     segment: WorkSegment,
     agentName: String,
     agentNameFor: (String) -> String,
-    displayName: (AiToolCall) -> String,
     statusOf: (WorkStep.Tool) -> StepStatus,
     progressLabel: (WorkStep.Tool) -> String?,
-    onDismiss: () -> Unit,
+    onStepClick: (WorkStep) -> Unit,
 ) {
-    // skipPartiallyExpanded = false: the sheet opens at the 50% detent
-    // and can be dragged up to full height.
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
-    var detailStep by remember(segment.anchorId) { mutableStateOf<WorkStep?>(null) }
-    BackHandler(enabled = detailStep != null) { detailStep = null }
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
-        AnimatedContent(
-            targetState = detailStep,
-            transitionSpec = {
-                slideInHorizontally { it } + fadeIn() togetherWith
-                    slideOutHorizontally { -it / 5 } + fadeOut()
-            },
-            label = "work-step-detail",
-        ) { step ->
-            if (step == null) {
-                Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text("$agentName — các bước đã làm", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Theo thứ tự thời gian · chạm vào một việc để xem chi tiết",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // Rows are ~48dp and the header ~50dp, so 384dp shows the header
+    // plus ~6-7 rows; more than 7 steps means the table scrolls.
+    val visibleRows = 7
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 384.dp).verticalScroll(rememberScrollState())) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("$agentName — các bước đã làm", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "Theo thứ tự thời gian · chạm vào một việc để xem chi tiết",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            segment.steps.forEach { s ->
+                when (s) {
+                    is WorkStep.Reasoning -> StepRow(
+                        icon = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) },
+                        title = stepPhrase(s, agentNameFor),
+                        meta = "Xong",
+                        metaColor = MaterialTheme.colorScheme.primary,
+                        onClick = { onStepClick(s) },
+                    )
+                    is WorkStep.Tool -> {
+                        val status = statusOf(s)
+                        val progress = progressLabel(s)
+                        val (meta, metaColor) = when (status) {
+                            StepStatus.WAITING -> "Chờ duyệt…" to MaterialTheme.colorScheme.tertiary
+                            StepStatus.RUNNING -> (progress ?: "Đang chạy…") to MaterialTheme.colorScheme.onSurfaceVariant
+                            StepStatus.FAILED -> "Lỗi" to MaterialTheme.colorScheme.error
+                            StepStatus.INTERRUPTED -> "Đã dừng" to MaterialTheme.colorScheme.onSurfaceVariant
+                            StepStatus.DONE -> "Xong" to MaterialTheme.colorScheme.primary
+                        }
+                        StepRow(
+                            icon = {
+                                when (status) {
+                                    StepStatus.RUNNING, StepStatus.WAITING ->
+                                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    StepStatus.FAILED ->
+                                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                    StepStatus.INTERRUPTED ->
+                                        Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                                    StepStatus.DONE ->
+                                        if (s.result == null) {
+                                            Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        } else {
+                                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                        }
+                                }
+                            },
+                            title = stepPhrase(s, agentNameFor),
+                            meta = meta,
+                            metaColor = metaColor,
+                            onClick = { onStepClick(s) },
                         )
                     }
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
-                        itemsIndexed(segment.steps, key = { index, s -> "$index:${stepKey(s)}" }) { _, s ->
-                            when (s) {
-                                is WorkStep.Reasoning -> StepRow(
-                                    icon = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) },
-                                    title = stepPhrase(s, agentNameFor),
-                                    meta = "Xong",
-                                    metaColor = MaterialTheme.colorScheme.primary,
-                                    onClick = { detailStep = s },
-                                )
-                                is WorkStep.Tool -> {
-                                    val status = statusOf(s)
-                                    val progress = progressLabel(s)
-                                    val (meta, metaColor) = when (status) {
-                                        StepStatus.WAITING -> "Chờ duyệt…" to MaterialTheme.colorScheme.tertiary
-                                        StepStatus.RUNNING -> (progress ?: "Đang chạy…") to MaterialTheme.colorScheme.onSurfaceVariant
-                                        StepStatus.FAILED -> "Lỗi" to MaterialTheme.colorScheme.error
-                                        StepStatus.INTERRUPTED -> "Đã dừng" to MaterialTheme.colorScheme.onSurfaceVariant
-                                        StepStatus.DONE -> "Xong" to MaterialTheme.colorScheme.primary
-                                    }
-                                    StepRow(
-                                        icon = {
-                                            when (status) {
-                                                StepStatus.RUNNING, StepStatus.WAITING ->
-                                                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                                StepStatus.FAILED ->
-                                                    Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                                                StepStatus.INTERRUPTED ->
-                                                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                                                StepStatus.DONE ->
-                                                    if (s.result == null) {
-                                                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                    } else {
-                                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                                    }
-                                            }
-                                        },
-                                        title = stepPhrase(s, agentNameFor),
-                                        meta = meta,
-                                        metaColor = metaColor,
-                                        onClick = { detailStep = s },
-                                    )
-                                }
-                            }
-                            HorizontalDivider()
-                        }
-                    }
                 }
-            } else {
-                WorkStepDetail(
-                    step = step,
-                    agentNameFor = agentNameFor,
-                    displayName = displayName,
-                    statusOf = statusOf,
-                    onBack = { detailStep = null },
+                HorizontalDivider()
+            }
+            if (segment.steps.size > visibleRows) {
+                Text(
+                    "Còn ${segment.steps.size - visibleRows} việc nữa — cuộn xuống để xem",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
             }
         }
     }
 }
 
-private fun stepKey(step: WorkStep): String = when (step) {
-    is WorkStep.Reasoning -> "reasoning:${step.text.hashCode()}"
-    is WorkStep.Tool -> "tool:${step.call.id}"
+/**
+ * Third level: one step's detail as a bottom sheet. The sheet always
+ * opens at a FIXED 50% height — its content is forced to at least
+ * half the screen, so even a short detail leaves empty space below
+ * instead of sticking to the bottom edge, and it can always be
+ * dragged up to 100% (Claude style, 18/11/2026). Drag down returns
+ * to 50%, further down dismisses.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WorkDetailSheet(
+    step: WorkStep,
+    agentNameFor: (String) -> String,
+    displayName: (AiToolCall) -> String,
+    statusOf: (WorkStep.Tool) -> StepStatus,
+    onDismiss: () -> Unit,
+) {
+    // skipPartiallyExpanded = false: the sheet opens at the 50% detent
+    // and can be dragged up to full height (the expanded state still
+    // leaves the status bar visible).
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(
+            Modifier.fillMaxWidth()
+                .heightIn(min = screenHeight * 0.5f)
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding(),
+        ) {
+            WorkStepDetail(
+                step = step,
+                agentNameFor = agentNameFor,
+                displayName = displayName,
+                statusOf = statusOf,
+                onBack = onDismiss,
+            )
+        }
+    }
 }
 
 @Composable
