@@ -52,6 +52,7 @@ import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.ProviderType
+import com.example.byokchat.tools.SubAgentTools
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -595,7 +596,10 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     TextButton(onClick = { showToolPicker = true }) { Text("Choose tools") }
                     if (showToolPicker) {
                         ToolPickerSheet(
-                            tools = container.registry.all,
+                            // Recruit is never Main's tool (GĐ4 batch, shape
+                            // B): it is not offered here — only a creator
+                            // agent picks it in its own settings.
+                            tools = container.registry.all.filter { it.uid != SubAgentTools.RECRUIT_TOOL_UID },
                             selected = selectedUids,
                             onSelectionChange = { selectedUids = it },
                             onDismiss = { showToolPicker = false },

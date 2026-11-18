@@ -42,20 +42,12 @@ import com.example.byokchat.chat.AgentConfigMd
 import com.example.byokchat.chat.HistoryVisibility
 import com.example.byokchat.chat.ParsedAgentConfig
 import com.example.byokchat.chat.SubAgentConfig
+import com.example.byokchat.chat.agentIdSlug
 import com.example.byokchat.container
+import com.example.byokchat.tools.SubAgentTools
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-/** Id for a new agent, from its name ("My Reviewer" -> "my-reviewer"). Pure. */
-fun agentIdSlug(name: String): String {
-    val slug = name.lowercase()
-        .map { if (it.isLetterOrDigit()) it else '-' }
-        .joinToString("")
-        .trim('-')
-        .replace(Regex("-+"), "-")
-    return slug.ifBlank { "agent" }
-}
 
 /**
  * Agent settings screen (Phase 3): the editor for one agent in agents.json.
@@ -231,11 +223,14 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
         }
     }
 
-    // Tools a sub may use: everything except the delegate tool (no sub-subs).
+    // Tools a sub may use: everything except the delegate, stop and
+    // recall tools (no sub-subs, no stopping or recalling from a sub).
+    // The recruit tool IS pickable: a creator agent (BotFather-style)
+    // holds it, so Main can delegate hiring to it.
     // The send_message tool is added to every run by the runner, so it is
     // not a checkbox below — it is shown as a built-in row instead (always
     // on, Main cannot use it).
-    val pickableTools = container.registry.all.filter { !it.uid.startsWith("sub.") }
+    val pickableTools = container.registry.all.filter { !it.uid.startsWith("sub.") || it.uid == SubAgentTools.RECRUIT_TOOL_UID }
     val modelLabel = modelChoice?.let { (pid, m) ->
         providers.firstOrNull { it.id == pid }?.let { "${it.name} — $m" } ?: "$pid — $m"
     } ?: "Follow Main's model"

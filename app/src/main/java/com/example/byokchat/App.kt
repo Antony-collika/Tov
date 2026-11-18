@@ -118,7 +118,7 @@ class AppContainer(val context: Context) {
     val agentStore = SubAgentStore(java.io.File(context.filesDir, SubAgentStore.FILE_NAME))
     /** Diagnostic log (16/11/2026): the delegate handoff steps, shown on the Diagnostics screen. Declared before the registry because the delegate tool logs through it. */
     val diagnosticsLog = DiagnosticsLog(java.io.File(context.filesDir, "diagnostics-log"))
-    val registry = ToolRegistry(env, toolPrefs, confirmations, { agentStore.team.value.agents }, diagnosticsLog)
+    val registry = ToolRegistry(env, toolPrefs, confirmations, { agentStore.team.value.agents }, diagnosticsLog, agentStore = { agentStore })
     /** Phát nhạc (kế hoạch media player): một controller duy nhất cho tool, service và UI. */
     val media = MediaPlayback(context)
     /** Những bài AI đã phát trong từng cuộc trò chuyện ("Recently played", menu ⋮): lưu vào DB (bảng recently_played) nên không mất khi app bị kill; store giữ một bản sao trong bộ nhớ để UI đọc ngay. */

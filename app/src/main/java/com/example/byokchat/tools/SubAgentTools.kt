@@ -3,7 +3,9 @@ package com.example.byokchat.tools
 import com.example.byokchat.chat.DiagnosticsLog
 import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.chat.SubAgentRunner
+import com.example.byokchat.chat.SubAgentStore
 import com.example.byokchat.chat.SubStopSource
+import com.example.byokchat.chat.agentIdSlug
 import com.example.byokchat.chat.buildSubRunStartedReceipt
 import com.example.byokchat.chat.decodeSubRunToolCalls
 import com.example.byokchat.data.SubRunEntity
@@ -33,11 +35,22 @@ import kotlinx.serialization.json.JsonObject
  * so delegating never writes a file or changes anything outside the chat.
  */
 object SubAgentTools {
+    /**
+     * Uid of the recruit tool (GĐ4 batch). Main must never hold it — only
+     * a creator agent (BotFather-style, created by the user) picks it, so
+     * Main delegates hiring instead of recruiting directly.
+     */
+    const val RECRUIT_TOOL_UID = "sub.recruit"
+
     fun build(
         subRunner: () -> SubAgentRunner?,
         teamProvider: () -> List<SubAgentConfig> = { emptyList() },
         /** Diagnostic log (16/11/2026): the handoff steps, for the Diagnostics screen. Null = no logging. */
         diagnosticsLog: DiagnosticsLog? = null,
+        /** The agent store (recruit_teammate writes agents.json). Null = no recruiting. */
+        agentStore: () -> SubAgentStore? = { null },
+        /** All tools in the registry, for resolving the recruit's tool names/uids. A lambda: it is evaluated only when the tool runs, after the registry finished building. */
+        allTools: () -> List<Tool> = { emptyList() },
     ): List<Tool> = listOf(
         Tool(
             uid = "sub.delegate",
@@ -119,6 +132,28 @@ object SubAgentTools {
                 agentId = agentId,
                 turnNo = turn,
             )
+        },
+        Tool(
+            uid = RECRUIT_TOOL_UID,
+            group = ToolGroup.AGENTS,
+            risk = Risk.WRITE,
+            defaultName = "recruit_teammate",
+            defaultDescription = "Create a new sub-agent in the team. Takes the agent's name, role, description, system prompt, workspace folder and tools; returns the new agent's id and name. The new agent can be edited in the agent settings.",
+            schema = recruitSchema(),
+        ) { _, args ->
+            val store = agentStore() ?: throw ToolException("The agent store is not available.")
+            val config = buildRecruitConfig(
+                name = args.reqStr("name"),
+                role = args.reqStr("role"),
+                description = args.reqStr("description"),
+                systemPrompt = args.reqStr("system_prompt"),
+                workspaceFolder = args.reqStr("workspace_folder"),
+                tools = args.strList("tools") ?: throw ToolException("Missing parameter 'tools'."),
+                availableTools = allTools().map { it.uid to it.defaultName },
+                existingIds = store.team.value.agents.map { it.id }.toSet(),
+            )
+            store.addAgent(config).onFailure { throw ToolException(it.message ?: "Could not save the new agent.") }
+            "Created sub-agent '${config.name}' (id: ${config.id}) with tools: ${config.toolUids.joinToString(", ")}. It can be edited in the agent settings."
         },
     )
 
@@ -221,6 +256,69 @@ object SubAgentTools {
             str("title", "One-line title for the task, e.g. \"Find cheerful morning music\". The title stays in your context as the receipt; the detailed instructions go in 'brief'.", required = true)
             str("brief", "The task: exactly what the sub-agent should do and what to include in its report.", required = true)
         }
+    }
+
+    /**
+     * Schema for the recruit tool: the five manual fields plus the tools.
+     * The ceilings, model, history and on/off keep their defaults (10
+     * rounds, 32000 tokens, follow Main's model, brief only, on) — the
+     * user edits them in the agent settings after. Pure.
+     */
+    fun recruitSchema(): JsonObject = schema {
+        str("name", "The new agent's display name, e.g. \"Music\".", required = true)
+        str("role", "Short role label, shown on the Members screen, e.g. \"Music agent\".", required = true)
+        str("description", "Short description — Main reads this when picking an agent, so say what it does and when to call it.", required = true)
+        str("system_prompt", "The system prompt the new agent reads — its job, its rules and how it reports back.", required = true)
+        str("workspace_folder", "The agent's workspace folder inside the AI playground, e.g. \"Music\".", required = true)
+        strArray("tools", "Tools the new agent may use: tool names (e.g. \"web_search\") or uids (e.g. \"web.search\"). At least one.", required = true)
+    }
+
+    /**
+     * Build the config for a recruited agent from the tool's parameters
+     * (recruit, GĐ4 batch). Pure — the Tool lambda only wires the store
+     * and the registry's tool list — so it can be unit-tested without
+     * Android. Throws a clear ToolException on bad input; never invents a
+     * value. The ceilings, model, history and on/off keep their defaults.
+     */
+    fun buildRecruitConfig(
+        name: String,
+        role: String,
+        description: String,
+        systemPrompt: String,
+        workspaceFolder: String,
+        tools: List<String>,
+        /** (uid, model-facing name) of every tool the recruiter may assign. */
+        availableTools: List<Pair<String, String>>,
+        /** Ids already in the team — a recruited id must not collide with one. */
+        existingIds: Set<String>,
+    ): SubAgentConfig {
+        if (name.isBlank()) throw ToolException("recruit_teammate: 'name' is empty.")
+        if (role.isBlank()) throw ToolException("recruit_teammate: 'role' is empty.")
+        if (description.isBlank()) throw ToolException("recruit_teammate: 'description' is empty.")
+        if (systemPrompt.isBlank()) throw ToolException("recruit_teammate: 'system_prompt' is empty.")
+        if (workspaceFolder.isBlank()) throw ToolException("recruit_teammate: 'workspace_folder' is empty.")
+        if (tools.isEmpty()) throw ToolException("recruit_teammate: 'tools' is empty — pick at least one tool for the new agent.")
+        val resolved = tools.map { entry ->
+            availableTools.firstOrNull { (uid, toolName) -> uid == entry || toolName == entry }?.first
+                ?: throw ToolException(
+                    "recruit_teammate: unknown tool '$entry'. Available: " +
+                        availableTools.joinToString(", ") { it.second }.ifBlank { "(none)" } + ".",
+                )
+        }
+        val id = agentIdSlug(name)
+        if (id in existingIds) throw ToolException("recruit_teammate: an agent with id '$id' already exists.")
+        val config = SubAgentConfig(
+            id = id,
+            name = name.trim(),
+            role = role.trim(),
+            description = description.trim(),
+            systemPrompt = systemPrompt.trim(),
+            toolUids = resolved.distinct(),
+            workspaceFolder = workspaceFolder.trim(),
+        )
+        val errors = config.validate()
+        if (errors.isNotEmpty()) throw ToolException("recruit_teammate: ${errors.joinToString(" ")}")
+        return config
     }
 }
 

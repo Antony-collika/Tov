@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import com.example.byokchat.chat.agentIdSlug
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

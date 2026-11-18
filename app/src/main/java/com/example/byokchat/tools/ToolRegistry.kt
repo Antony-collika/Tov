@@ -39,11 +39,13 @@ class ToolRegistry(
     private val teamProvider: () -> List<com.example.byokchat.chat.SubAgentConfig> = { emptyList() },
     /** Diagnostic log (16/11/2026): the handoff steps, for the Diagnostics screen. Null = no logging. */
     private val diagnosticsLog: com.example.byokchat.chat.DiagnosticsLog? = null,
+    /** The agent store (recruit_teammate writes agents.json). Null = no recruiting. */
+    private val agentStore: () -> com.example.byokchat.chat.SubAgentStore? = { null },
 ) : ToolRuntime {
     /** Set by AppContainer after the sub-agent runner is built (it needs this registry for the sub's own tools). */
     var subRunner: com.example.byokchat.chat.SubAgentRunner? = null
 
-    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build({ subRunner }, teamProvider, diagnosticsLog)
+    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build({ subRunner }, teamProvider, diagnosticsLog, agentStore = agentStore, allTools = { all })
     private val byUid = all.associateBy { it.uid }
 
     fun tool(uid: String): Tool? = byUid[uid]

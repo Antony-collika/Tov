@@ -20,6 +20,16 @@ import kotlinx.serialization.json.Json
 // source of truth, the Agent settings screen edits the file, and the
 // delegate tool is built from the loaded team. There is no seed.
 
+/** Id for a new agent, from its name ("My Reviewer" -> "my-reviewer"). Pure. Moved here from the Agent settings screen (GĐ4 batch, recruit): the recruit tool slugs ids too, and tools must not import UI. */
+fun agentIdSlug(name: String): String {
+    val slug = name.lowercase()
+        .map { if (it.isLetterOrDigit()) it else '-' }
+        .joinToString("")
+        .trim('-')
+        .replace(Regex("-+"), "-")
+    return slug.ifBlank { "agent" }
+}
+
 /** How much of Main's conversation a sub-agent may see. */
 enum class HistoryVisibility {
     /** Only the brief Main gives it — the default (least context, least noise). */
