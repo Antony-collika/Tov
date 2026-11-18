@@ -167,11 +167,11 @@ class SubAgentsTest {
         assertTrue(text.contains("Sub-agent results:"))
         assertTrue(text.contains("Monica"))
         assertTrue(text.contains("\"Find cheerful morning music\""))
-        assertTrue(text.contains("Turn: 3"))
+        assertTrue(text.contains("(turn 3)"))
         assertTrue(text.contains("done"))
         assertTrue(text.contains("Bob"))
         assertTrue(text.contains("\"Find football news\""))
-        assertTrue(text.contains("Turn: 5"))
+        assertTrue(text.contains("(turn 5)"))
         assertTrue(text.contains("failed"))
         // The provider error stays verbatim in the wake text.
         assertTrue(text.contains("429 Too Many Requests"))
