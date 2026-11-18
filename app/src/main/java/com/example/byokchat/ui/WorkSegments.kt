@@ -33,6 +33,10 @@ data class WorkSegment(
     val sender: String?,
     val anchorId: String,
     val steps: List<WorkStep>,
+    /** When the stretch's first row was written (the work started). */
+    val startedAt: Long,
+    /** When the stretch's last row (call or result) was written. */
+    val lastActivityAt: Long,
 ) {
     val toolSteps: List<WorkStep.Tool> get() = steps.filterIsInstance<WorkStep.Tool>()
     val hasTools: Boolean get() = toolSteps.isNotEmpty()
@@ -86,6 +90,11 @@ fun groupWorkSegments(messages: List<MessageEntity>, results: ToolResults): List
                 sender = rows.first().sender,
                 anchorId = rows.first().id,
                 steps = steps,
+                startedAt = rows.first().createdAt,
+                lastActivityAt = maxOf(
+                    rows.maxOf { it.createdAt },
+                    steps.filterIsInstance<WorkStep.Tool>().mapNotNull { it.result?.createdAt }.maxOrNull() ?: 0L,
+                ),
             )
         }
     }

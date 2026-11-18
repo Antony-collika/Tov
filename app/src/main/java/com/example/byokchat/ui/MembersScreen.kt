@@ -218,7 +218,7 @@ fun MembersScreen(
                                     ) { Text("View journal") }
                                 }
                                 if (member.status == MemberStatus.WORKING) {
-                                    TextButton(onClick = { vm.stopSub() }) { Text("Stop this sub") }
+                                    TextButton(onClick = { vm.stopSub(member.id) }) { Text("Stop this sub") }
                                 }
                             }
                         }

@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -239,6 +240,8 @@ internal fun AssistantMessage(
     actions: Actions,
     /** The work segment whose pill renders on this message (null except on the segment's first row). */
     workSegment: WorkSegment? = null,
+    /** Phase 4: the name of the agent this segment's sub is waiting for (null = not waiting) — the pill shows "đang chờ [tên] nói xong". */
+    pillWaitingForName: String? = null,
     /** Who sent this message (Main when null sender, else the sub-agent). Null = unknown, no name/avatar. */
     senderMember: GroupMember? = null,
     /** Tapping a sub-agent's avatar opens its Main↔sub conversation; null = avatar does nothing (Main). */
@@ -328,7 +331,7 @@ internal fun AssistantMessage(
             // appears when the provider really returned readable text
             // (never invented). A turn with no tools and no reasoning
             // has no segment, so no pill.
-            if (workSegment != null) WorkPill(workSegment, generating)
+            if (workSegment != null) WorkPill(workSegment, generating, waitingForName = pillWaitingForName)
             if (shownText.isNotEmpty()) {
                 // Telegram-style bubble (18/11/2026): every text bubble
                 // is a complete unit — the sender's name on the first
@@ -350,6 +353,19 @@ internal fun AssistantMessage(
                         modifier = Modifier.widthIn(max = 300.dp),
                     ) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            // Late result of a sub-agent (Phase 4): the
+                            // task title as an anchor, so a message that
+                            // arrives after the conversation moved on still
+                            // says which task it belongs to.
+                            if (!m.taskTitle.isNullOrBlank()) {
+                                Text(
+                                    "↩ ${m.taskTitle}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             if (senderMember != null) {
                                 Text(
                                     senderMember.name,

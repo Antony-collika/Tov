@@ -126,6 +126,8 @@ fun ChatScreen(
     val generating by vm.generating.collectAsState()
     // Group chat members (Phase 1): You + Main; Main's status follows `generating`.
     val members by vm.members.collectAsState()
+    /** Phase 4: a finished sub waiting for its turn to speak — agent id → the agent currently speaking. */
+    val waitingDeliveries by vm.waitingDeliveries.collectAsState()
     val mainMember = members.firstOrNull { it.id == "main" }
     // Đợt bỏ provider 12/11/2026: các lượt đã Retry một lần mà vẫn lỗi —
     // bong bóng lỗi của lượt đó thêm nút "Start a new chat".
@@ -527,15 +529,18 @@ fun ChatScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    // Typing indicator (Phase 2): while a sub-agent runs, the
-                    // indicator names the sub ("Research is typing…");
-                    // otherwise Main is working but has no visible message yet
-                    // — before the first streaming row appears, or between tool
-                    // rounds. The streaming row itself keeps its own spinner
-                    // (unchanged).
+                    // Typing indicator (Phase 2, async in Phase 4): a sub
+                    // works in the background while Main is idle, so the
+                    // indicator names the working sub even when Main is not
+                    // generating — the earliest-started working sub, which
+                    // is the one closest to speaking (completion order).
+                    // Otherwise Main is working but has no visible message
+                    // yet — before the first streaming row appears, or
+                    // between tool rounds. The streaming row itself keeps
+                    // its own spinner (unchanged).
                     val newest = visible.firstOrNull()
-                    val runningSub = members.firstOrNull { it.status == MemberStatus.WORKING && it.id != "main" }
-                    val showTyping = generating && (runningSub != null || (newest == null || newest.role != "assistant" || newest.status != "streaming"))
+                    val runningSub = members.filter { it.status == MemberStatus.WORKING && it.id != "main" }.minByOrNull { it.startedAt ?: Long.MAX_VALUE }
+                    val showTyping = runningSub != null || (generating && (newest == null || newest.role != "assistant" || newest.status != "streaming"))
                     val typingMember = runningSub ?: mainMember
                     if (showTyping && typingMember != null) {
                         item { TypingIndicatorRow(typingMember) }
@@ -580,6 +585,7 @@ fun ChatScreen(
                                 AssistantMessage(
                                 m, generating, hl, edit, actions,
                                 workSegment = segmentsByAnchor[m.id],
+                                pillWaitingForName = segmentsByAnchor[m.id]?.sender?.let { waitingDeliveries[it] },
                                 senderMember = senderMember,
                                 onAvatarClick = avatarClick,
                                 showActions = m.id == lastAnswerId,

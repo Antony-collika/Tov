@@ -247,7 +247,8 @@ class SubAgentRunner(
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
 
-    suspend fun run(
+    /** One run, in the background scope (started by [startRun]): the loop itself. Never called directly — the launcher owns it. */
+    private suspend fun run(
         agent: SubAgentConfig,
         title: String,
         brief: String,

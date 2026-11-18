@@ -34,6 +34,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.container
+import kotlinx.coroutines.delay
 
 /** Status of one work step, derived exactly like the old per-tool cards did. */
 private enum class StepStatus { RUNNING, WAITING, DONE, FAILED, INTERRUPTED }
@@ -75,6 +77,8 @@ private enum class StepStatus { RUNNING, WAITING, DONE, FAILED, INTERRUPTED }
 internal fun WorkPill(
     segment: WorkSegment,
     generating: Boolean,
+    /** Phase 4: a finished sub waiting for its turn to speak — the name of the agent currently speaking (null = not waiting). */
+    waitingForName: String? = null,
 ) {
     val container = LocalContext.current.container
     val pending by container.confirmations.pending.collectAsState()
@@ -116,18 +120,39 @@ internal fun WorkPill(
     // sheet; the pill itself stays one short sentence.
     val runningStep = segment.toolSteps.lastOrNull { statusOf(it) == StepStatus.RUNNING }
     val latestStep = segment.steps.lastOrNull()
-    val label = when (segmentStatus) {
-        StepStatus.WAITING -> "Chờ bạn duyệt…"
-        StepStatus.RUNNING -> when {
+    // A finished sub waiting for its turn to speak (Phase 4): its work is
+    // done, but its brief is queued behind the speaker — the pill says so
+    // instead of the done check, until the brief is delivered.
+    val label = when {
+        waitingForName != null -> "Đã xong · đang chờ $waitingForName nói xong"
+        segmentStatus == StepStatus.WAITING -> "Chờ bạn duyệt…"
+        segmentStatus == StepStatus.RUNNING -> when {
             runningStep != null -> pillLabel(runningStep, running = true, done = false, agentNameFor)
             latestStep is WorkStep.Reasoning -> "Đang suy nghĩ…"
             else -> "Đang chạy…"
         }
-        StepStatus.FAILED -> latestStep?.let {
+        segmentStatus == StepStatus.FAILED -> latestStep?.let {
             "Lỗi khi " + stepPhrase(it, agentNameFor).replaceFirstChar { c -> c.lowercaseChar() }
         } ?: "Lỗi"
-        StepStatus.INTERRUPTED -> "Đã dừng"
-        StepStatus.DONE -> latestStep?.let { pillLabel(it, running = false, done = true, agentNameFor) } ?: "Xong"
+        segmentStatus == StepStatus.INTERRUPTED -> "Đã dừng"
+        else -> latestStep?.let { pillLabel(it, running = false, done = true, agentNameFor) } ?: "Xong"
+    }
+    // Elapsed time (Phase 4): only elapsed time is real — a run's total
+    // time is unknowable, so there is no % progress bar. Ticks every
+    // second while the agent is live; frozen at the last activity once done.
+    val isLive = waitingForName != null || segmentStatus == StepStatus.RUNNING || segmentStatus == StepStatus.WAITING
+    var nowMs by remember(segment.anchorId) { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(isLive) {
+        while (isLive) {
+            delay(1000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val elapsedText = if (segment.startedAt > 0) {
+        val elapsedMs = if (isLive) nowMs - segment.startedAt else segment.lastActivityAt - segment.startedAt
+        " · " + formatPillElapsed(elapsedMs)
+    } else {
+        ""
     }
 
     var expanded by remember(segment.anchorId) { mutableStateOf(false) }
@@ -144,14 +169,14 @@ internal fun WorkPill(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            when (segmentStatus) {
-                StepStatus.RUNNING, StepStatus.WAITING ->
+            when {
+                waitingForName != null || segmentStatus == StepStatus.RUNNING || segmentStatus == StepStatus.WAITING ->
                     CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
-                StepStatus.FAILED ->
+                segmentStatus == StepStatus.FAILED ->
                     Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                StepStatus.INTERRUPTED ->
+                segmentStatus == StepStatus.INTERRUPTED ->
                     Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                StepStatus.DONE ->
+                else ->
                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
             }
             Text(
@@ -162,7 +187,7 @@ internal fun WorkPill(
                 maxLines = 1,
             )
             Text(
-                label,
+                label + elapsedText,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

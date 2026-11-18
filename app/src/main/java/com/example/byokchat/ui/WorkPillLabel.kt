@@ -159,6 +159,18 @@ internal fun pillLabel(step: WorkStep, running: Boolean, done: Boolean, agentNam
     }
 }
 
+/** Elapsed time for the pill ("5 giây", "1 phút 20 giây", "1:05:30"):
+ * only elapsed time, rounds vs cap and tokens vs budget are real — a
+ * run's total time is unknowable, so there is no % progress bar. */
+internal fun formatPillElapsed(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    return when {
+        s < 60 -> "$s giây"
+        s < 3600 -> "${s / 60} phút ${s % 60} giây"
+        else -> "${s / 3600}:${"%02d".format(s % 3600 / 60)}:${"%02d".format(s % 60)}"
+    }
+}
+
 /**
  * The concrete object a step acts on (file, folder, keyword, place,
  * agent), for the step detail page's "Nhắm vào" row. Null when the

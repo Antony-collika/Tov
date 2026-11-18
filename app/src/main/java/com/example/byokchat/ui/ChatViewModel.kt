@@ -108,19 +108,26 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     private val _peakMembers = MutableStateFlow(2)
     val peakMembers: StateFlow<Int> = _peakMembers.asStateFlow()
 
+    /** A finished sub waiting for its turn to speak (Phase 4): agent id → the agent currently speaking, in this conversation. */
+    val waitingDeliveries: StateFlow<Map<String, String>> =
+        app.subRunner.waitingDeliveries.map { it[conversationId] ?: emptyMap() }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
+
     /**
-     * Group chat members (Phase 3): every chat starts with 2 members — you
-     * and Main. Main shows as Working while the engine is answering this
-     * conversation, Available otherwise. The whole team is listed: a
-     * running sub shows Working with its live rounds/tokens, the rest show
-     * Available (a turned-off agent stays listed, marked, so its settings
-     * stay reachable).
+     * Group chat members (Phase 3, async in Phase 4): every chat starts
+     * with 2 members — you and Main. Main shows as Working while the
+     * engine is answering this conversation, Available otherwise. The
+     * whole team is listed: a running sub shows Working with its live
+     * rounds/tokens, a finished sub waiting for its turn to speak shows
+     * Waiting, the rest show Available (a turned-off agent stays listed,
+     * marked, so its settings stay reachable).
      */
     val members: StateFlow<List<GroupMember>> = combine(
         generating,
         app.subRunner.activeSubs,
+        app.subRunner.waitingDeliveries,
         app.agentStore.team,
-    ) { gen, subs, team ->
+    ) { gen, subs, waiting, team ->
         val base = listOf(
             GroupMember(id = "you", name = "You", role = "You", status = MemberStatus.IDLE, isUser = true),
             GroupMember(
@@ -129,10 +136,13 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 currentTask = if (gen) "Answering…" else null,
             ),
         )
-        val running = subs[conversationId]
+        val convSubs = subs.filterKeys { it.conversationId == conversationId }
+        val convWaiting = waiting[conversationId] ?: emptyMap()
         val agents = team.agents.map { agent ->
-            if (running?.agentId == agent.id) {
-                GroupMember(
+            val running = convSubs.entries.firstOrNull { it.key.agentId == agent.id }?.value
+            val waitingFor = convWaiting[agent.id]
+            when {
+                running != null -> GroupMember(
                     id = agent.id, name = agent.name, role = agent.role,
                     status = MemberStatus.WORKING,
                     currentTask = running.brief.take(120),
@@ -141,8 +151,13 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                     tokensUsed = running.tokensUsed, tokenBudget = running.tokenBudget,
                     enabled = agent.enabled, isAgent = true,
                 )
-            } else {
-                GroupMember(
+                waitingFor != null -> GroupMember(
+                    id = agent.id, name = agent.name, role = agent.role,
+                    status = MemberStatus.WAITING,
+                    currentTask = "Đã xong · đang chờ $waitingFor nói xong",
+                    enabled = agent.enabled, isAgent = true,
+                )
+                else -> GroupMember(
                     id = agent.id, name = agent.name, role = agent.role,
                     status = MemberStatus.IDLE, enabled = agent.enabled, isAgent = true,
                 )
@@ -172,15 +187,15 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             messageCount = msgs.size,
             subMessageCount = msgs.count { it.sender != null },
             finishedSubTokens = subTokens[conversationId] ?: 0,
-            liveSubTokens = subs[conversationId]?.tokensUsed ?: 0,
+            liveSubTokens = subs.filterKeys { it.conversationId == conversationId }.values.sumOf { it.tokensUsed },
             teamTokenBudget = team.enabledAgents().sumOf { it.tokenBudget },
             journalPath = HistoryExporter.subRunsPath(conv),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
-    /** Stop only this conversation's sub run (Members screen): Main keeps going. */
-    fun stopSub() {
-        app.subRunner.stopSub(conversationId)
+    /** Stop one sub in this conversation (Members screen, per agent): Main keeps going. */
+    fun stopSub(agentId: String) {
+        app.subRunner.stopSub(conversationId, agentId)
     }
 
     val providers: StateFlow<List<ProviderConfig>> = app.settings.providers
