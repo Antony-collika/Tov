@@ -206,6 +206,10 @@ object HistoryExporter {
                     val senderSuffix = m.sender?.let { " (${SubAgentStore.snapshot.displayName(it)})" }.orEmpty()
                     appendLine("## T$n assistant$senderSuffix")
                     appendLine("{\"id\":\"${m.id}\"}")
+                    // Late result of a sub-agent (Phase 4): the task title
+                    // as an anchor line, so reading the file says which
+                    // task this message belongs to.
+                    if (!m.taskTitle.isNullOrBlank()) appendLine("↩ ${m.taskTitle}")
                     if (m.text.isNotBlank()) appendLine(m.text)
                     if (m.error != null) appendLine("(error: ${m.error})")
                     appendLine()

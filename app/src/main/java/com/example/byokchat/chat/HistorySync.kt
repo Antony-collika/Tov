@@ -278,7 +278,8 @@ class HistorySync(
                         existing.thoughtSignature != newSig ||
                         existing.reasoningText != newRText || existing.reasoningReplay != newRReplay ||
                         existing.reasoningProvider != newRProvider ||
-                        existing.sender != senderId
+                        existing.sender != senderId ||
+                        existing.taskTitle != pm.taskTitle
                     ) {
                         db.messages().upsert(
                             existing.copy(
@@ -293,6 +294,7 @@ class HistorySync(
                                 reasoningReplay = newRReplay,
                                 reasoningProvider = newRProvider,
                                 sender = senderId,
+                                taskTitle = pm.taskTitle,
                                 edited = if (existing.text != pm.text) true else existing.edited,
                             ),
                         )
@@ -312,6 +314,7 @@ class HistorySync(
                             role = pm.role,
                             text = pm.text,
                             sender = senderId,
+                            taskTitle = pm.taskTitle,
                             imagePaths = if (pm.role == "user") encodeImages(entry.attachments) else "[]",
                             toolCallsJson = callsJson,
                             status = if (pm.error != null) "error" else "done",

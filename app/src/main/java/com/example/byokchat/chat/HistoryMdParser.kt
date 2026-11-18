@@ -21,6 +21,8 @@ data class ParsedHistoryMessage(
     val error: String? = null,
     /** Tên người gửi trong heading ("## Tn assistant (Research)") — null = Main. */
     val sender: String? = null,
+    /** Tiêu đề việc của một tin muộn của sub-agent (dòng "↩ <title>" ngay sau dòng id) — null = không có. */
+    val taskTitle: String? = null,
 )
 
 /** Toàn bộ history.md đã parse (chỉ định dạng sidecar; không dùng format legacy). */
@@ -45,6 +47,7 @@ object HistoryMdParser {
     private val headingRx = Regex("^## T(\\d+) (user|assistant)(?: \\(([^)]+)\\))?\\s*$")
     private val imagesLineRx = Regex("^\\(\\+ \\d+ image\\(s\\)\\)$")
     private val errorLineRx = Regex("^\\(error: (.*)\\)$")
+    private val anchorLineRx = Regex("^↩ (.+)$")
 
     /** Parse history.md sidecar. */
     fun parseMd(text: String): ParsedHistory {
@@ -95,11 +98,21 @@ object HistoryMdParser {
             if (!seenIds.add(id)) throw HistoryParseException("Message id \"$id\" appears twice (line $currentLine).")
             var body = currentText.joinToString("\n").trimEnd('\n')
             var error: String? = null
+            var taskTitle: String? = null
             val bodyLines = body.lines()
             if (role == "user" && bodyLines.lastOrNull()?.let { imagesLineRx.matches(it) } == true) {
                 body = bodyLines.dropLast(1).joinToString("\n").trimEnd('\n')
             }
             if (role == "assistant") {
+                // Dòng neo (Phase 4): "↩ <title>" là dòng đầu tiên, ngay
+                // sau dòng {"id":...} — lấy ra khỏi nội dung, giữ làm
+                // taskTitle (tin muộn của sub-agent thuộc về việc nào).
+                val first = body.lines().firstOrNull()
+                val anchor = first?.let { anchorLineRx.matchEntire(it) }
+                if (anchor != null) {
+                    taskTitle = anchor.groupValues[1].trim()
+                    body = body.lines().drop(1).joinToString("\n").trimEnd('\n')
+                }
                 val last = body.lines().lastOrNull()
                 val m = last?.let { errorLineRx.matchEntire(it) }
                 if (m != null) {
@@ -107,7 +120,7 @@ object HistoryMdParser {
                     body = body.lines().dropLast(1).joinToString("\n").trimEnd('\n')
                 }
             }
-            messages += ParsedHistoryMessage(id, currentTurn, role, body, error, sender = currentSender)
+            messages += ParsedHistoryMessage(id, currentTurn, role, body, error, sender = currentSender, taskTitle = taskTitle)
             currentRole = null
             currentSender = null
             currentId = null
