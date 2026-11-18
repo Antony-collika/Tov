@@ -2,8 +2,10 @@ package com.example.byokchat.chat
 
 import com.example.byokchat.ai.AiEvent
 import com.example.byokchat.ai.AiException
+import com.example.byokchat.ai.AiMessage
 import com.example.byokchat.ai.AiRequest
 import com.example.byokchat.ai.AiToolCall
+import com.example.byokchat.ai.Role
 import com.example.byokchat.ai.ProviderFactory
 import com.example.byokchat.ai.RequestLog
 import com.example.byokchat.data.AppDatabase
@@ -91,6 +93,11 @@ class ChatEngine(
     private val settleMutex = Mutex()
     private val _active = MutableStateFlow<Set<String>>(emptySet())
     val activeConversations: StateFlow<Set<String>> = _active.asStateFlow()
+    /** Finished sub runs waiting for a wake turn (wake, GĐ4 batch):
+     *  conversation → outcomes not yet handed to Main. */
+    private val pendingWake = ConcurrentHashMap<String, MutableList<SubRunResult>>()
+    /** Serializes the wake queue ([requestWake] and the turn-end wake in [start]'s finally). */
+    private val wakeMutex = Mutex()
 
     // Text of the answers being streamed right now (messageId -> text so far). Kept in memory so the UI can
     // update just the streaming message without waiting for the database; the DB is only written every
@@ -101,7 +108,7 @@ class ChatEngine(
     private val json = Json { ignoreUnknownKeys = true }
     private val callsSer = ListSerializer(AiToolCall.serializer())
 
-    fun start(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
+    fun start(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE, wakeText: String? = null, wakeTurnNo: Int? = null) {
         // A new turn supersedes the running one (send while generating):
         // cancel it, but do not wait — the old turn's network calls are
         // abandoned and its late results are discarded (see run()).
@@ -114,7 +121,7 @@ class ChatEngine(
         jobs[conversationId]?.cancel()
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
-                run(conversationId, turnId, repair)
+                run(conversationId, turnId, repair, wakeText, wakeTurnNo)
             } finally {
                 tools.endTurn(turnId)
                 turnIds.remove(conversationId, turnId)
@@ -125,6 +132,18 @@ class ChatEngine(
                 // cannot be named inside its own initializer.)
                 if (jobs.remove(conversationId, currentCoroutineContext()[Job])) {
                     _active.update { it - conversationId }
+                    // Wake Main (GĐ4 batch): subs that finished while this
+                    // turn ran left their outcomes in pendingWake — start a
+                    // wake turn with them now, so Main learns the results
+                    // without being asked. A stopped or superseded turn
+                    // never reaches here (the guard above), so a user Stop
+                    // never triggers a wake from this turn's end.
+                    withContext(NonCancellable) {
+                        wakeMutex.withLock {
+                            val take = pendingWake.remove(conversationId)?.takeIf { it.isNotEmpty() }
+                            if (take != null) startWake(conversationId, buildWakeText(take))
+                        }
+                    }
                 }
             }
         }
@@ -144,6 +163,42 @@ class ChatEngine(
 
     /** Whether this conversation has a live turn right now. Read directly from the flag — no flow lag, so the guards that decide "is a turn running" (send, regenerate, retry) never act on a stale value. */
     fun isActive(conversationId: String): Boolean = conversationId in _active.value
+
+    /**
+     * A sub run finished (SubAgentRunner.onWake, wake, GĐ4 batch): queue
+     * its outcome and wake Main when the chat is free. If Main is
+     * answering right now, the outcome waits — the turn's finally starts
+     * the wake turn when it ends. The take and the start happen under the
+     * same lock, so a turn ending at the same moment cannot take the same
+     * outcomes twice.
+     */
+    fun requestWake(conversationId: String, outcomes: List<SubRunResult>) {
+        scope.launch {
+            withContext(NonCancellable) {
+                wakeMutex.withLock {
+                    val list = pendingWake.getOrPut(conversationId) { mutableListOf() }
+                    list += outcomes
+                    if (!isActive(conversationId)) {
+                        val take = list.toList()
+                        pendingWake.remove(conversationId)
+                        startWake(conversationId, buildWakeText(take))
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Start a Main turn that reports finished sub runs (wake, GĐ4 batch):
+     * a fresh turn, numbered after the latest one. The wake text itself
+     * is in-memory only — the durable record stays in the sub_runs table,
+     * so Main can read it back with get_subagent_result.
+     */
+    private suspend fun startWake(conversationId: String, wakeText: String) {
+        val turnId = UUID.randomUUID().toString()
+        val turnNo = (db.messages().maxTurnNo(conversationId) ?: 0) + 1
+        start(conversationId, turnId, wakeText = wakeText, wakeTurnNo = turnNo)
+    }
 
     fun stop(conversationId: String) {
         // Courier model: stopping abandons the running turn at once. Drop
@@ -174,14 +229,16 @@ class ChatEngine(
         settleMutex.withLock { }
     }
 
-    private suspend fun run(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE) {
+    private suspend fun run(conversationId: String, turnId: String, repair: RepairMode = RepairMode.NONE, wakeText: String? = null, wakeTurnNo: Int? = null) {
         val msgDao = db.messages()
         // The job running this turn: late writes check it, so a turn that
         // was superseded by a send never writes into the new turn.
         val myJob = currentCoroutineContext()[Job]
         // Đợt 4: tin assistant và kết quả tool dùng chung số lượt của tin user
         // cùng lượt (đã gán khi gửi). Tạo lại (regenerate) giữ nguyên số cũ.
-        val turnNo = msgDao.getTurn(conversationId, turnId)
+        // A wake turn has no user message, so its number comes from the
+        // caller instead (wake, GĐ4 batch).
+        val turnNo = wakeTurnNo ?: msgDao.getTurn(conversationId, turnId)
             .firstOrNull { it.role == "user" }?.turnNo ?: 0
         // Đợt E: tạo thư mục session ở lần gửi đầu tiên (như FPilot) — nếu
         // chưa có file session thì xuất trạng thái hiện tại của Room.
@@ -297,7 +354,12 @@ class ChatEngine(
                 val request = AiRequest(
                     model,
                     assembled.system,
-                    assembled.sentMessages,
+                    // Wake turn (GĐ4 batch): the outcomes go inline as a
+                    // user message on the FIRST round only, so Main can
+                    // synthesize without recalling each run. Later rounds
+                    // already carry the wake turn's own reply, so the text
+                    // is not repeated.
+                    if (wakeText != null && rounds == 0) assembled.sentMessages + AiMessage(Role.USER, wakeText) else assembled.sentMessages,
                     assembled.toolDefs,
                     cfg.maxOutputTokens,
                     metadata,

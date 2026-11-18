@@ -150,6 +150,9 @@ class AppContainer(val context: Context) {
         // needs the registry for the sub's own tools, so it is set here,
         // after both are built).
         registry.subRunner = subRunner
+        // Wake Main (GĐ4 batch): finished subs report to the engine, which
+        // wakes Main with their outcomes when the chat is free.
+        subRunner.onWake = { conv, outcomes -> engine.requestWake(conv, outcomes) }
         // A tool is waiting for confirmation: if the app is not on screen, tell the user with a notification.
         confirmations.onRequested = { req -> if (!AppVisibility.inForeground) notifier.notifyConfirmation(req) }
         confirmations.onFinished = { req -> notifier.cancelConfirmation(req.id) }

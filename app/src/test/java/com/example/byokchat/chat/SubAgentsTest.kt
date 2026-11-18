@@ -135,6 +135,53 @@ class SubAgentsTest {
         assertTrue(receipt.contains("Turn: 5"))
     }
 
+    private fun wakeRun(
+        agentName: String = "Monica",
+        title: String = "Find cheerful morning music",
+        turnNo: Int = 3,
+        status: SubRunStatus = SubRunStatus.DONE,
+        detailed: String = "Sub-agent Monica finished: done.\nTask: Find cheerful morning music.",
+    ) = SubRunResult(
+        agentId = agentName.lowercase(), agentName = agentName, brief = "brief",
+        detailed = detailed, status = status, rounds = 3, tokensUsed = 100,
+        toolCalls = emptyList(), startedAt = 1000L, finishedAt = 2000L,
+        title = title, turnNo = turnNo, receipt = "",
+    )
+
+    @Test fun wakeErrorCoversFailuresAndCapsButNotInterrupt() {
+        assertTrue(isWakeError(SubRunStatus.FAILED))
+        assertTrue(isWakeError(SubRunStatus.ROUND_CAP))
+        assertTrue(isWakeError(SubRunStatus.BUDGET_EXCEEDED))
+        assertFalse(isWakeError(SubRunStatus.DONE))
+        assertFalse(isWakeError(SubRunStatus.INTERRUPTED))
+    }
+
+    @Test fun wakeTextListsEachRunWithItsReportVerbatim() {
+        val failedDetail = "Sub-agent Bob finished: failed.\nTask: Find football news.\nNote: 429 Too Many Requests"
+        val text = buildWakeText(
+            listOf(
+                wakeRun(),
+                wakeRun(agentName = "Bob", title = "Find football news", turnNo = 5, status = SubRunStatus.FAILED, detailed = failedDetail),
+            ),
+        )
+        assertTrue(text.contains("Sub-agent results:"))
+        assertTrue(text.contains("Monica"))
+        assertTrue(text.contains("\"Find cheerful morning music\""))
+        assertTrue(text.contains("Turn: 3"))
+        assertTrue(text.contains("done"))
+        assertTrue(text.contains("Bob"))
+        assertTrue(text.contains("\"Find football news\""))
+        assertTrue(text.contains("Turn: 5"))
+        assertTrue(text.contains("failed"))
+        // The provider error stays verbatim in the wake text.
+        assertTrue(text.contains("429 Too Many Requests"))
+        assertTrue(text.contains(failedDetail))
+    }
+
+    @Test fun wakeTextWithNoOutcomesIsJustTheHeader() {
+        assertEquals("Sub-agent results:", buildWakeText(emptyList()))
+    }
+
     @Test fun subRunToolCallsRoundTripThroughJson() {
         val calls = listOf(
             SubRunToolCall("youtube_search", "{\"q\": \"lofi morning\"}"),

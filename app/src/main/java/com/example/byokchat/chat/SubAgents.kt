@@ -214,6 +214,30 @@ fun buildSubRunStartedReceipt(agentName: String, agentId: String, title: String,
         "The run is still going — its result arrives as the sub-agent's own message in the chat. " +
         "To read the full result, call get_subagent_result with agent \"$agentId\" and turn $turnNo."
 
+/**
+ * Whether a finished run wakes Main at once (wake, GĐ4 batch): a run
+ * that failed, ran out of rounds or ran out of tokens is an error worth
+ * waking for. A run Main or the user stopped (INTERRUPTED) is not — it
+ * just counts as finished for the all-done wake.
+ */
+fun isWakeError(status: SubRunStatus): Boolean =
+    status == SubRunStatus.FAILED || status == SubRunStatus.ROUND_CAP || status == SubRunStatus.BUDGET_EXCEEDED
+
+/**
+ * The text Main reads in its wake turn (wake, GĐ4 batch): a short header
+ * plus one block per finished run — agent, task title, turn, status, and
+ * the run's detailed report verbatim (provider error text stays as the
+ * provider wrote it). Pure, so it can be unit-tested without Android.
+ */
+fun buildWakeText(outcomes: List<SubRunResult>): String = buildString {
+    appendLine("Sub-agent results:")
+    outcomes.forEach { r ->
+        appendLine()
+        appendLine("${r.agentName} — \"${r.title}\" (turn ${r.turnNo}): ${r.status.name.lowercase().replace('_', ' ')}")
+        appendLine(r.detailed)
+    }
+}.trim()
+
 /** One line of sub_runs.meta.json (JSONL): one entry per sub run in a session. */
 @Serializable
 data class SubRunRecord(

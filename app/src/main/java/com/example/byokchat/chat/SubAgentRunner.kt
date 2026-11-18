@@ -171,6 +171,20 @@ class SubAgentRunner(
     private val runTickets = ConcurrentHashMap<SubRunKey, Int>()
     /** Serializes the runner's own message writes per conversation (several subs can write at once now). */
     private val writeMutexes = ConcurrentHashMap<String, Mutex>()
+    /** Finished runs waiting for Main to be woken (wake, GĐ4 batch):
+     *  conversation → outcomes not yet handed to Main. */
+    private val pendingOutcomes = ConcurrentHashMap<String, MutableList<SubRunResult>>()
+    /** Serializes the wake bookkeeping in [noteRunFinished]. */
+    private val wakeMutex = Mutex()
+
+    /**
+     * Wakes Main with finished runs (wake, GĐ4 batch): called with the
+     * conversation id and the runs that finished — once when every run in
+     * the conversation is done, or at once when a run errors. Set by the
+     * app container; null = no waking (tests, or a runner without an
+     * engine).
+     */
+    var onWake: ((String, List<SubRunResult>) -> Unit)? = null
 
     /**
      * Start a sub run in the background and return its key at once
@@ -192,7 +206,11 @@ class SubAgentRunner(
         runTickets[key] = greetingTickets.getOrPut(conversationId) { AtomicInteger(0) }.getAndIncrement()
         val job = runScope.launch {
             try {
-                deferred.complete(run(agent, title, brief, conversationId, turnId))
+                val result = run(agent, title, brief, conversationId, turnId)
+                deferred.complete(result)
+                // Wake Main (GĐ4 batch): bookkeeping only — it must never
+                // break the run's completion, so a failure here is swallowed.
+                runCatching { noteRunFinished(key, result) }
             } catch (e: CancellationException) {
                 deferred.completeExceptionally(e)
             } catch (e: Exception) {
@@ -243,6 +261,30 @@ class SubAgentRunner(
         if (!runResults.containsKey(key)) return
         stopRequested[key] = SubStopSource.USER
         runSubJobs[key]?.cancel()
+    }
+
+    /**
+     * Wake bookkeeping (GĐ4 batch): after a run finishes, remember its
+     * outcome for the conversation. Main wakes once when every run in the
+     * conversation is done, or at once when a run errors — the [onWake]
+     * callback carries the outcomes. Called in the launcher after the run
+     * returns, wrapped in runCatching so bookkeeping can never break the
+     * run's completion.
+     */
+    private suspend fun noteRunFinished(key: SubRunKey, result: SubRunResult) {
+        val wake = wakeMutex.withLock {
+            val list = pendingOutcomes.getOrPut(key.conversationId) { mutableListOf() }
+            list += result
+            val error = isWakeError(result.status)
+            // runResults still holds this run (the launcher's finally
+            // removes it after this returns), so exclude this key when
+            // asking whether anything else is still running.
+            val othersRunning = runResults.keys.any { it.conversationId == key.conversationId && it != key }
+            if (error || !othersRunning) {
+                pendingOutcomes.remove(key.conversationId)?.toList()
+            } else null
+        }
+        if (wake != null) onWake?.invoke(key.conversationId, wake)
     }
 
     /** Serializes sub_runs.meta.json writes (one file per session; runs are sequential per conversation, but two conversations could write at once). */
