@@ -19,22 +19,37 @@ import com.example.byokchat.tools.WorkspaceFs
 import com.example.byokchat.tools.schema
 import com.example.byokchat.tools.str
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+
+/** Identifies one sub-agent run: an agent runs at most one task at a time in a conversation. */
+data class SubRunKey(val conversationId: String, val agentId: String)
+
+/** Who stopped a sub run: the user (Members screen) or Main (its stop tool). */
+enum class SubStopSource { USER, MAIN }
 
 /** A sub-agent run currently in progress in a conversation (members list + typing indicator read this). Live progress (rounds, tokens) is updated every round, so the Members screen can show whether a run is moving or stuck. */
 data class ActiveSubRun(
@@ -49,14 +64,18 @@ data class ActiveSubRun(
 )
 
 /**
- * Runs one sub-agent synchronously inside Main's turn (Phase 2): Main waits
- * for the result. The sub gets its own system prompt, its own tools and its
+ * Runs a sub-agent in the background (Phase 4, 18/11/2026): Main delegates
+ * and does NOT wait — the run lives in the runner's own scope, independent
+ * of Main's turn, so stopping Main never stops a sub and a stuck sub never
+ * freezes Main. The sub gets its own system prompt, its own tools and its
  * own folder; by default it never sees the rest of the conversation, only
  * the brief (an agent may opt into seeing Main's recent history).
  *
- * Flow: loop tool rounds (own round cap + token budget) → on finish,
- * return a short receipt to Main (the delegate tool's result) and store
- * the full report in the sub_runs table, so Main can read it back later
+ * Flow: [startRun] launches the run and returns at once; the run loops
+ * tool rounds (own round cap + token budget) → on finish, its brief is
+ * delivered as a NEW message at the bottom of the chat (never inserted
+ * into its old turn), carrying the task title as its anchor, and the full
+ * report is stored in the sub_runs table, so Main can read it back later
  * with get_subagent_result instead of carrying it in its context
  * (context manager, 17/11/2026). The sub greets the user itself, with
  * its send_message tool at the start of its first round (taught in its
@@ -65,18 +84,24 @@ data class ActiveSubRun(
  * implicit here: when the run ends, the sub leaves the member list (it
  * stays in the team and can be called again).
  *
- * Talking to the user (Phase 3): the sub's plain text goes only to Main.
- * A message reaches the group chat ONLY when the sub calls its
- * send_message tool (receiver "user" → written to the chat at once;
- * receiver "main" → collected and included in the detailed report). There
- * is no marker and no JSON in the sub's answer.
+ * One speaker streams at a time: a finished sub waits until no assistant
+ * row is streaming, then its brief is written — while it waits, its pill
+ * reads "đang chờ [tên agent] nói xong" ([waitingDeliveries]). Greetings
+ * keep delegation order (the first run to be delegated greets first);
+ * results go in completion order (whoever finishes first speaks first).
  *
- * Stop: the run shares Main's turn, so stopping Main stops the sub too
- * (the cancellation propagates through the provider stream); the run is
- * still recorded as interrupted. Stopping ONE sub from the Members screen
- * ([stopSub]) is different: it cancels only that sub's job, the run ends
- * as INTERRUPTED, and the result returns to Main through the delegate
- * tool — Main's turn continues.
+ * Talking to the user: the sub's plain text goes only to Main. A message
+ * reaches the group chat ONLY when the sub calls its send_message tool
+ * (receiver "user" → delivered to the chat; receiver "main" → collected
+ * and included in the detailed report). There is no marker and no JSON in
+ * the sub's answer.
+ *
+ * Stop: Main's Stop button stops Main only — it never reaches a sub.
+ * A sub stops three ways: Main calls its stop tool ([stopAgent] with
+ * [SubStopSource.MAIN]), the user taps per-sub Stop on the Members screen
+ * ([stopSub], [SubStopSource.USER]), or the run hits its round/token cap
+ * (forced stop). A stopped run is still recorded as INTERRUPTED, with the
+ * report it completed so far.
  */
 class SubAgentRunner(
     private val settings: SettingsRepository,
@@ -97,29 +122,123 @@ class SubAgentRunner(
         /** How much of Main's history a SEES_HISTORY sub may see. */
         const val HISTORY_MESSAGES = 20
         const val HISTORY_MESSAGE_CHARS = 1000
+
+        /** How long a finished sub waits for the chat to be free before its
+         *  brief is written anyway (a stuck speaker must not swallow the
+         *  result forever). */
+        const val DELIVERY_WAIT_TIMEOUT_MS = 5 * 60 * 1000L
+        /** How long a greeting waits for its turn in delegation order before it is written anyway. */
+        const val GREETING_ORDER_TIMEOUT_MS = 30_000L
+        /** How long Main's stop tool waits for the stopped run's report. */
+        const val STOP_AWAIT_TIMEOUT_MS = 120_000L
     }
 
-    private val _activeSubs = MutableStateFlow<Map<String, ActiveSubRun>>(emptyMap())
-    val activeSubs: StateFlow<Map<String, ActiveSubRun>> = _activeSubs.asStateFlow()
+    /** The runner's own scope: background sub runs live here, independent
+     *  of Main's turn job — so Main's Stop can never cascade to a sub. A
+     *  SupervisorJob, so one run failing never takes the others down. */
+    private val runScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _activeSubs = MutableStateFlow<Map<SubRunKey, ActiveSubRun>>(emptyMap())
+    val activeSubs: StateFlow<Map<SubRunKey, ActiveSubRun>> = _activeSubs.asStateFlow()
 
     /** Tokens used by finished sub runs, per conversation — the session token bar on the Members screen. */
     private val _sessionSubTokens = MutableStateFlow<Map<String, Int>>(emptyMap())
     val sessionSubTokens: StateFlow<Map<String, Int>> = _sessionSubTokens.asStateFlow()
 
-    /** One job per running sub (Phase 3): a child of Main's turn job, so
-     *  stopping Main still stops the sub, but [stopSub] can cancel the
-     *  sub alone. */
-    private val subJobs = MutableStateFlow<Map<String, Job>>(emptyMap())
+    /** A finished sub waiting for its turn to speak: conversation → agent
+     *  → the agent currently speaking (Main or another sub). The pill
+     *  shows "đang chờ [tên] nói xong" while this is set. */
+    private val _waitingDeliveries = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
+    val waitingDeliveries: StateFlow<Map<String, Map<String, String>>> = _waitingDeliveries.asStateFlow()
 
-    /** Conversations whose sub was stopped from the Members screen (set by [stopSub], read by the run's catch). */
-    private val stopRequested = ConcurrentHashMap.newKeySet<String>()
+    /** The launcher job of each running sub (a child of [runScope]). */
+    private val runJobs = ConcurrentHashMap<SubRunKey, Job>()
+    /** The sub's own job (a child of its launcher job): the cancellation
+     *  token [stopSub]/[stopAgent] cancel, so the run stops without
+     *  touching Main's turn, the launcher, or the other subs. */
+    private val runSubJobs = ConcurrentHashMap<SubRunKey, Job>()
+    /** The result each running sub will produce, so Main's stop tool can await it. */
+    private val runResults = ConcurrentHashMap<SubRunKey, CompletableDeferred<SubRunResult>>()
+    /** Runs a stop was asked for (set by [stopSub]/[stopAgent], read by the run's catch). */
+    private val stopRequested = ConcurrentHashMap<SubRunKey, SubStopSource>()
+    /** Greeting order: tickets handed out in delegation order, per conversation. */
+    private val greetingTickets = ConcurrentHashMap<String, AtomicInteger>()
+    private val greetingNext = ConcurrentHashMap<String, AtomicInteger>()
+    private val runTickets = ConcurrentHashMap<SubRunKey, Int>()
+    /** Serializes the runner's own message writes per conversation (several subs can write at once now). */
+    private val writeMutexes = ConcurrentHashMap<String, Mutex>()
 
-    /** Stop only this conversation's sub run. Main's turn keeps going: the
-     *  run ends as INTERRUPTED and its result returns through the delegate
-     *  tool. No-op when no sub is running here. */
-    fun stopSub(conversationId: String) {
-        stopRequested.add(conversationId)
-        subJobs.value[conversationId]?.cancel()
+    /**
+     * Start a sub run in the background and return its key at once
+     * (Phase 4): the caller does NOT wait for the result. Null when this
+     * agent is already running a task in this conversation — one task at
+     * a time per agent, the delegate tool reports that instead of
+     * queueing a second task behind the first.
+     */
+    fun startRun(
+        agent: SubAgentConfig,
+        title: String,
+        brief: String,
+        conversationId: String,
+        turnId: String,
+    ): SubRunKey? {
+        val key = SubRunKey(conversationId, agent.id)
+        val deferred = CompletableDeferred<SubRunResult>()
+        if (runResults.putIfAbsent(key, deferred) != null) return null
+        runTickets[key] = greetingTickets.getOrPut(conversationId) { AtomicInteger(0) }.getAndIncrement()
+        val job = runScope.launch {
+            try {
+                deferred.complete(run(agent, title, brief, conversationId, turnId))
+            } catch (e: CancellationException) {
+                deferred.completeExceptionally(e)
+            } catch (e: Exception) {
+                deferred.completeExceptionally(e)
+            } finally {
+                runJobs.remove(key)
+                runResults.remove(key)
+            }
+        }
+        runJobs[key] = job
+        return key
+    }
+
+    /**
+     * Stop one sub agent in this conversation ([source] says who asked:
+     * Main through its stop tool, or the user from the Members screen).
+     * Cancels only that sub's own job — Main's turn and the other subs
+     * keep going — and awaits the run's report (partial results). Null
+     * when the agent is not running, or when its report did not land in
+     * time (it still lands in the sub_runs table — read it back with
+     * get_subagent_result).
+     */
+    suspend fun stopAgent(conversationId: String, agentId: String, source: SubStopSource): SubRunResult? {
+        val key = SubRunKey(conversationId, agentId)
+        val deferred = runResults[key] ?: return null
+        if (runSubJobs.containsKey(key)) {
+            stopRequested[key] = source
+            runSubJobs[key]?.cancel()
+        }
+        return try {
+            withTimeoutOrNull(STOP_AWAIT_TIMEOUT_MS) { deferred.await() }
+        } catch (e: CancellationException) {
+            // The run died before recording a result (its deferred holds
+            // the cancellation) — or this caller was cancelled. Tell them
+            // apart: a cancelled caller must propagate, a dead run just has
+            // no report to return.
+            if (currentCoroutineContext().isActive) null else throw e
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Stop one sub from the Members screen. Main's turn keeps going: the
+     *  run ends as INTERRUPTED and its report is stored for Main to read
+     *  back. No-op when this agent is not running here. */
+    fun stopSub(conversationId: String, agentId: String) {
+        val key = SubRunKey(conversationId, agentId)
+        if (!runResults.containsKey(key)) return
+        stopRequested[key] = SubStopSource.USER
+        runSubJobs[key]?.cancel()
     }
 
     /** Serializes sub_runs.meta.json writes (one file per session; runs are sequential per conversation, but two conversations could write at once). */
@@ -155,20 +274,27 @@ class SubAgentRunner(
         // Work tool calls with their arguments, for the stored run record
         // (send_message is not work — its messages already are).
         val workCallRecords = mutableListOf<SubRunToolCall>()
+        val key = SubRunKey(conversationId, agent.id)
         var status = SubRunStatus.DONE
         var error: String? = null
         var finalText = ""
-        var cancelled = false
+        var stopSource: SubStopSource? = null
         _activeSubs.update {
-            it + (conversationId to ActiveSubRun(agent.id, agent.name, brief, startedAt, roundCap = agent.roundCap, tokenBudget = agent.tokenBudget))
+            it + (key to ActiveSubRun(agent.id, agent.name, brief, startedAt, roundCap = agent.roundCap, tokenBudget = agent.tokenBudget))
         }
-        // The sub's own job: a child of Main's turn job (stopping Main
-        // still stops the sub), cancelled alone by stopSub.
+        // The sub's own job: a child of the launcher job in the runner's
+        // own scope (Phase 4) — never of Main's turn job, so stopping Main
+        // can never reach it. It is the cancellation token stopSub /
+        // stopAgent cancel; the loop below stops on it, and finish() still
+        // runs in this coroutine's context, which a sub stop does not cancel.
         val subJob = Job(parent = currentCoroutineContext()[Job])
-        subJobs.update { it + (conversationId to subJob) }
-        // A stop pressed while no sub was running leaves a stale flag; a
-        // later Main stop must not be mistaken for a per-sub stop.
-        stopRequested.remove(conversationId)
+        runSubJobs[key] = subJob
+        // A stop asked in the tiny window between startRun and here (the
+        // flag is set, the job was not registered yet to cancel): stop the
+        // loop at its first step, and remember who asked, so the run is
+        // recorded with the right stop reason.
+        val pendingStop = stopRequested.remove(key)
+        if (pendingStop != null) subJob.cancel()
         try {
             // The sub greets the user itself, with its send_message tool
             // at the start of its first round (taught in its system
@@ -225,7 +351,7 @@ class SubAgentRunner(
                         subMessages.sumOf { TokenEstimator.message(it) } +
                         toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) }
                     tokensUsed = maxOf(tokensUsed, estimate)
-                    updateActive(conversationId, agent, rounds, tokensUsed)
+                    updateActive(key, agent, rounds, tokensUsed)
                     if (estimate > agent.tokenBudget) {
                         status = SubRunStatus.BUDGET_EXCEEDED
                         error = "Stopped: the estimated request ($estimate tokens) passed this agent's token budget (${agent.tokenBudget})."
@@ -269,7 +395,7 @@ class SubAgentRunner(
                         break
                     }
                     rounds++
-                    updateActive(conversationId, agent, rounds, tokensUsed)
+                    updateActive(key, agent, rounds, tokensUsed)
                     subMessages += AiMessage(
                         Role.ASSISTANT, text = text.toString(), toolCalls = calls,
                         thoughtSignature = textSignature,
@@ -291,7 +417,7 @@ class SubAgentRunner(
                     var toolRowWritten = false
                     for (call in calls) {
                         val outcome = if (call.name == SEND_TOOL_NAME) {
-                            handleSend(call, agent, conversationId, turnId, turnNo, mainOutbox, sentToUser)
+                            handleSend(call, agent, key, title, conversationId, turnId, turnNo, mainOutbox, sentToUser)
                         } else {
                             workCallRecords += SubRunToolCall(call.name, call.argsJson)
                             // Written lazily at the first work call, not
@@ -327,22 +453,19 @@ class SubAgentRunner(
                 }
             }
         } catch (e: CancellationException) {
-            if (stopRequested.remove(conversationId)) {
-                // Per-sub stop from the Members screen: the run ends as
-                // interrupted and its result returns to Main through the
-                // delegate tool — Main's turn continues (cancelled stays
-                // false, so nothing is rethrown below).
-                status = SubRunStatus.INTERRUPTED
-                error = "Stopped from the Members screen."
-            } else {
-                // Stop pressed mid-run: the run is recorded as interrupted,
-                // then the cancellation propagates so Main's turn settles
-                // as interrupted. It was FAILED before, so a stop looked
-                // like a failure in the run record and the brief
-                // ("couldn't finish") instead of a stop (17/11/2026).
-                cancelled = true
-                status = SubRunStatus.INTERRUPTED
-                error = "Interrupted by the user."
+            // A stop (Members screen or Main's stop tool) or the run's own
+            // scope going away: the run ends as interrupted and is still
+            // recorded, with the report it completed so far. A per-sub stop
+            // never rethrows — there is no Main turn waiting on this run
+            // any more (Phase 4), and the launcher completes the deferred
+            // with the result instead.
+            val source = stopRequested.remove(key) ?: pendingStop
+            stopSource = source
+            status = SubRunStatus.INTERRUPTED
+            error = when (source) {
+                SubStopSource.USER -> "Stopped from the Members screen."
+                SubStopSource.MAIN -> "Interrupted by Main."
+                null -> "Interrupted by the user."
             }
         } catch (e: Exception) {
             // A provider/network error must not leave the sub stuck as
@@ -353,7 +476,6 @@ class SubAgentRunner(
             // Stop press): that is still an interruption, not a failure,
             // so Main is told the user stopped it.
             if (!currentCoroutineContext().isActive) {
-                cancelled = true
                 status = SubRunStatus.INTERRUPTED
                 error = "Interrupted by the user."
             } else {
@@ -362,51 +484,53 @@ class SubAgentRunner(
             }
         } finally {
             // A bare child Job blocks its parent's completion (16/11/2026):
-            // the delegate tool runs under withContext (ToolRegistry), and
-            // subJob is a child of that Job. Without complete() here, the
-            // withContext Job can never complete after a normal run — the
-            // sub finished, but its Job stays ACTIVE forever, so execute()
-            // never returns, no tool result is recorded and no round-2
-            // request is ever sent (the turn stalls with "Main is typing"
-            // and idle dispatchers). complete() on an already-cancelled
-            // Job is a no-op, so the stopSub / Main-stop paths are
-            // unaffected.
+            // subJob is a child of the launcher job. Without complete()
+            // here, the launcher job can never complete after a normal run
+            // — the sub finished, but its Job stays ACTIVE forever.
+            // complete() on an already-cancelled Job is a no-op, so the
+            // stopSub / stopAgent paths are unaffected.
             subJob.complete()
-            _activeSubs.update { it - conversationId }
-            subJobs.update { it - conversationId }
+            _activeSubs.update { it - key }
+            runSubJobs.remove(key)
+            // A run that never greeted must not block the greetings behind
+            // it in delegation order.
+            advanceGreetingGate(key)
+            runTickets.remove(key)
+            stopRequested.remove(key)
         }
-        // End the run: brief message + stored record + meta record. On
-        // cancellation this must still land, so it runs NonCancellable; a
-        // write failure never hides the original outcome (finishOrFallback
-        // always returns a result).
-        val result = if (cancelled) {
-            withContext(NonCancellable) {
-                finishOrFallback(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, allReasoning.toString(), workCallRecords)
-            }
-        } else {
-            finishOrFallback(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, allReasoning.toString(), workCallRecords)
+        // End the run: brief message + stored record + meta record. This
+        // must still land when the run was cancelled, so it always runs
+        // NonCancellable (a stop cancels the sub's job, not this
+        // coroutine's context — but a scope cancellation would abort a
+        // plain finish); a write failure never hides the original outcome
+        // (finishOrFallback always returns a result).
+        val result = withContext(NonCancellable) {
+            finishOrFallback(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, allReasoning.toString(), workCallRecords, interruptedByMain = stopSource == SubStopSource.MAIN)
         }
+        // A stop asked while finish() was writing (the loop was already
+        // over, so it had nothing to stop) must not linger into the next
+        // run of this agent.
+        stopRequested.remove(key)
         _sessionSubTokens.update { it + (conversationId to (it[conversationId] ?: 0) + result.tokensUsed) }
         // Handoff step (16/11/2026): the run returned — the next step is
-        // the delegate tool returning, then the engine recording the result.
+        // the brief delivery (or the stop tool awaiting this result).
         diagnosticsLog?.handoff(
             "sub.run.return", conversationId, turnId,
             "agent=${agent.id} status=${result.status} rounds=${result.rounds} took=${System.currentTimeMillis() - startedAt}ms",
         )
-        if (cancelled) throw CancellationException("Interrupted by the user.")
         return result
     }
 
     /** Refresh the live run shown on the Members screen (rounds, tokens). No-op once the run is gone. */
     private fun updateActive(
-        conversationId: String,
+        key: SubRunKey,
         agent: SubAgentConfig,
         rounds: Int,
         tokensUsed: Int,
     ) {
         _activeSubs.update { current ->
-            val active = current[conversationId] ?: return@update current
-            current + (conversationId to active.copy(rounds = rounds, roundCap = agent.roundCap, tokensUsed = tokensUsed, tokenBudget = agent.tokenBudget))
+            val active = current[key] ?: return@update current
+            current + (key to active.copy(rounds = rounds, roundCap = agent.roundCap, tokensUsed = tokensUsed, tokenBudget = agent.tokenBudget))
         }
     }
 
@@ -428,6 +552,8 @@ class SubAgentRunner(
     private suspend fun handleSend(
         call: AiToolCall,
         agent: SubAgentConfig,
+        key: SubRunKey,
+        title: String,
         conversationId: String,
         turnId: String,
         turnNo: Int,
@@ -447,7 +573,19 @@ class SubAgentRunner(
         }
         return when (args.str("receiver")) {
             "user" -> {
-                writeSubMessage(conversationId, turnId, turnNo, agent, text)
+                // The first user message is the greeting: written at once
+                // under the delegation turn, in delegation order (no
+                // waiting state — it is the run's first appearance). Every
+                // later message is a late result: it waits for its turn to
+                // speak and is written as a new message at the bottom,
+                // carrying the task title as its anchor.
+                if (sentToUser.isEmpty()) {
+                    awaitGreetingTurn(key)
+                    writeSubMessage(conversationId, turnId, turnNo, agent, text)
+                    advanceGreetingGate(key)
+                } else {
+                    deliverSubMessage(key, agent, title, text)
+                }
                 sentToUser += text
                 ToolOutcome(SEND_TOOL_UID, "Sent to the user.", false)
             }
@@ -458,6 +596,86 @@ class SubAgentRunner(
             else -> ToolOutcome(SEND_TOOL_UID, "send_message: 'receiver' must be \"user\" or \"main\".", true)
         }
     }
+
+    /**
+     * Deliver one of the sub's messages to the user as a NEW message at the
+     * bottom of the chat (Phase 4): a fresh turn, so the conversation
+     * never scrolls back to the run's old turn, carrying the task title
+     * as its anchor ("↩ <title>"). One speaker streams at a time, so the
+     * message waits until no assistant row is streaming (the pill shows
+     * "đang chờ [tên] nói xong" while it waits); the wait is bounded and
+     * the message is written anyway rather than lost.
+     */
+    private suspend fun deliverSubMessage(key: SubRunKey, agent: SubAgentConfig, title: String, text: String) {
+        waitForFreeChannel(key)
+        // The write itself is NonCancellable: a stop that lands while the
+        // channel frees must not lose the brief.
+        withContext(NonCancellable) {
+            val msgDao = db.messages()
+            val turnNo = (msgDao.maxTurnNo(key.conversationId) ?: 0) + 1
+            writeSubMessage(key.conversationId, UUID.randomUUID().toString(), turnNo, agent, text, taskTitle = title)
+        }
+    }
+
+    /** Wait until no assistant row is streaming in this conversation (one speaker at a time), then clear the waiting state. Bounded: on timeout or cancellation the caller writes anyway. */
+    private suspend fun waitForFreeChannel(key: SubRunKey) {
+        try {
+            withTimeoutOrNull(DELIVERY_WAIT_TIMEOUT_MS) {
+                db.messages().observe(key.conversationId).first { rows ->
+                    val streaming = rows.firstOrNull { it.role == "assistant" && it.status == "streaming" }
+                    if (streaming != null) {
+                        val speaker = if (streaming.sender == null) "Main" else SubAgentStore.snapshot.displayName(streaming.sender)
+                        setWaiting(key, speaker)
+                        false
+                    } else {
+                        true
+                    }
+                }
+            }
+        } catch (e: CancellationException) {
+            // Cancelled while waiting (the run was stopped, or the app is
+            // going away): deliver anyway rather than lose the brief.
+        } finally {
+            clearWaiting(key)
+        }
+    }
+
+    private fun setWaiting(key: SubRunKey, speakerName: String) {
+        _waitingDeliveries.update { current ->
+            val conv = current[key.conversationId] ?: emptyMap()
+            if (conv[key.agentId] == speakerName) current
+            else current + (key.conversationId to (conv + (key.agentId to speakerName)))
+        }
+    }
+
+    private fun clearWaiting(key: SubRunKey) {
+        _waitingDeliveries.update { current ->
+            val conv = current[key.conversationId] ?: return@update current
+            val next = conv - key.agentId
+            if (next.isEmpty()) current - key.conversationId else current + (key.conversationId to next)
+        }
+    }
+
+    /** Greeting order (Phase 4): greetings go in delegation order. Each run takes a ticket when it starts; a greeting waits until its ticket is the next one to speak. A run that is skipped (its turn already passed, or it timed out) greets at once instead of waiting forever. */
+    private suspend fun awaitGreetingTurn(key: SubRunKey) {
+        val myTicket = runTickets[key] ?: return
+        val next = greetingNext.getOrPut(key.conversationId) { AtomicInteger(0) }
+        val deadline = System.currentTimeMillis() + GREETING_ORDER_TIMEOUT_MS
+        while (next.get() < myTicket) {
+            if (System.currentTimeMillis() >= deadline) return
+            delay(100)
+        }
+    }
+
+    /** Let the next greeting in delegation order speak. Idempotent: a run that already greeted, or never greeted, advances past its own ticket at most once. */
+    private fun advanceGreetingGate(key: SubRunKey) {
+        val myTicket = runTickets[key] ?: return
+        greetingNext.getOrPut(key.conversationId) { AtomicInteger(0) }.getAndUpdate { current -> maxOf(current, myTicket + 1) }
+    }
+
+    /** The mutex serializing this runner's own message writes in one conversation. */
+    private fun writeMutex(conversationId: String): Mutex =
+        writeMutexes.getOrPut(conversationId) { Mutex() }
 
     /**
      * Main's recent conversation history for a SEES_HISTORY sub: the last
@@ -504,9 +722,10 @@ class SubAgentRunner(
         sentToUser: List<String>,
         reasoning: String,
         workCallRecords: List<SubRunToolCall>,
+        interruptedByMain: Boolean = false,
     ): SubRunResult {
         return try {
-            finish(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, reasoning, workCallRecords)
+            finish(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, reasoning, workCallRecords, interruptedByMain)
         } catch (e: Exception) {
             SubRunResult(
                 agentId = agent.id, agentName = agent.name,
@@ -549,9 +768,20 @@ class SubAgentRunner(
         sentToUser: List<String>,
         reasoning: String,
         workCallRecords: List<SubRunToolCall>,
+        interruptedByMain: Boolean = false,
     ): SubRunResult {
         val finishedAt = System.currentTimeMillis()
         val detail = finalText.trim()
+        // A run Main stopped is shown in the Main↔sub conversation as
+        // "saying" its completed results + "Interrupted by Main" — the app
+        // records the stop, the sub does not report it. The marker goes in
+        // the report body (the header is stripped there), so it reads as
+        // the sub's last words.
+        val reportDetail = when {
+            !interruptedByMain -> detail
+            detail.isBlank() -> "Interrupted by Main."
+            else -> "$detail\n\nInterrupted by Main."
+        }
         val alreadySent = sentToUser.isNotEmpty()
         val userBrief = if (alreadySent) {
             sentToUser.last()
@@ -578,10 +808,12 @@ class SubAgentRunner(
                 mainOutbox.forEach { appendLine("- $it") }
             }
             appendLine()
-            append(detail.ifBlank { "(no report text)" })
+            append(reportDetail.ifBlank { "(no report text)" })
         }.trim()
         if (!alreadySent && userBrief.isNotBlank()) {
-            writeSubMessage(conversationId, turnId, turnNo, agent, userBrief)
+            // The brief arrives as a new message at the bottom (Phase 4),
+            // never inserted into the run's old turn.
+            deliverSubMessage(SubRunKey(conversationId, agent.id), agent, title, userBrief)
         }
         // The stored run record and the journal file are written together,
         // so they cannot drift apart: the table is what reads use (the
@@ -613,7 +845,7 @@ class SubAgentRunner(
         }
         writeMetaRecord(
             conversationId, agent, brief, status, rounds, tokensUsed, toolCalls,
-            startedAt, finishedAt, detail.take(500), error, sentToUser.size, mainOutbox,
+            startedAt, finishedAt, reportDetail.take(500), error, sentToUser.size, mainOutbox,
         )
         return SubRunResult(
             agentId = agent.id, agentName = agent.name, brief = userBrief, detailed = detailed,
@@ -643,23 +875,25 @@ class SubAgentRunner(
         workCalls: List<AiToolCall>,
         reasoningText: String? = null,
     ) {
-        val msgDao = db.messages()
-        msgDao.upsert(
-            MessageEntity(
-                id = UUID.randomUUID().toString(),
-                conversationId = conversationId,
-                turnId = turnId,
-                turnNo = turnNo,
-                seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
-                role = "assistant",
-                text = "",
-                sender = agent.id,
-                toolCallsJson = json.encodeToString(callsSer, workCalls),
-                reasoningText = reasoningText,
-                status = "done",
-                createdAt = System.currentTimeMillis(),
-            ),
-        )
+        writeMutex(conversationId).withLock {
+            val msgDao = db.messages()
+            msgDao.upsert(
+                MessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversationId,
+                    turnId = turnId,
+                    turnNo = turnNo,
+                    seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                    role = "assistant",
+                    text = "",
+                    sender = agent.id,
+                    toolCallsJson = json.encodeToString(callsSer, workCalls),
+                    reasoningText = reasoningText,
+                    status = "done",
+                    createdAt = System.currentTimeMillis(),
+                ),
+            )
+        }
     }
 
     /** One tool-result row per real tool call, keyed by the call id so the card above finds its result. Same shape as Main's tool rows. */
@@ -670,23 +904,25 @@ class SubAgentRunner(
         call: AiToolCall,
         outcome: ToolOutcome,
     ) {
-        val msgDao = db.messages()
-        msgDao.upsert(
-            MessageEntity(
-                id = UUID.randomUUID().toString(),
-                conversationId = conversationId,
-                turnId = turnId,
-                turnNo = turnNo,
-                seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
-                role = "tool",
-                text = outcome.resultText,
-                toolCallId = call.id,
-                toolUid = outcome.uid,
-                toolName = call.name,
-                toolIsError = outcome.isError,
-                createdAt = System.currentTimeMillis(),
-            ),
-        )
+        writeMutex(conversationId).withLock {
+            val msgDao = db.messages()
+            msgDao.upsert(
+                MessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversationId,
+                    turnId = turnId,
+                    turnNo = turnNo,
+                    seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                    role = "tool",
+                    text = outcome.resultText,
+                    toolCallId = call.id,
+                    toolUid = outcome.uid,
+                    toolName = call.name,
+                    toolIsError = outcome.isError,
+                    createdAt = System.currentTimeMillis(),
+                ),
+            )
+        }
     }
 
     /** One of the sub's own messages (a send_message to the user, or the brief report): an assistant message tagged with the agent id. */
@@ -696,22 +932,26 @@ class SubAgentRunner(
         turnNo: Int,
         agent: SubAgentConfig,
         text: String,
+        taskTitle: String? = null,
     ) {
-        val msgDao = db.messages()
-        msgDao.upsert(
-            MessageEntity(
-                id = UUID.randomUUID().toString(),
-                conversationId = conversationId,
-                turnId = turnId,
-                turnNo = turnNo,
-                seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
-                role = "assistant",
-                text = text,
-                sender = agent.id,
-                status = "done",
-                createdAt = System.currentTimeMillis(),
-            ),
-        )
+        writeMutex(conversationId).withLock {
+            val msgDao = db.messages()
+            msgDao.upsert(
+                MessageEntity(
+                    id = UUID.randomUUID().toString(),
+                    conversationId = conversationId,
+                    turnId = turnId,
+                    turnNo = turnNo,
+                    seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                    role = "assistant",
+                    text = text,
+                    sender = agent.id,
+                    taskTitle = taskTitle,
+                    status = "done",
+                    createdAt = System.currentTimeMillis(),
+                ),
+            )
+        }
     }
 
     /** Append one run to sub_runs.meta.json in the session folder (JSONL: header line, then one line per run). Best-effort: no session storage, lost access or a write error never breaks the chat. */

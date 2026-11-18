@@ -78,6 +78,14 @@ data class MessageEntity(
      * history.md writes it in the heading ("## Tn assistant (Research)").
      */
     val sender: String? = null,
+    /**
+     * The task title a sub-agent's late message belongs to (Phase 4):
+     * the one-line goal Main set when delegating (e.g. "tìm nhạc xưa").
+     * Shown as a small "↩ <title>" anchor above the message, so a result
+     * that arrives after the conversation moved on still says which task
+     * it is. Null for every other message — greetings carry no anchor.
+     */
+    val taskTitle: String? = null,
     val text: String,
     val edited: Boolean = false,
     val imagePaths: String = "[]",
