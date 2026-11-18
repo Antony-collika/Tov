@@ -289,11 +289,6 @@ fun ChatScreen(
     }
     // Turns that have an AI message on screen. A turn without one gets "Regenerate" in your message's menu.
     val turnsWithAnswer = remember(chrono) { chrono.filter { it.role == "assistant" }.map { it.turnId }.toSet() }
-    // Group chat (Phase 1 fix, speaker-change rule 17/11/2026): a "Main"
-    // header on the first Main message of a turn, and again when Main
-    // speaks after a sub-agent in the same turn (the handover); later
-    // messages in the same speaker stretch do not repeat it.
-    val firstAssistantOfTurn = remember(chrono) { mainHeaderMessageIds(chrono) }
     val toolResults = remember(messages) {
         ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
     }
@@ -564,39 +559,29 @@ fun ChatScreen(
                         } else {
                             val fix = if (m.status == "error") errorFix(m.error, provider, modelName) else null
                             val help = if (m.status == "error") apiErrorHelp(m.error, provider, metadata.keepThoughtSignature) else null
-                            // Group chat sender header (Phase 2): a message
-                            // sent by a sub-agent carries that agent's avatar
-                            // and name; Main's messages carry Main's header
-                            // at the start of a turn and again when Main
-                            // speaks after a sub-agent (handover).
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                val senderMember = m.sender?.let { subAgentMember(it) }
-                                val mm = mainMember
-                                val headerMember = senderMember ?: mm?.takeIf { m.id in firstAssistantOfTurn }
-                                if (headerMember != null) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        // A sub's avatar on the chat opens
-                                        // the Main↔sub conversation for the
-                                        // whole session (17/11/2026) — the
-                                        // same screen whichever turn's
-                                        // avatar was tapped. Main's avatar
-                                        // does nothing — everything of
-                                        // Main's is already on the chat. The
-                                        // Members screen's avatar still
-                                        // opens the agent's settings instead.
-                                        MemberAvatar(
-                                            headerMember,
-                                            size = 24.dp,
-                                            onClick = senderMember?.let { sm ->
-                                                { onOpenSubConversation(sm.id) }
-                                            },
-                                        )
-                                        Text(headerMember.name, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
+                            // Telegram style (18/11/2026): no header row
+                            // above the message — the name lives inside
+                            // the text bubble and the avatar at its left
+                            // corner (see AssistantMessage), and only
+                            // when there is a text bubble at all.
+                            run {
+                                val senderMember = m.sender?.let { subAgentMember(it) } ?: mainMember
+                                // A sub's avatar on the chat opens the
+                                // Main↔sub conversation for the whole
+                                // session (17/11/2026) — the same screen
+                                // whichever turn's avatar was tapped.
+                                // Main's avatar does nothing — everything
+                                // of Main's is already on the chat. The
+                                // Members screen's avatar still opens
+                                // the agent's settings instead.
+                                val avatarClick = m.sender?.let { sid ->
+                                    { onOpenSubConversation(sid) }
                                 }
                                 AssistantMessage(
                                 m, generating, hl, edit, actions,
                                 workSegment = segmentsByAnchor[m.id],
+                                senderMember = senderMember,
+                                onAvatarClick = avatarClick,
                                 showActions = m.id == lastAnswerId,
                                 errorFix = fix,
                                 onErrorFix = { f ->

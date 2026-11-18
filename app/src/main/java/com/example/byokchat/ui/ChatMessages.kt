@@ -59,6 +59,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -238,6 +239,10 @@ internal fun AssistantMessage(
     actions: Actions,
     /** The work segment whose pill renders on this message (null except on the segment's first row). */
     workSegment: WorkSegment? = null,
+    /** Who sent this message (Main when null sender, else the sub-agent). Null = unknown, no name/avatar. */
+    senderMember: GroupMember? = null,
+    /** Tapping a sub-agent's avatar opens its Main↔sub conversation; null = avatar does nothing (Main). */
+    onAvatarClick: (() -> Unit)? = null,
     showActions: Boolean,
     errorFix: ErrorFix?,
     onErrorFix: (ErrorFix) -> Unit,
@@ -325,20 +330,41 @@ internal fun AssistantMessage(
             // has no segment, so no pill.
             if (workSegment != null) WorkPill(workSegment, generating)
             if (shownText.isNotEmpty()) {
-                // Messenger-style bubble (17/11/2026, approved mockup):
-                // the AI's words sit in a grey bubble on the left, like
-                // the user's purple bubble on the right.
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
-                    modifier = Modifier.widthIn(max = 340.dp),
+                // Telegram-style bubble (18/11/2026): every text bubble
+                // is a complete unit — the sender's name on the first
+                // line INSIDE the bubble, coloured per agent, and the
+                // avatar at the bubble's LEFT corner. Name + avatar only
+                // appear with a text bubble: a pill-only or empty row
+                // (a tool call with no words) shows neither, so the
+                // avatar never appears on its own looking broken.
+                Row(
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    MarkdownBody(
-                        shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl,
-                        modifier = Modifier.padding(12.dp),
-                        onLongPress = openMenu, anchorCoordinates = boxCoords,
-                        streaming = m.status == "streaming",
-                    )
+                    if (senderMember != null) {
+                        MemberAvatar(senderMember, size = 28.dp, onClick = onAvatarClick)
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
+                        modifier = Modifier.widthIn(max = 300.dp),
+                    ) {
+                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (senderMember != null) {
+                                Text(
+                                    senderMember.name,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = memberColor(senderMember),
+                                )
+                            }
+                            MarkdownBody(
+                                shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl,
+                                onLongPress = openMenu, anchorCoordinates = boxCoords,
+                                streaming = m.status == "streaming",
+                            )
+                        }
+                    }
                 }
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)

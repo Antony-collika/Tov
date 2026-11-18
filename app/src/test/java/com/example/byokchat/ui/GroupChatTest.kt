@@ -3,7 +3,6 @@ package com.example.byokchat.ui
 import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.chat.SubAgentStore
 import com.example.byokchat.chat.SubAgentTeam
-import com.example.byokchat.data.MessageEntity
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -28,34 +27,6 @@ class GroupChatTest {
 
     private fun member(id: String, status: MemberStatus) =
         GroupMember(id = id, name = id, role = "agent", status = status)
-
-    private fun msg(id: String, turnId: String, seq: Long, role: String, sender: String? = null) =
-        MessageEntity(
-            id = id, conversationId = "c1", turnId = turnId,
-            seq = seq, role = role, text = "x", sender = sender, createdAt = seq,
-        )
-
-    @Test fun headerOnlyOnFirstAssistantMessageOfEachTurn() {
-        val rows = listOf(
-            msg("u1", "t1", 1, "user"),
-            msg("a1", "t1", 2, "assistant"),
-            msg("a2", "t1", 3, "assistant"),
-            msg("a3", "t1", 4, "assistant"),
-            msg("u2", "t2", 5, "user"),
-            msg("a4", "t2", 6, "assistant"),
-            msg("a5", "t2", 7, "assistant"),
-        )
-        assertEquals(setOf("a1", "a4"), mainHeaderMessageIds(rows))
-    }
-
-    @Test fun headerLogicIgnoresUserMessagesAndEmptyList() {
-        val rows = listOf(
-            msg("u1", "t1", 1, "user"),
-            msg("u2", "t2", 2, "user"),
-        )
-        assertEquals(emptySet<String>(), mainHeaderMessageIds(rows))
-        assertEquals(emptySet<String>(), mainHeaderMessageIds(emptyList()))
-    }
 
     @Test fun defaultMembersAreYouAndMain() {
         val members = defaultMembers()
@@ -128,40 +99,6 @@ class GroupChatTest {
         assertEquals("Waiting", memberStatusLabel(MemberStatus.WAITING))
         assertEquals("Done", memberStatusLabel(MemberStatus.DONE))
         assertEquals("Needs you", memberStatusLabel(MemberStatus.NEEDS_INPUT))
-    }
-
-    // Speaker-change rule (17/11/2026): this used to expect only "a1" —
-    // one header per turn. Now Main's answer after the sub's message is
-    // the handover point, so it carries the header again ("a2"); the sub's
-    // own message still never carries Main's header.
-    @Test fun headerReturnsAfterSubAgentMessage() {
-        val rows = listOf(
-            msg("u1", "t1", 1, "user"),
-            msg("a1", "t1", 2, "assistant"),
-            msg("s1", "t1", 3, "assistant", sender = "research"),
-            msg("a2", "t1", 4, "assistant"),
-        )
-        assertEquals(setOf("a1", "a2"), mainHeaderMessageIds(rows))
-    }
-
-    @Test fun headerDoesNotRepeatForMainMessagesAfterHandover() {
-        val rows = listOf(
-            msg("u1", "t1", 1, "user"),
-            msg("a1", "t1", 2, "assistant"),
-            msg("s1", "t1", 3, "assistant", sender = "research"),
-            msg("a2", "t1", 4, "assistant"),
-            msg("a3", "t1", 5, "assistant"),
-        )
-        assertEquals(setOf("a1", "a2"), mainHeaderMessageIds(rows))
-    }
-
-    @Test fun headerOnMainMessageAfterLeadingSubMessage() {
-        val rows = listOf(
-            msg("u1", "t1", 1, "user"),
-            msg("s1", "t1", 2, "assistant", sender = "research"),
-            msg("a1", "t1", 3, "assistant"),
-        )
-        assertEquals(setOf("a1"), mainHeaderMessageIds(rows))
     }
 
     @Test fun subAgentMemberUsesConfigForKnownAgent() {

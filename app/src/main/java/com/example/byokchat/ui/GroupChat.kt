@@ -27,7 +27,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.byokchat.data.MessageEntity
 
 // ============ Group chat members (Phase 3: full session info) ============
 //
@@ -132,42 +131,6 @@ fun defaultMembers(): List<GroupMember> = listOf(
     GroupMember(id = "main", name = "Main", role = "Main agent", status = MemberStatus.IDLE),
 )
 
-/**
- * Ids of the assistant messages that carry the "Main" sender header: the
- * first Main message of each turn, and a Main message right after a
- * sub-agent's message in the same turn — the handover point where Main
- * speaks again after a sub (17/11/2026: without this, Main's closing
- * answer after a sub's report looked like the sub talking on). Later Main
- * messages in the same speaker stretch do not repeat it, so consecutive
- * tool rounds of Main still share one header. Messages sent by a sub-agent
- * (sender != null) never carry Main's header; they carry their own.
- * [messages] is the chat list in chronological order (the same list the
- * screen renders, before it is reversed for display).
- */
-fun mainHeaderMessageIds(messages: List<MessageEntity>): Set<String> {
-    val ids = mutableSetOf<String>()
-    var currentTurn: String? = null
-    var seenMainInTurn = false
-    var prevAssistantSender: String? = null
-    var prevAssistantSeen = false
-    for (m in messages) {
-        if (m.role != "assistant") continue
-        if (m.turnId != currentTurn) {
-            currentTurn = m.turnId
-            seenMainInTurn = false
-            prevAssistantSender = null
-            prevAssistantSeen = false
-        }
-        if (m.sender == null) {
-            if (!seenMainInTurn || (prevAssistantSeen && prevAssistantSender != null)) ids += m.id
-            seenMainInTurn = true
-        }
-        prevAssistantSender = m.sender
-        prevAssistantSeen = true
-    }
-    return ids
-}
-
 /** Display member for a sub-agent message (sender is the agent id stored in Room). Unknown senders fall back to the raw string, so old messages still render. */
 fun subAgentMember(sender: String): GroupMember {
     val agent = com.example.byokchat.chat.SubAgentStore.snapshot.byId(sender)
@@ -232,6 +195,14 @@ private fun avatarColorFor(id: String): Color {
     val idx = (id.hashCode() and Int.MAX_VALUE) % AVATAR_COLORS.size
     return AVATAR_COLORS[idx]
 }
+
+/**
+ * A member's colour: the same fixed colour as its avatar (Main is
+ * purple, Monica orange — both are the letter M, so colour is what
+ * tells them apart). Used for the sender name inside a text bubble
+ * (Telegram style, 18/11/2026).
+ */
+fun memberColor(member: GroupMember): Color = avatarColorFor(member.id)
 
 /**
  * Round avatar with the member's initial and a status dot at the bottom
