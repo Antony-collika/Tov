@@ -128,10 +128,10 @@ class AppContainer(val context: Context) {
     val layoutStore = RequestLayoutStore(context, settings)
     /** Nhật ký request/response (Đợt B): ghi ra file trong bộ nhớ riêng của app. */
     val requestLog = RequestLog(java.io.File(context.filesDir, "request-log"), enabled = { settings.requestLogEnabled.value })
-    /** Sub-agent runner (Phase 2): runs a sub synchronously inside Main's turn; the delegate tool calls it through the registry. Declared after requestLog because it takes requestLog as a constructor argument. */
-    val subRunner = SubAgentRunner(settings, db, registry, fs, requestLog, diagnosticsLog)
     /** Đồng bộ hai chiều history.md (Đợt E): hash + parse khi mở chat + ghi ra ngay khi sửa trong app. */
     val historySync = HistorySync(context, db, fs)
+    /** Sub-agent runner (Phase 2): runs a sub synchronously inside Main's turn; the delegate tool calls it through the registry. Declared after historySync because it takes historySync as a constructor argument (Phase 4 fix, 18/11/2026). */
+    val subRunner = SubAgentRunner(settings, db, registry, fs, requestLog, diagnosticsLog, historySync)
     val engine = ChatEngine(db, settings, registry, notifier, requestLog, layoutStore, fs, historySync, diagnosticsLog)
 
     /** Mở cuộc trò chuyện được yêu cầu từ thông báo (MainActivity ghi vào, AppNav đọc rồi xóa). */

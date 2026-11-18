@@ -111,6 +111,10 @@ class SubAgentRunner(
     private val requestLog: RequestLog? = null,
     /** Diagnostic log (16/11/2026): the handoff steps, for the Diagnostics screen. Null = no logging. */
     private val diagnosticsLog: DiagnosticsLog? = null,
+    /** History sync (Phase 4 fix, 18/11/2026): the single shared instance —
+     *  the same one ChatEngine uses — so a sub's messages also reach
+     *  history.md. Null = no file export. */
+    private val historySync: HistorySync? = null,
 ) {
     companion object {
         /** Uid + model-facing name of the sub's send tool (Phase 3). It is
@@ -952,6 +956,21 @@ class SubAgentRunner(
                     createdAt = System.currentTimeMillis(),
                 ),
             )
+        }
+        // Phase 4 fix (18/11/2026): a sub message used to live only in Room —
+        // nothing ever exported its turn, so history.md skipped it (a real
+        // session jumped T1 → T3, missing the sub's T2 result and both
+        // greetings). Export the turn now, in the background, the same way
+        // ChatEngine does at the end of a Main turn: try append, fall back
+        // to a full export. Best-effort: the message is already safe in Room,
+        // and the export runs through the shared HistorySync so file writes
+        // stay serialized.
+        historySync?.let { sync ->
+            runScope.launch {
+                runCatching {
+                    if (!sync.appendTurn(conversationId, turnNo)) sync.export(conversationId)
+                }
+            }
         }
     }
 
