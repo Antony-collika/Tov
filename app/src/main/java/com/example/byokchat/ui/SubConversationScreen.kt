@@ -39,12 +39,11 @@ import kotlinx.coroutines.withContext
  * sub's avatar on the chat screen — in ANY turn (17/11/2026, mockup
  * v2). Main on one side, the sub on the other, in time order across the
  * whole session: every brief Main gave and every report the sub sent
- * back, plus the messages the sub sent to the user, all as plain
- * bubbles. There is no per-turn split, no turn marker, no label saying
- * which kind of sub message a bubble is — the two kinds are told apart
- * only in the data (see buildSubConversation), never on screen. The
- * title is just the sub's name. Runs from before the sub_runs table
- * existed have no record and simply show nothing extra.
+ * back, as plain bubbles. The messages the sub sent to the user are
+ * NOT here — they already live on the main chat screen (18/11/2026).
+ * There is no per-turn split, no turn marker. The title is just the
+ * sub's name. Runs from before the sub_runs table existed have no
+ * record and simply show nothing.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,9 +59,7 @@ fun SubConversationScreen(
     LaunchedEffect(conversationId, agentId) {
         val built = withContext(Dispatchers.IO) {
             val runs = container.db.subRuns().getByAgent(conversationId, agentId)
-            val rows = container.db.messages().getAll(conversationId)
-                .filter { it.role == "assistant" && it.sender == agentId }
-            buildSubConversation(runs, rows)
+            buildSubConversation(runs)
         }
         items = built
         loaded = true

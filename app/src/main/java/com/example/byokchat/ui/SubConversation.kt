@@ -1,7 +1,6 @@
 package com.example.byokchat.ui
 
 import com.example.byokchat.chat.decodeSubRunStrings
-import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.SubRunEntity
 
 /** One message in the Main↔sub conversation of a session. */
@@ -61,18 +60,17 @@ internal fun stripReportHeader(fullReport: String, agentName: String): String {
  * - Main's side: each run's brief (the task Main gave), at the run's start.
  * - Sub's side: the messages it sent to Main ([SubRunEntity.messagesToMainJson],
  *   in order) and its final report ([SubRunEntity.fullReport], header
- *   stripped) at the run's end — plus the messages it sent to the user,
- *   which are the assistant message rows with sender = the agent id
- *   ([subMessages], in time order). The two kinds of sub messages are
- *   told apart ONLY here, in the data: on screen they are all plain
- *   bubbles, with no label, no turn marker, no per-turn split.
+ *   stripped) at the run's end. The messages the sub sent to the USER
+ *   are NOT here: they already live on the main chat screen, and
+ *   showing them again here made the two screens duplicate each other
+ *   (18/11/2026). This screen is only the Main↔sub exchange.
  * - Runs from before the sub_runs table existed have no record: they
- *   simply contribute no brief/report — no backfill, no special case.
+ *   simply contribute nothing — the screen is empty for them, no
+ *   backfill, no special case.
  * Pure, so it can be unit-tested without Android.
  */
 fun buildSubConversation(
     runs: List<SubRunEntity>,
-    subMessages: List<MessageEntity>,
 ): List<SubConversationItem> {
     data class Timed(val at: Long, val order: Int, val item: SubConversationItem)
     val timed = mutableListOf<Timed>()
@@ -100,13 +98,6 @@ fun buildSubConversation(
                 SubConversationItem("run-${run.id}-report", fromMain = false, text = body),
             )
         }
-    }
-    for (m in subMessages) {
-        if (m.text.isBlank()) continue
-        timed += Timed(
-            m.createdAt, order++,
-            SubConversationItem("msg-${m.id}", fromMain = false, text = m.text),
-        )
     }
     // Stable sort by time; ties (a run's outbox and report share
     // finishedAt) keep insertion order: brief, outbox, report.
