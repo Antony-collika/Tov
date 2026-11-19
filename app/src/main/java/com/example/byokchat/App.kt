@@ -153,6 +153,9 @@ class AppContainer(val context: Context) {
         // Wake Main (GĐ4 batch): finished subs report to the engine, which
         // wakes Main with their outcomes when the chat is free.
         subRunner.onWake = { conv, outcomes -> engine.requestWake(conv, outcomes) }
+        // Manual wake (peer mode, 19/11/2026): a sub wakes Main with a
+        // message through the wake tool.
+        registry.onMainWakeText = { conv, text -> engine.requestWakeText(conv, text) }
         // A tool is waiting for confirmation: if the app is not on screen, tell the user with a notification.
         confirmations.onRequested = { req -> if (!AppVisibility.inForeground) notifier.notifyConfirmation(req) }
         confirmations.onFinished = { req -> notifier.cancelConfirmation(req.id) }

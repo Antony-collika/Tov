@@ -14,6 +14,7 @@ import com.example.byokchat.data.SubRunEntity
 import com.example.byokchat.data.ProviderConfig
 import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.SettingsRepository
+import com.example.byokchat.tools.CallerScope
 import com.example.byokchat.tools.ParsedTool
 import com.example.byokchat.tools.WorkspaceFs
 import com.example.byokchat.tools.schema
@@ -174,6 +175,11 @@ class SubAgentRunner(
     /** Finished runs waiting for Main to be woken (wake, GĐ4 batch):
      *  conversation → outcomes not yet handed to Main. */
     private val pendingOutcomes = ConcurrentHashMap<String, MutableList<SubRunResult>>()
+    /** Runs whose result Main already saw through a manual wake (peer
+     *  mode, 19/11/2026): conversation → agent ids. The automatic wake
+     *  skips those outcomes, so Main never gets the same result twice.
+     *  One-shot: an entry is consumed when its run finishes. */
+    private val manualWakeDelivered = ConcurrentHashMap<String, MutableSet<String>>()
     /** Serializes the wake bookkeeping in [noteRunFinished]. */
     private val wakeMutex = Mutex()
 
@@ -185,6 +191,16 @@ class SubAgentRunner(
      * engine).
      */
     var onWake: ((String, List<SubRunResult>) -> Unit)? = null
+
+    /**
+     * A sub woke Main by hand with its result (peer mode, 19/11/2026):
+     * remember it, so the automatic wake later does not repeat that
+     * run's result. Called by the wake tool; the run itself still
+     * finishes normally.
+     */
+    fun noteManualWakeToMain(conversationId: String, agentId: String) {
+        manualWakeDelivered.getOrPut(conversationId) { ConcurrentHashMap.newKeySet() } += agentId
+    }
 
     /**
      * Start a sub run in the background and return its key at once
@@ -273,15 +289,22 @@ class SubAgentRunner(
      */
     private suspend fun noteRunFinished(key: SubRunKey, result: SubRunResult) {
         val wake = wakeMutex.withLock {
+            // Peer mode: a run whose result Main already saw through a
+            // manual wake is not queued again — unless it failed, hit a
+            // cap or was interrupted, which is new information, not the
+            // repeated result. The entry is consumed either way: one run
+            // finishes once.
+            val manuallyDelivered = manualWakeDelivered[key.conversationId]?.remove(key.agentId) == true &&
+                result.status == SubRunStatus.DONE
             val list = pendingOutcomes.getOrPut(key.conversationId) { mutableListOf() }
-            list += result
+            if (!manuallyDelivered) list += result
             val error = isWakeError(result.status)
             // runResults still holds this run (the launcher's finally
             // removes it after this returns), so exclude this key when
             // asking whether anything else is still running.
             val othersRunning = runResults.keys.any { it.conversationId == key.conversationId && it != key }
             if (error || !othersRunning) {
-                pendingOutcomes.remove(key.conversationId)?.toList()
+                pendingOutcomes.remove(key.conversationId)?.toList()?.takeIf { it.isNotEmpty() }
             } else null
         }
         if (wake != null) onWake?.invoke(key.conversationId, wake)
@@ -484,7 +507,14 @@ class SubAgentRunner(
                                 }
                                 toolRowWritten = true
                             }
-                            val result = tools.execute(call, turnId, exposed, conversationId)
+                            // CallerScope (peer mode, 19/11/2026): the
+                            // tool runs as this agent, so a tool that needs
+                            // to know who called it (wake_agent) can read
+                            // it. execute() only adds context elements, so
+                            // the scope survives into the tool's run.
+                            val result = withContext(CallerScope(agent.id)) {
+                                tools.execute(call, turnId, exposed, conversationId)
+                            }
                             runCatching {
                                 writeSubToolResult(conversationId, turnId, turnNo, call, result)
                             }

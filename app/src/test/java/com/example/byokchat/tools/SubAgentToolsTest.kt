@@ -62,17 +62,21 @@ class SubAgentToolsTest {
 
     @Test fun sendMessageIsNotInTheRegistry_MainCannotCallIt() {
         // The registry is what Main sees: the delegate, the stop, the
-        // recall and the recruit are the only sub tools in it. send_message is offered by
-        // the runner to subs only, so Main can never call it — but it is
-        // still shown in the agent settings as a built-in row, so the user
-        // knows the sub has it.
+        // recall, the recruit and the wake are the sub tools in it.
+        // send_message is offered by the runner to subs only, so Main can
+        // never call it — but it is still shown in the agent settings as
+        // a built-in row, so the user knows the sub has it. The wake tool
+        // IS in the registry (subs pick it in their settings), but Main
+        // never holds it: the Tools picker and the engine's selection both
+        // filter it out — Main talks to agents with delegate and recall.
         val tools = SubAgentTools.build({ null })
-        assertEquals(listOf("sub.delegate", "sub.stop", "sub.recall", "sub.recruit"), tools.map { it.uid })
+        assertEquals(listOf("sub.delegate", "sub.stop", "sub.recall", "sub.recruit", "sub.wake"), tools.map { it.uid })
         assertTrue(tools.none { it.uid == SubAgentRunner.SEND_TOOL_UID })
         assertTrue(tools.none { it.defaultName == SubAgentRunner.SEND_TOOL_NAME })
         assertEquals("sub.send", SubAgentRunner.SEND_TOOL_UID)
         assertEquals("send_message", SubAgentRunner.SEND_TOOL_NAME)
         assertEquals("recruit_teammate", tools.first { it.uid == SubAgentTools.RECRUIT_TOOL_UID }.defaultName)
+        assertEquals("wake_agent", tools.first { it.uid == SubAgentTools.WAKE_TOOL_UID }.defaultName)
     }
 
     @Test fun delegateSchemaHasRequiredTitleParam() {
@@ -113,6 +117,38 @@ class SubAgentToolsTest {
         assertEquals("integer", (turn["type"] as JsonPrimitive).content)
         val required = (schema["required"] as JsonArray).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
         assertEquals(listOf("agent", "turn"), required)
+    }
+
+    @Test fun wakeSchemaOffersMainPlusEnabledAgents() {
+        val review = testAgent(id = "review", name = "Review", description = "Reviews a draft.")
+        val schema = SubAgentTools.wakeSchema(listOf(testAgent(), review, testAgent(id = "off", name = "Off").copy(enabled = false)))
+        assertEquals(listOf("main", "research", "review"), enumOf(schema))
+        val desc = agentParam(schema)["description"] as JsonPrimitive
+        assertTrue(desc.content.contains("main"))
+        assertTrue(desc.content.contains("review — Reviews a draft."))
+        assertTrue(!desc.content.contains("off"))
+        val required = (schema["required"] as JsonArray).mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+        assertEquals(listOf("agent", "message"), required)
+    }
+
+    @Test fun wakeSchemaWithEmptyTeamStillOffersMain() {
+        assertEquals(listOf("main"), enumOf(SubAgentTools.wakeSchema(emptyList())))
+    }
+
+    @Test fun wakeRunTitleReusesLatestTitleOrFallsBackToWaker() {
+        assertEquals("Find football news", SubAgentTools.wakeRunTitle("Find football news", "Danny"))
+        assertEquals("Tin từ Danny", SubAgentTools.wakeRunTitle(null, "Danny"))
+        assertEquals("Tin từ Danny", SubAgentTools.wakeRunTitle("", "Danny"))
+        assertEquals("Tin từ Danny", SubAgentTools.wakeRunTitle("   ", "Danny"))
+    }
+
+    @Test fun wakeTextsNameTheWaker() {
+        val toMain = SubAgentTools.wakeTextForMain("Danny", "done: 3 goals, see the file")
+        assertTrue(toMain.contains("Danny"))
+        assertTrue(toMain.contains("done: 3 goals, see the file"))
+        val toSub = SubAgentTools.wakeBriefForSub("Danny", "done: 3 goals, see the file")
+        assertTrue(toSub.contains("Danny"))
+        assertTrue(toSub.contains("done: 3 goals, see the file"))
     }
 
     private fun storedRun(

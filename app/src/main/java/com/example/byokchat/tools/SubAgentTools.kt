@@ -36,11 +36,17 @@ import kotlinx.serialization.json.JsonObject
  */
 object SubAgentTools {
     /**
-     * Uid of the recruit tool (GĐ4 batch). Main must never hold it — only
-     * a creator agent (BotFather-style, created by the user) picks it, so
-     * Main delegates hiring instead of recruiting directly.
+     * Uid of the recruit tool (GĐ4 batch). 19/11/2026: tools are one
+     * shared pool — Main holds it too when the user ticks it in the
+     * Tools picker, like any other tool; a creator agent
+     * (BotFather-style) is one way to use it, not the only way.
      */
     const val RECRUIT_TOOL_UID = "sub.recruit"
+    const val DELEGATE_TOOL_UID = "sub.delegate"
+    const val STOP_TOOL_UID = "sub.stop"
+    const val RECALL_TOOL_UID = "sub.recall"
+    /** Uid of the wake tool (peer mode, 19/11/2026). */
+    const val WAKE_TOOL_UID = "sub.wake"
 
     fun build(
         subRunner: () -> SubAgentRunner?,
@@ -51,9 +57,11 @@ object SubAgentTools {
         agentStore: () -> SubAgentStore? = { null },
         /** All tools in the registry, for resolving the recruit's tool names/uids. A lambda: it is evaluated only when the tool runs, after the registry finished building. */
         allTools: () -> List<Tool> = { emptyList() },
+        /** Wake Main with a message (peer mode, 19/11/2026): the engine's text-wake entry, wired by the app container. Null = Main cannot be woken (tests, or a runner without an engine). A lambda: evaluated only when the tool runs. */
+        requestMainWakeText: () -> ((String, String) -> Unit)? = { null },
     ): List<Tool> = listOf(
         Tool(
-            uid = "sub.delegate",
+            uid = DELEGATE_TOOL_UID,
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "delegate_to_subagent",
@@ -96,7 +104,7 @@ object SubAgentTools {
             buildSubRunStartedReceipt(agent.name, agent.id, title, turnNo)
         },
         Tool(
-            uid = "sub.stop",
+            uid = STOP_TOOL_UID,
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "stop_subagent",
@@ -115,7 +123,7 @@ object SubAgentTools {
             result.detailed
         },
         Tool(
-            uid = "sub.recall",
+            uid = RECALL_TOOL_UID,
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "get_subagent_result",
@@ -155,7 +163,98 @@ object SubAgentTools {
             store.addAgent(config).onFailure { throw ToolException(it.message ?: "Could not save the new agent.") }
             "Created sub-agent '${config.name}' (id: ${config.id}) with tools: ${config.toolUids.joinToString(", ")}. It can be edited in the agent settings."
         },
+        Tool(
+            uid = WAKE_TOOL_UID,
+            group = ToolGroup.AGENTS,
+            risk = Risk.READ,
+            defaultName = "wake_agent",
+            defaultDescription = "Wake another agent with a message: \"main\" wakes Main, a sub-agent id wakes that sub-agent. The woken agent starts a new turn with your message.",
+            schema = wakeSchema(teamProvider()),
+            schemaProvider = { wakeSchema(teamProvider()) },
+        ) { env, args ->
+            val runner = subRunner() ?: throw ToolException("Sub-agents are not available right now.")
+            val team = teamProvider()
+            // The caller: a sub-agent's id from the runner (CallerScope);
+            // Main never holds this tool — it talks to agents with
+            // delegate_to_subagent and get_subagent_result instead.
+            val callerId = currentCallerAgentId()
+                ?: throw ToolException("wake_agent is for sub-agents — Main talks to agents with delegate_to_subagent and get_subagent_result.")
+            val callerName = team.firstOrNull { it.id == callerId }?.name ?: callerId
+            val targetId = args.reqStr("agent")
+            val message = args.reqStr("message")
+            val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")
+            if (targetId == "main") {
+                // Hand the result to Main: the engine wakes Main with the
+                // message, and the runner is told so the automatic wake
+                // later does not repeat this run's result.
+                val wakeMain = requestMainWakeText()
+                    ?: throw ToolException("Main cannot be woken right now.")
+                runner.noteManualWakeToMain(conversationId, callerId)
+                wakeMain(conversationId, wakeTextForMain(callerName, message))
+                "Woke Main up."
+            } else {
+                val agent = team.firstOrNull { it.id == targetId }
+                    ?: throw ToolException(
+                        "Unknown sub-agent '$targetId'. Available: " +
+                            team.filter { it.enabled }.joinToString(", ") { it.id }.ifBlank { "(none — enable an agent in the agent settings)" } +
+                            ".",
+                    )
+                if (!agent.enabled) {
+                    throw ToolException("Sub-agent '${agent.name}' is turned off. Turn it on in the agent settings to call it.")
+                }
+                val turnId = currentTurnId() ?: throw ToolException("No turn is running.")
+                // A woken run continues the target's task, so its title is
+                // the target's latest task title in this conversation.
+                val title = wakeRunTitle(env.db.subRuns().latestTitle(conversationId, targetId), callerName)
+                val brief = wakeBriefForSub(callerName, message)
+                runner.startRun(agent, title, brief, conversationId, turnId)
+                    ?: throw ToolException("Sub-agent '${agent.name}' is already running a task. Wait for it to finish, or stop it first with stop_subagent.")
+                "Woke ${agent.name} up."
+            }
+        },
     )
+
+    /**
+     * Text of a manual wake to Main (peer mode, 19/11/2026): who woke Main
+     * and what they said. Pure, so it can be unit-tested without Android.
+     */
+    fun wakeTextForMain(wakerName: String, message: String): String =
+        "$wakerName woke you up:\n$message"
+
+    /**
+     * Brief of a woken sub run (peer mode, 19/11/2026): the waker's
+     * message, labelled with who sent it — the run's first message to
+     * the woken agent. Pure.
+     */
+    fun wakeBriefForSub(wakerName: String, message: String): String =
+        "Message from $wakerName:\n$message"
+
+    /**
+     * Title of a woken sub run (peer mode, 19/11/2026): the target's
+     * latest task title in this conversation — a wake continues that
+     * task, it does not start a new one. Falls back to "Tin từ <waker>"
+     * when the target never ran here. Pure.
+     */
+    fun wakeRunTitle(latestTitle: String?, wakerName: String): String =
+        latestTitle?.takeIf { it.isNotBlank() } ?: "Tin từ $wakerName"
+
+    /**
+     * Schema for the wake tool, built from the loaded team like the
+     * delegate's: the `agent` enum is "main" plus the enabled agents'
+     * ids. Pure, so it can be unit-tested without Android.
+     */
+    fun wakeSchema(agents: List<SubAgentConfig>): JsonObject {
+        val enabled = agents.filter { it.enabled }
+        val agentDesc = if (enabled.isEmpty()) {
+            "Who to wake: \"main\" (Main) or a sub-agent id. No sub-agents are enabled right now."
+        } else {
+            "Who to wake: \"main\" (Main) or a sub-agent id. Available sub-agents: " + enabled.joinToString("; ") { "${it.id} — ${it.description}" }
+        }
+        return schema {
+            str("agent", agentDesc, required = true, enum = listOf("main") + enabled.map { it.id })
+            str("message", "What to tell them: the result to hand over, or what you need.", required = true)
+        }
+    }
 
     /**
      * Read one stored sub run back (context manager, 17/11/2026): the

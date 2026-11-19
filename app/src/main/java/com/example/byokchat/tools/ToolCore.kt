@@ -40,6 +40,23 @@ suspend fun currentConversationId(): String? = currentCoroutineContext()[Convers
 /** Lượt của tool call đang chạy trong coroutine này, null nếu không có. */
 suspend fun currentTurnId(): String? = currentCoroutineContext()[ConversationScope]?.turnId
 
+/**
+ * Coroutine-context element carrying the agent making a tool call
+ * (peer mode, 19/11/2026): the sub-agent id when a sub calls a tool,
+ * absent when Main calls one. The runner sets it around each sub tool
+ * call; [ToolRegistry.execute] only adds elements, so it survives into
+ * the tool's run — the wake tool reads it to know who woke whom.
+ * Same pattern as [ConversationScope].
+ */
+class CallerScope(val agentId: String) : CoroutineContext.Element {
+    companion object Key : CoroutineContext.Key<CallerScope>
+
+    override val key: CoroutineContext.Key<*> get() = Key
+}
+
+/** Id of the agent making the tool call running in this coroutine, null when Main is the caller. */
+suspend fun currentCallerAgentId(): String? = currentCoroutineContext()[CallerScope]?.agentId
+
 class ToolEnv(
     val app: Context,
     val fs: WorkspaceFs,

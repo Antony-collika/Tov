@@ -44,8 +44,10 @@ class ToolRegistry(
 ) : ToolRuntime {
     /** Set by AppContainer after the sub-agent runner is built (it needs this registry for the sub's own tools). */
     var subRunner: com.example.byokchat.chat.SubAgentRunner? = null
+    /** Wake Main with a message (peer mode, 19/11/2026): set by AppContainer to the engine's text-wake entry. Null = Main cannot be woken. Read lazily by the wake tool, like [subRunner]. */
+    var onMainWakeText: ((String, String) -> Unit)? = null
 
-    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build({ subRunner }, teamProvider, diagnosticsLog, agentStore = agentStore, allTools = { all })
+    val all: List<Tool> = FsTools.build() + TextTools.build() + DataTools.build() + DailyTools.build() + WeatherTools.build() + YouTubeTools.build() + MediaTools.build() + SubAgentTools.build({ subRunner }, teamProvider, diagnosticsLog, agentStore = agentStore, allTools = { all }, requestMainWakeText = { onMainWakeText })
     private val byUid = all.associateBy { it.uid }
 
     fun tool(uid: String): Tool? = byUid[uid]

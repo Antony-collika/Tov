@@ -16,6 +16,7 @@ import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.RequestLayout
 import com.example.byokchat.data.RequestLayoutStore
 import com.example.byokchat.data.SettingsRepository
+import com.example.byokchat.tools.SubAgentTools
 import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -96,6 +97,10 @@ class ChatEngine(
     /** Finished sub runs waiting for a wake turn (wake, GĐ4 batch):
      *  conversation → outcomes not yet handed to Main. */
     private val pendingWake = ConcurrentHashMap<String, MutableList<SubRunResult>>()
+    /** Manual wake texts waiting for a wake turn (peer mode, 19/11/2026):
+     *  conversation → messages subs sent Main with the wake tool. Drains
+     *  together with [pendingWake] into one wake turn. */
+    private val pendingWakeTexts = ConcurrentHashMap<String, MutableList<String>>()
     /** Serializes the wake queue ([requestWake] and the turn-end wake in [start]'s finally). */
     private val wakeMutex = Mutex()
 
@@ -140,8 +145,7 @@ class ChatEngine(
                     // never triggers a wake from this turn's end.
                     withContext(NonCancellable) {
                         wakeMutex.withLock {
-                            val take = pendingWake.remove(conversationId)?.takeIf { it.isNotEmpty() }
-                            if (take != null) startWake(conversationId, buildWakeText(take))
+                            takeWake(conversationId)?.let { startWake(conversationId, it) }
                         }
                     }
                 }
@@ -179,13 +183,42 @@ class ChatEngine(
                     val list = pendingWake.getOrPut(conversationId) { mutableListOf() }
                     list += outcomes
                     if (!isActive(conversationId)) {
-                        val take = list.toList()
-                        pendingWake.remove(conversationId)
-                        startWake(conversationId, buildWakeText(take))
+                        takeWake(conversationId)?.let { startWake(conversationId, it) }
                     }
                 }
             }
         }
+    }
+
+    /**
+     * A sub woke Main with a message (peer mode, 19/11/2026): queue the
+     * text and wake Main when the chat is free — same queueing as
+     * [requestWake]. The two queues drain together ([takeWake]), so Main
+     * is never woken twice for the same moment.
+     */
+    fun requestWakeText(conversationId: String, text: String) {
+        scope.launch {
+            withContext(NonCancellable) {
+                wakeMutex.withLock {
+                    val list = pendingWakeTexts.getOrPut(conversationId) { mutableListOf() }
+                    list += text
+                    if (!isActive(conversationId)) {
+                        takeWake(conversationId)?.let { startWake(conversationId, it) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Take everything waiting for a wake turn in this conversation: finished-run outcomes as wake text plus manual wake texts. Null when nothing is waiting. */
+    private fun takeWake(conversationId: String): String? {
+        val outcomes = pendingWake.remove(conversationId)?.takeIf { it.isNotEmpty() }
+        val texts = pendingWakeTexts.remove(conversationId)?.takeIf { it.isNotEmpty() }
+        if (outcomes == null && texts == null) return null
+        return listOfNotNull(
+            outcomes?.let { buildWakeText(it) },
+            texts?.joinToString("\n\n"),
+        ).joinToString("\n\n")
     }
 
     /**
@@ -326,6 +359,11 @@ class ChatEngine(
                 else layout.toolsCard()?.takeIf { it.enabled }?.effectiveSelectedToolUids(tools.allUids()).orEmpty()
                 // 19/11/2026: tools are one shared pool — who holds what
                 // is the user's choice in the picker, never hardcoded.
+                // One exception, decided by the user: wake_agent is a
+                // sub-only tool (Main never wakes itself — it talks to
+                // agents with delegate and recall), so even a saved
+                // "all tools" choice must not offer it to Main.
+                    .filter { it != SubAgentTools.WAKE_TOOL_UID }
                 val defsForUids = tools.definitionsForUids(selectedUids)
                 exposed = defsForUids.map { (uid, def) ->
                     com.example.byokchat.tools.ParsedTool(uid, def.name, def.description)

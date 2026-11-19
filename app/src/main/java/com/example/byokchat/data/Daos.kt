@@ -187,6 +187,10 @@ interface SubRunDao {
     @Query("SELECT * FROM sub_runs WHERE conversationId = :cid AND agent = :agent ORDER BY turnNo ASC")
     suspend fun getByAgent(cid: String, agent: String): List<SubRunEntity>
 
+    /** Title of the latest stored run of one agent in a conversation — the wake tool reuses it as the title of the woken run (peer mode, 19/11/2026). */
+    @Query("SELECT title FROM sub_runs WHERE conversationId = :cid AND agent = :agent ORDER BY finishedAt DESC LIMIT 1")
+    suspend fun latestTitle(cid: String, agent: String): String?
+
     @Insert
     suspend fun insert(row: SubRunEntity)
 
