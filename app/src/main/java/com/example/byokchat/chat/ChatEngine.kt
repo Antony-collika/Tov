@@ -16,7 +16,6 @@ import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.RequestLayout
 import com.example.byokchat.data.RequestLayoutStore
 import com.example.byokchat.data.SettingsRepository
-import com.example.byokchat.tools.SubAgentTools
 import com.example.byokchat.tools.WorkspaceFs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -325,10 +324,8 @@ class ChatEngine(
                 // không offer tool nào, như tắt thẻ — sửa 17/11/2026).
                 val selectedUids = if (repair == RepairMode.NO_TOOLS) emptyList()
                 else layout.toolsCard()?.takeIf { it.enabled }?.effectiveSelectedToolUids(tools.allUids()).orEmpty()
-                    // Recruit is never Main's tool (GĐ4 batch, shape B):
-                    // even a saved "all tools" choice must not offer it —
-                    // only a creator agent holds it.
-                    .filter { it != SubAgentTools.RECRUIT_TOOL_UID }
+                // 19/11/2026: tools are one shared pool — who holds what
+                // is the user's choice in the picker, never hardcoded.
                 val defsForUids = tools.definitionsForUids(selectedUids)
                 exposed = defsForUids.map { (uid, def) ->
                     com.example.byokchat.tools.ParsedTool(uid, def.name, def.description)
