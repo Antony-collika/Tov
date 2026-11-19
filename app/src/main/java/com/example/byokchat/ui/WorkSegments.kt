@@ -49,28 +49,37 @@ private fun parseCalls(toolCallsJson: String?): List<AiToolCall> =
  * Groups an agent's work into segments. Pure, so it can be unit-tested
  * without Android.
  *
- * A row contributes when it holds tool calls or readable reasoning. Rows
- * that contribute and follow each other with the same (turnId, sender)
- * merge into one segment; a user message or a plain text message (a
- * greeting, a final answer) breaks the stretch. A tool-result row never
- * breaks it: it sits between the rounds in the DB (call row, result row,
- * next call row) and is the answer to the step above it, so the rounds
- * on both sides still belong to one stretch. A text-only message
- * therefore never becomes a step, and `send_message` never becomes one
- * either: its messages already are.
- * Within one row the reasoning step comes first (the model thinks, then
- * calls), then that round's calls in order. Tool results attach from
- * [results] by call id; a call with no result yet is still a step, so the
- * pill can stream it as running.
+ * One segment per (turnId, sender): every tool/reasoning row of one
+ * speaker in one turn belongs to one segment, wherever it sits in the
+ * chat (19/11/2026: the old consecutive-only rule split one agent's
+ * turn into one pill per round as soon as two subs interleaved or a
+ * greeting landed in between — the pill is background work, not a
+ * chat bubble, so one agent's one turn gets one pill). A user message
+ * or a plain text message (a greeting, a final answer) contributes
+ * nothing and never splits a segment. A tool-result row never
+ * contributes a step either: it sits between the rounds in the DB
+ * (call row, result row, next call row) and is the answer to the step
+ * above it. A text-only message therefore never becomes a step, and
+ * `send_message` never becomes one either: its messages already are.
+ * Segments come out in first-appearance order; within one segment the
+ * steps stay in chat order. Within one row the reasoning step comes
+ * first (the model thinks, then calls), then that round's calls in
+ * order. Tool results attach from [results] by call id; a call with
+ * no result yet is still a step, so the pill can stream it as running.
  */
 fun groupWorkSegments(messages: List<MessageEntity>, results: ToolResults): List<WorkSegment> {
-    val segments = mutableListOf<WorkSegment>()
-    var currentRows: MutableList<MessageEntity>? = null
-    var currentTurn: String? = null
-    var currentSender: String? = null
-    fun flush() {
-        val rows = currentRows ?: return
-        currentRows = null
+    val byKey = linkedMapOf<Pair<String, String?>, MutableList<MessageEntity>>()
+    for (m in messages) {
+        // A tool-result row is the answer to the step above it; it
+        // neither contributes a step nor splits a segment.
+        if (m.role == "tool") continue
+        if (m.role != "assistant") continue
+        val calls = parseCalls(m.toolCallsJson)
+        val hasReasoning = !m.reasoningText.isNullOrBlank()
+        if (calls.isEmpty() && !hasReasoning) continue
+        byKey.getOrPut(m.turnId to m.sender) { mutableListOf() }.add(m)
+    }
+    return byKey.values.mapNotNull { rows ->
         val steps = rows.flatMap { row ->
             val reasoning = if (!row.reasoningText.isNullOrBlank()) {
                 listOf(WorkStep.Reasoning(row.reasoningText!!))
@@ -82,46 +91,19 @@ fun groupWorkSegments(messages: List<MessageEntity>, results: ToolResults): List
             }
             reasoning + tools
         }
-        if (steps.isNotEmpty()) {
-            // Every row in the stretch shares one (turnId, sender) by the
-            // merge rule above, so the first row's values describe it.
-            segments += WorkSegment(
-                turnId = rows.first().turnId,
-                sender = rows.first().sender,
-                anchorId = rows.first().id,
-                steps = steps,
-                startedAt = rows.first().createdAt,
-                lastActivityAt = maxOf(
-                    rows.maxOf { it.createdAt },
-                    steps.filterIsInstance<WorkStep.Tool>().mapNotNull { it.result?.createdAt }.maxOrNull() ?: 0L,
-                ),
-            )
-        }
+        if (steps.isEmpty()) return@mapNotNull null
+        // Every row in the segment shares one (turnId, sender) by the
+        // grouping above, so the first row's values describe it.
+        WorkSegment(
+            turnId = rows.first().turnId,
+            sender = rows.first().sender,
+            anchorId = rows.first().id,
+            steps = steps,
+            startedAt = rows.first().createdAt,
+            lastActivityAt = maxOf(
+                rows.maxOf { it.createdAt },
+                steps.filterIsInstance<WorkStep.Tool>().mapNotNull { it.result?.createdAt }.maxOrNull() ?: 0L,
+            ),
+        )
     }
-    for (m in messages) {
-        // A tool-result row is the answer to the step above it; it neither
-        // contributes a step nor breaks the stretch (17/11/2026: without
-        // this, a sub's two rounds split into two pills because the
-        // result row sits between them in the DB).
-        if (m.role == "tool") continue
-        if (m.role != "assistant") {
-            flush()
-            continue
-        }
-        val calls = parseCalls(m.toolCallsJson)
-        val hasReasoning = !m.reasoningText.isNullOrBlank()
-        if (calls.isEmpty() && !hasReasoning) {
-            flush()
-            continue
-        }
-        if (currentRows == null || m.turnId != currentTurn || m.sender != currentSender) {
-            flush()
-            currentRows = mutableListOf()
-            currentTurn = m.turnId
-            currentSender = m.sender
-        }
-        currentRows!!.add(m)
-    }
-    flush()
-    return segments
 }

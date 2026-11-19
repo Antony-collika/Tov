@@ -9,8 +9,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pill grouping (17/11/2026, approved mockup): consecutive tool/reasoning
- * rows by one speaker in one turn form one work segment; plain text
+ * Pill grouping (17/11/2026, approved mockup; 19/11/2026: one pill per
+ * speaker per turn): all tool/reasoning rows by one speaker in one turn
+ * form one work segment, wherever they sit in the chat; plain text
  * messages never become steps, and tool-result rows attach by call id.
  */
 class WorkSegmentsTest {
@@ -108,15 +109,54 @@ class WorkSegmentsTest {
         assertTrue(segments[0].steps[0] is WorkStep.Reasoning)
     }
 
-    @Test fun textRowBreaksSegment() {
+    @Test fun textRowBetweenRoundsDoesNotBreakSegment() {
         val rows = listOf(
             row("a1", "t1", 1, toolCallsJson = calls("web_search")),
             row("a2", "t1", 2, text = "Tôi tìm thấy vài tin, để tôi đọc thêm."),
             row("a3", "t1", 3, toolCallsJson = calls("web_fetch")),
         )
         val segments = groupWorkSegments(rows, results())
-        assertEquals(2, segments.size)
-        assertEquals(listOf("a1", "a3"), segments.map { it.anchorId })
+        // 19/11/2026: one pill per speaker per turn — a text message
+        // between two rounds no longer splits the stretch.
+        assertEquals(1, segments.size)
+        assertEquals("a1", segments[0].anchorId)
+        assertEquals(
+            listOf("web_search", "web_fetch"),
+            segments[0].toolSteps.map { it.call.name },
+        )
+    }
+
+    @Test fun interleavedSubsFormOneSegmentEach() {
+        // 19/11/2026: two subs working in parallel in one Main turn —
+        // their rounds interleave and greetings/results sit between
+        // them, but each agent's work is still one pill.
+        val rows = listOf(
+            row("u1", "t1", 1, role = "user", text = "xem tin bóng đá, mở nhạc du dương"),
+            row("a1", "t1", 2, toolCallsJson = calls("delegate_to_subagent")),
+            row("s0", "t1", 3, text = "Chào bạn, mình sẽ tìm nhạc ngay đây!", sender = "monica"),
+            row("b1", "t1", 4, sender = "bob", toolCallsJson = calls("web_search")),
+            row("m1", "t1", 5, sender = "monica", toolCallsJson = calls("youtube_search")),
+            row("b2", "t1", 6, sender = "bob", toolCallsJson = calls("web_fetch")),
+            row("m2", "t1", 7, sender = "monica", toolCallsJson = calls("youtube_media_play")),
+            row("s1", "t1", 8, text = "Mình đã phát nhạc rồi nhé!", sender = "monica"),
+            row("b3", "t1", 9, sender = "bob", toolCallsJson = calls("web_fetch")),
+        )
+        val segments = groupWorkSegments(rows, results())
+        assertEquals(3, segments.size)
+        assertEquals(null, segments[0].sender)
+        assertEquals("a1", segments[0].anchorId)
+        assertEquals("bob", segments[1].sender)
+        assertEquals("b1", segments[1].anchorId)
+        assertEquals(
+            listOf("web_search", "web_fetch", "web_fetch"),
+            segments[1].toolSteps.map { it.call.name },
+        )
+        assertEquals("monica", segments[2].sender)
+        assertEquals("m1", segments[2].anchorId)
+        assertEquals(
+            listOf("youtube_search", "youtube_media_play"),
+            segments[2].toolSteps.map { it.call.name },
+        )
     }
 
     @Test fun subToolRowsGroupUnderSubSenderAndGreetingIsNotAStep() {

@@ -284,24 +284,35 @@ fun ChatScreen(
     }
     // Đợt 4: nhãn lượt ổn định (T1, T2…) cho bong bóng user, như FPilot.
     val turnLabels = remember(messages) { TurnNumbers.effectiveTurnNumbers(messages) }
-    val visible = remember(chrono) { chrono.asReversed() }
+    val toolResults = remember(messages) {
+        ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
+    }
+    // Work pill (17/11/2026, approved mockup; 19/11/2026: one pill per
+    // speaker per turn): all tool/reasoning rows by one speaker in one
+    // turn form one segment, wherever they sit in the chat; the pill
+    // renders on the segment's first row. The pill only groups rows
+    // already in the DB — it never adds anything to Main's request
+    // (the 400 fix still holds).
+    val segmentsByAnchor = remember(chrono, toolResults) {
+        groupWorkSegments(chrono, toolResults).associateBy { it.anchorId }
+    }
+    // A tool/reasoning row that is not a segment anchor renders nothing
+    // (no pill, no bubble) — drop it from the visible list so it leaves
+    // no 14dp gap in the chat. The streaming row is never dropped: its
+    // text is still arriving (liveText) even though the DB text is blank.
+    val visible = remember(chrono, segmentsByAnchor) {
+        chrono.asReversed().filter { m ->
+            !(m.role == "assistant" && m.status == "done" && m.text.isBlank() &&
+                (!m.toolCallsJson.isNullOrBlank() || !m.reasoningText.isNullOrBlank()) &&
+                m.id !in segmentsByAnchor)
+        }
+    }
     // Only the very last answer of the chat gets the Copy / Regenerate / Branch row; older answers use press-and-hold.
     val lastAnswerId = remember(chrono) {
         chrono.lastOrNull()?.takeIf { it.role == "assistant" && it.text.isNotEmpty() && it.status == "done" }?.id
     }
     // Turns that have an AI message on screen. A turn without one gets "Regenerate" in your message's menu.
     val turnsWithAnswer = remember(chrono) { chrono.filter { it.role == "assistant" }.map { it.turnId }.toSet() }
-    val toolResults = remember(messages) {
-        ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
-    }
-    // Work pill (17/11/2026, approved mockup): consecutive tool/reasoning
-    // rows by one speaker in one turn form one segment; the pill renders
-    // on the segment's first row, the other rows of the stretch render
-    // none. The pill only groups rows already in the DB — it never adds
-    // anything to Main's request (the 400 fix still holds).
-    val segmentsByAnchor = remember(chrono, toolResults) {
-        groupWorkSegments(chrono, toolResults).associateBy { it.anchorId }
-    }
     // Bỏ dấu một lần: câu tìm và từng tin (chỉ khi đang mở thanh tìm), thay vì bỏ dấu lại mỗi lần gõ.
     val foldedQuery = remember(query) { TextUtil.fold(query) }
     val foldedTexts = remember(chrono, searchOpen) {
