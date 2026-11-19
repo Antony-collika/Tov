@@ -232,14 +232,20 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
         }
     }
 
-    // Tools a sub may use: everything except the delegate, stop and
-    // recall tools (no sub-subs, no stopping or recalling from a sub).
-    // The recruit tool IS pickable: a creator agent (BotFather-style)
-    // holds it, so Main can delegate hiring to it.
+    // Tools a sub may use (peer mode, 19/11/2026): the whole pool, except
+    // stop_subagent — stopping a running sub stays Main-only. Delegate,
+    // recall and wake are pickable, so a sub can hand work to a peer, read
+    // a peer's result back, and wake whoever needs its result next.
     // The send_message tool is added to every run by the runner, so it is
     // not a checkbox below — it is shown as a built-in row instead (always
     // on, Main cannot use it).
-    val pickableTools = container.registry.all.filter { !it.uid.startsWith("sub.") || it.uid == SubAgentTools.RECRUIT_TOOL_UID }
+    val pickableTools = container.registry.all.filter { tool ->
+        !tool.uid.startsWith("sub.") ||
+            tool.uid == SubAgentTools.RECRUIT_TOOL_UID ||
+            tool.uid == SubAgentTools.DELEGATE_TOOL_UID ||
+            tool.uid == SubAgentTools.RECALL_TOOL_UID ||
+            tool.uid == SubAgentTools.WAKE_TOOL_UID
+    }
     val modelLabel = modelChoice?.let { (pid, m) ->
         providers.firstOrNull { it.id == pid }?.let { "${it.name} — $m" } ?: "$pid — $m"
     } ?: "Follow Main's model"

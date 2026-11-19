@@ -52,6 +52,7 @@ import com.example.byokchat.data.RequestCard
 import com.example.byokchat.data.FreeRole
 import com.example.byokchat.data.HistoryPolicy
 import com.example.byokchat.data.ProviderType
+import com.example.byokchat.tools.SubAgentTools
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -598,7 +599,10 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                             // 19/11/2026: tools are one shared pool — the
                             // whole registry is offered here; who holds
                             // what is the user's choice, never hardcoded.
-                            tools = container.registry.all,
+                            // One exception, decided by the user: wake_agent
+                            // is sub-only (Main never wakes itself — it
+                            // talks to agents with delegate and recall).
+                            tools = container.registry.all.filter { it.uid != SubAgentTools.WAKE_TOOL_UID },
                             selected = selectedUids,
                             onSelectionChange = { selectedUids = it },
                             onDismiss = { showToolPicker = false },
