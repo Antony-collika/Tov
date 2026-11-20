@@ -254,7 +254,10 @@ data class SubRunRecord(
     val version: Int = 1,
     val agent: String,
     val agentName: String,
-    /** The brief Main gave the agent. */
+    /** Who started the run: "main" for Main, else the delegating/waking sub-agent's id (20/11/2026). */
+    val startedBy: String = "main",
+    val startedByName: String = "Main",
+    /** The brief the run started with (from Main, or from the peer that delegated/woke it). */
     val brief: String,
     val status: String,
     val rounds: Int,

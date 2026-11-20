@@ -199,6 +199,10 @@ data class SubRunEntity(
     /** Id of the sub-agent that ran. */
     val agent: String,
     val agentName: String,
+    /** Who started the run: "main" for Main, else the id of the sub-agent that delegated / woke this run (peer mode, 20/11/2026). Old rows read "main" — before peer mode every run was Main-delegated. */
+    val startedBy: String = "main",
+    /** Display name of who started the run ("Main" for Main). Stored like agentName, so the conversation screens can name the sender without the agent registry. */
+    val startedByName: String = "Main",
     /** One-line title Main gave the task when delegating. */
     val title: String,
     /** The detailed brief Main gave the agent. */
