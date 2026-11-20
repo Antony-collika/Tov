@@ -103,20 +103,22 @@ fun ChatMemoryDialog(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                // Donut ở trên, chú thích ở dưới, đủ rộng cho chữ (23/11/2026):
-                // để chú thích bên phải donut thì "Available" không đủ chỗ
-                // trên điện thoại, bị bóp thành từng chữ cái một dòng.
-                Column(
+                // Donut trái, chú thích phải như mẫu — với size vừa điện thoại
+                // (23/11/2026): donut 96dp, chữ chú thích 13sp/12sp, và cột
+                // nội dung fillMaxWidth để weight chia đúng chỗ. Lần trước
+                // thiếu fillMaxWidth nên weight bị bóp về 0, chữ vỡ thành
+                // từng chữ cái một dòng.
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Box(
-                        modifier = Modifier.size(120.dp),
+                        modifier = Modifier.size(96.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Canvas(modifier = Modifier.size(120.dp)) {
-                            val stroke = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Butt)
+                        Canvas(modifier = Modifier.size(96.dp)) {
+                            val stroke = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Butt)
                             drawArc(
                                 color = availableColor,
                                 startAngle = 0f,
@@ -138,17 +140,17 @@ fun ChatMemoryDialog(
                             Text(
                                 formatExactTokens(used),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                             )
                             Text(
                                 "/ ${formatExactTokens(limit)}",
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         LegendRow(
@@ -265,17 +267,17 @@ private fun LegendRow(dotColor: Color, label: String, value: String, pct: String
     ) {
         Box(
             modifier = Modifier
-                .size(10.dp)
+                .size(8.dp)
                 .clip(RoundedCornerShape(50))
                 .background(dotColor),
         )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(label, modifier = Modifier.weight(1f), fontSize = 14.sp)
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(label, modifier = Modifier.weight(1f), fontSize = 13.sp)
         Column(horizontalAlignment = Alignment.End) {
-            Text(value, fontSize = 14.sp, textAlign = TextAlign.End)
+            Text(value, fontSize = 12.sp, textAlign = TextAlign.End)
             Text(
                 pct,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.End,
             )
