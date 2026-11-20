@@ -91,6 +91,8 @@ fun ChatScreen(
     onOpenMembers: () -> Unit,
     /** Opens the Main↔sub conversation for a whole session (tapping a sub's avatar on the chat screen). */
     onOpenSubConversation: (agentId: String) -> Unit,
+    /** Opens Main's inbox for a whole session (tapping Main's avatar on the chat screen). */
+    onOpenMainConversation: () -> Unit,
     /** Opens the request log. */
     onOpenRequestLog: () -> Unit,
     /** Opens the Request panel for this chat. */
@@ -586,13 +588,14 @@ fun ChatScreen(
                                 // Main↔sub conversation for the whole
                                 // session (17/11/2026) — the same screen
                                 // whichever turn's avatar was tapped.
-                                // Main's avatar does nothing — everything
-                                // of Main's is already on the chat. The
-                                // Members screen's avatar still opens
-                                // the agent's settings instead.
+                                // Main's avatar opens Main's inbox instead
+                                // (20/11/2026): Main's briefs to every sub
+                                // and every sub's messages back, in time
+                                // order. The Members screen's avatar still
+                                // opens the agent's settings instead.
                                 val avatarClick = m.sender?.let { sid ->
                                     { onOpenSubConversation(sid) }
-                                }
+                                } ?: { onOpenMainConversation() }
                                 AssistantMessage(
                                 m, generating, hl, edit, actions,
                                 workSegment = segmentsByAnchor[m.id],

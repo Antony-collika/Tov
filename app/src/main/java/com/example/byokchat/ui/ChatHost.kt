@@ -51,6 +51,8 @@ fun ChatHost(
     onOpenMembers: () -> Unit,
     /** Opens the Main↔sub conversation for a whole session (tapping a sub's avatar on the chat screen). */
     onOpenSubConversation: (agentId: String) -> Unit,
+    /** Opens Main's inbox for a whole session (tapping Main's avatar on the chat screen). */
+    onOpenMainConversation: () -> Unit,
     onOpenStorage: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -131,6 +133,7 @@ fun ChatHost(
                 onOpenMessages = onOpenMessages,
                 onOpenMembers = onOpenMembers,
                 onOpenSubConversation = onOpenSubConversation,
+                onOpenMainConversation = onOpenMainConversation,
                 onOpenRequestLog = onRequestLog,
                 onOpenRequestPanel = onPanel,
                 onOpenStorage = onOpenStorage,

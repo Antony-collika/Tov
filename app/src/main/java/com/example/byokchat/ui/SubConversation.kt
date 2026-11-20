@@ -3,11 +3,24 @@ package com.example.byokchat.ui
 import com.example.byokchat.chat.decodeSubRunStrings
 import com.example.byokchat.data.SubRunEntity
 
-/** One message in the Main↔sub conversation of a session. */
+/** Id of Main as a message sender in these conversations. */
+const val MAIN_SENDER_ID = "main"
+
+/** One message in a Main↔sub conversation of a session. */
 data class SubConversationItem(
     val key: String,
-    /** True = Main's side, false = the sub's side. */
-    val fromMain: Boolean,
+    /** Id of the speaker: "main" or a sub-agent id. */
+    val senderId: String,
+    /** Display name of the speaker. */
+    val senderName: String,
+    /**
+     * Who a Main brief is addressed to (the running sub's name) — set
+     * only by [buildMainConversation], where one inbox holds Main's
+     * briefs to several subs and the recipient must be visible. Null
+     * everywhere else: a per-sub screen is about one sub, so the
+     * recipient is obvious.
+     */
+    val toName: String? = null,
     val text: String,
 )
 
@@ -52,12 +65,16 @@ internal fun stripReportHeader(fullReport: String, agentName: String): String {
 }
 
 /**
- * Builds the full Main↔sub conversation of one session — Main on one
- * side, the sub on the other, in time order across the whole session,
- * not per turn (17/11/2026, mockup v2). Tapping the sub's avatar in ANY
- * turn opens this same conversation.
+ * Builds the full Main↔sub conversation of one session — the session's
+ * exchange with one sub, in time order across the whole session, not
+ * per turn (17/11/2026, mockup v2). Tapping the sub's avatar in ANY
+ * turn opens this same conversation. This screen is that sub's inbox:
+ * everything the sub said and received, with the real speaker's name
+ * on each bubble — a run's brief is shown under whoever started the
+ * run (Main, or the peer that delegated/woke it, 20/11/2026), never
+ * always as Main.
  *
- * - Main's side: each run's brief (the task Main gave), at the run's start.
+ * - Briefs: each run's brief (the task its starter gave), at the run's start.
  * - Sub's side: the messages it sent to Main ([SubRunEntity.messagesToMainJson],
  *   in order) and its final report ([SubRunEntity.fullReport], header
  *   stripped) at the run's end. The messages the sub sent to the USER
@@ -71,23 +88,53 @@ internal fun stripReportHeader(fullReport: String, agentName: String): String {
  */
 fun buildSubConversation(
     runs: List<SubRunEntity>,
+): List<SubConversationItem> = buildConversation(runs, mainInbox = false)
+
+/**
+ * Builds Main's inbox for a session (20/11/2026): the full exchange
+ * between Main and every sub, in time order — Main's briefs (full text)
+ * and each sub's messages to Main plus final reports. Only exchanges
+ * involving Main: a peer's brief (Bob→Danny, Danny→Bob) is neither
+ * Main's words nor addressed to Main, so it stays out — it lives in
+ * the per-sub screens ([buildSubConversation]). A brief carries the
+ * recipient in [SubConversationItem.toName], so in one inbox it is
+ * clear which sub Main is talking to. Pure, so it can be unit-tested
+ * without Android.
+ */
+fun buildMainConversation(
+    runs: List<SubRunEntity>,
+): List<SubConversationItem> = buildConversation(runs, mainInbox = true)
+
+private fun buildConversation(
+    runs: List<SubRunEntity>,
+    mainInbox: Boolean,
 ): List<SubConversationItem> {
     data class Timed(val at: Long, val order: Int, val item: SubConversationItem)
     val timed = mutableListOf<Timed>()
     var order = 0
     for (run in runs) {
         val brief = run.brief.ifBlank { run.title }
-        if (brief.isNotBlank()) {
+        // Main's inbox holds only exchanges involving Main: a peer's
+        // brief is neither Main's words nor addressed to Main.
+        if (brief.isNotBlank() && (!mainInbox || run.startedBy == MAIN_SENDER_ID)) {
             timed += Timed(
                 run.startedAt, order++,
-                SubConversationItem("run-${run.id}-brief", fromMain = true, text = brief),
+                SubConversationItem(
+                    "run-${run.id}-brief",
+                    senderId = run.startedBy,
+                    senderName = run.startedByName,
+                    // In Main's inbox the recipient must be visible: one
+                    // inbox holds Main's briefs to several subs.
+                    toName = if (mainInbox) run.agentName else null,
+                    text = brief,
+                ),
             )
         }
         decodeSubRunStrings(run.messagesToMainJson).forEachIndexed { idx, text ->
             if (text.isNotBlank()) {
                 timed += Timed(
                     run.finishedAt, order++,
-                    SubConversationItem("run-${run.id}-main-$idx", fromMain = false, text = text),
+                    SubConversationItem("run-${run.id}-main-$idx", senderId = run.agent, senderName = run.agentName, text = text),
                 )
             }
         }
@@ -95,7 +142,7 @@ fun buildSubConversation(
         if (body.isNotBlank() && body != "(no report text)") {
             timed += Timed(
                 run.finishedAt, order++,
-                SubConversationItem("run-${run.id}-report", fromMain = false, text = body),
+                SubConversationItem("run-${run.id}-report", senderId = run.agent, senderName = run.agentName, text = body),
             )
         }
     }

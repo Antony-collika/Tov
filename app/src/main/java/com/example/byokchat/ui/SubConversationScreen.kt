@@ -37,13 +37,16 @@ import kotlinx.coroutines.withContext
 /**
  * The whole Main↔sub conversation of a session, opened by tapping the
  * sub's avatar on the chat screen — in ANY turn (17/11/2026, mockup
- * v2). Main on one side, the sub on the other, in time order across the
- * whole session: every brief Main gave and every report the sub sent
- * back, as plain bubbles. The messages the sub sent to the user are
- * NOT here — they already live on the main chat screen (18/11/2026).
- * There is no per-turn split, no turn marker. The title is just the
- * sub's name. Runs from before the sub_runs table existed have no
- * record and simply show nothing.
+ * v2). This screen is that sub's inbox: everything the sub said and
+ * received, in time order across the whole session — every brief it
+ * was given (under whoever gave it: Main, or the peer that delegated
+ * or woke it, 20/11/2026) and every report it sent back, as plain
+ * bubbles. The messages the sub sent to the user are NOT here — they
+ * already live on the main chat screen (18/11/2026). There is no
+ * per-turn split, no turn marker. The title is just the sub's name.
+ * Runs from before the sub_runs table existed have no record and
+ * simply show nothing. The sub's own bubbles sit on the right, everyone
+ * else's on the left.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -79,29 +82,33 @@ fun SubConversationScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(items, key = { it.key }) { item ->
+                // The screen owner's own bubbles sit on the right;
+                // everyone else's (Main, or a peer that started a run)
+                // sit on the left, under their own name.
+                val isMine = item.senderId == agentId
                 Row(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = if (item.fromMain) Arrangement.Start else Arrangement.End,
+                    horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start,
                 ) {
                     Column(
                         Modifier.widthIn(max = 340.dp),
-                        horizontalAlignment = if (item.fromMain) Alignment.Start else Alignment.End,
+                        horizontalAlignment = if (isMine) Alignment.End else Alignment.Start,
                     ) {
                         Text(
-                            if (item.fromMain) "Main" else member.name,
+                            item.senderName,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Surface(
-                            color = if (item.fromMain) MaterialTheme.colorScheme.surfaceVariant
-                            else MaterialTheme.colorScheme.primaryContainer,
-                            shape = if (item.fromMain) RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp)
-                            else RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp),
+                            color = if (isMine) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = if (isMine) RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
+                            else RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
                         ) {
                             MarkdownBody(
                                 item.text,
-                                color = if (item.fromMain) MaterialTheme.colorScheme.onSurface
-                                else MaterialTheme.colorScheme.onPrimaryContainer,
+                                color = if (isMine) MaterialTheme.colorScheme.onPrimaryContainer
+                                else MaterialTheme.colorScheme.onSurface,
                                 highlight = null,
                                 modifier = Modifier.padding(12.dp),
                             )

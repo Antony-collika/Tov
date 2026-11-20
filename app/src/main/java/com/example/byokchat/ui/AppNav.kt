@@ -128,6 +128,9 @@ fun AppNav() {
                         onOpenSubConversation = { agentId ->
                             nav.navigate("sub-conversation/$id?agent=${Uri.encode(agentId)}")
                         },
+                        onOpenMainConversation = {
+                            nav.navigate("main-conversation/$id")
+                        },
                         onPanel = { nav.navigate("panel?id=$id") },
                         onOpenStorage = { nav.navigate("settings-storage") },
                     )
@@ -221,6 +224,12 @@ fun AppNav() {
                 SubConversationScreen(
                     conversationId = entry.arguments?.getString("id") ?: "",
                     agentId = entry.arguments?.getString("agent") ?: "",
+                    onBack = { nav.popBackStack() },
+                )
+            }
+            composable("main-conversation/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { entry ->
+                MainConversationScreen(
+                    conversationId = entry.arguments?.getString("id") ?: "",
                     onBack = { nav.popBackStack() },
                 )
             }
