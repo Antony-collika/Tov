@@ -91,9 +91,14 @@ object SubAgentTools {
             val turnNo = env.db.messages().getTurn(conversationId, turnId).firstOrNull()?.turnNo
                 ?: ((env.db.messages().maxTurnNo(conversationId) ?: 0) + 1)
             val handoffStartedAt = System.currentTimeMillis()
+            // Who started this run (20/11/2026): Main when there is no
+            // caller scope, else the peer sub-agent delegating — the
+            // conversation screens show the brief under that name.
+            val callerId = currentCallerAgentId()
+            val callerName = callerId?.let { id -> team.firstOrNull { it.id == id }?.name ?: id } ?: "Main"
             // Phase 4: the run starts in the background and this tool
             // returns at once — Main never waits for the result.
-            runner.startRun(agent, title, brief, conversationId, turnId)
+            runner.startRun(agent, title, brief, conversationId, turnId, callerId ?: "main", callerName)
                 ?: throw ToolException("Sub-agent '${agent.name}' is already running a task. Wait for it to finish, or stop it first with stop_subagent.")
             // Handoff step (16/11/2026): the run started — the next step
             // is the engine recording this receipt in the chat history.
@@ -207,7 +212,7 @@ object SubAgentTools {
                 // the target's latest task title in this conversation.
                 val title = wakeRunTitle(env.db.subRuns().latestTitle(conversationId, targetId), callerName)
                 val brief = wakeBriefForSub(callerName, message)
-                runner.startRun(agent, title, brief, conversationId, turnId)
+                runner.startRun(agent, title, brief, conversationId, turnId, callerId, callerName)
                     ?: throw ToolException("Sub-agent '${agent.name}' is already running a task. Wait for it to finish, or stop it first with stop_subagent.")
                 "Woke ${agent.name} up."
             }

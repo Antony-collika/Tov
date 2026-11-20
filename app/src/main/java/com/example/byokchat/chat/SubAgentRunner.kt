@@ -207,7 +207,10 @@ class SubAgentRunner(
      * (Phase 4): the caller does NOT wait for the result. Null when this
      * agent is already running a task in this conversation — one task at
      * a time per agent, the delegate tool reports that instead of
-     * queueing a second task behind the first.
+     * queueing a second task behind the first. [startedBy]/[startedByName]
+     * say who started the run ("main"/"Main" for Main, else the peer
+     * sub-agent's id/name) — the conversation screens show the brief
+     * under that name (20/11/2026).
      */
     fun startRun(
         agent: SubAgentConfig,
@@ -215,6 +218,8 @@ class SubAgentRunner(
         brief: String,
         conversationId: String,
         turnId: String,
+        startedBy: String = "main",
+        startedByName: String = "Main",
     ): SubRunKey? {
         val key = SubRunKey(conversationId, agent.id)
         val deferred = CompletableDeferred<SubRunResult>()
@@ -222,7 +227,7 @@ class SubAgentRunner(
         runTickets[key] = greetingTickets.getOrPut(conversationId) { AtomicInteger(0) }.getAndIncrement()
         val job = runScope.launch {
             try {
-                val result = run(agent, title, brief, conversationId, turnId)
+                val result = run(agent, title, brief, conversationId, turnId, startedBy, startedByName)
                 deferred.complete(result)
                 // Wake Main (GĐ4 batch): bookkeeping only — it must never
                 // break the run's completion, so a failure here is swallowed.
@@ -323,6 +328,8 @@ class SubAgentRunner(
         brief: String,
         conversationId: String,
         turnId: String,
+        startedBy: String = "main",
+        startedByName: String = "Main",
     ): SubRunResult {
         val startedAt = System.currentTimeMillis()
         val msgDao = db.messages()
@@ -905,6 +912,8 @@ class SubAgentRunner(
                     turnNo = turnNo,
                     agent = agent.id,
                     agentName = agent.name,
+                    startedBy = startedBy,
+                    startedByName = startedByName,
                     title = title,
                     brief = brief,
                     status = status.name.lowercase(),
@@ -923,6 +932,7 @@ class SubAgentRunner(
         writeMetaRecord(
             conversationId, agent, brief, status, rounds, tokensUsed, toolCalls,
             startedAt, finishedAt, reportDetail.take(500), error, sentToUser.size, mainOutbox,
+            startedBy, startedByName,
         )
         return SubRunResult(
             agentId = agent.id, agentName = agent.name, brief = userBrief, detailed = detailed,
@@ -1061,6 +1071,8 @@ class SubAgentRunner(
         error: String?,
         sentToUser: Int = 0,
         messagesToMain: List<String> = emptyList(),
+        startedBy: String = "main",
+        startedByName: String = "Main",
     ) {
         runCatching {
             val conv = db.conversations().get(conversationId) ?: return
@@ -1071,6 +1083,7 @@ class SubAgentRunner(
                 toolCalls = toolCalls, startedAt = startedAt, finishedAt = finishedAt,
                 resultSummary = resultSummary, error = error,
                 sentToUser = sentToUser, messagesToMain = messagesToMain,
+                startedBy = startedBy, startedByName = startedByName,
             )
             val line = encodeSubRunRecord(record)
             metaMutex.withLock {
