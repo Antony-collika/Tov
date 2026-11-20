@@ -2,9 +2,8 @@ package com.example.byokchat.ai
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Số token thật mà nhà cung cấp báo trong phản hồi (không phải ước lượng).
@@ -40,12 +39,15 @@ data class Usage(
     companion object {
         /** OpenAI: `usage` trong chunk cuối khi stream_options.include_usage bật. */
         fun fromOpenAi(usage: JsonObject): Usage = Usage(
-            inputTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull,
-            outputTokens = usage["completion_tokens"]?.jsonPrimitive?.intOrNull,
-            cachedTokens = usage["prompt_tokens_details"]?.jsonObject
-                ?.get("cached_tokens")?.jsonPrimitive?.intOrNull,
-            reasoningTokens = usage["completion_tokens_details"]?.jsonObject
-                ?.get("reasoning_tokens")?.jsonPrimitive?.intOrNull,
+            inputTokens = (usage["prompt_tokens"] as? JsonPrimitive)?.intOrNull,
+            outputTokens = (usage["completion_tokens"] as? JsonPrimitive)?.intOrNull,
+            // Các trường *_details có thể là JSON null thay vì bị bỏ đi
+            // (máy chủ tương thích) — đọc bằng as? để null chỉ nghĩa là
+            // không biết chi tiết đó, không làm hỏng cả lượt (20/11/2026).
+            cachedTokens = ((usage["prompt_tokens_details"] as? JsonObject)
+                ?.get("cached_tokens") as? JsonPrimitive)?.intOrNull,
+            reasoningTokens = ((usage["completion_tokens_details"] as? JsonObject)
+                ?.get("reasoning_tokens") as? JsonPrimitive)?.intOrNull,
         )
 
         /**
@@ -55,21 +57,21 @@ data class Usage(
          * output_tokens_details.reasoning_tokens.
          */
         fun fromResponses(usage: JsonObject): Usage = Usage(
-            inputTokens = usage["input_tokens"]?.jsonPrimitive?.intOrNull,
-            outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull,
-            cachedTokens = usage["input_tokens_details"]?.jsonObject
-                ?.get("cached_tokens")?.jsonPrimitive?.intOrNull,
-            cacheCreationTokens = usage["input_tokens_details"]?.jsonObject
-                ?.get("cache_write_tokens")?.jsonPrimitive?.intOrNull,
-            reasoningTokens = usage["output_tokens_details"]?.jsonObject
-                ?.get("reasoning_tokens")?.jsonPrimitive?.intOrNull,
+            inputTokens = (usage["input_tokens"] as? JsonPrimitive)?.intOrNull,
+            outputTokens = (usage["output_tokens"] as? JsonPrimitive)?.intOrNull,
+            cachedTokens = ((usage["input_tokens_details"] as? JsonObject)
+                ?.get("cached_tokens") as? JsonPrimitive)?.intOrNull,
+            cacheCreationTokens = ((usage["input_tokens_details"] as? JsonObject)
+                ?.get("cache_write_tokens") as? JsonPrimitive)?.intOrNull,
+            reasoningTokens = ((usage["output_tokens_details"] as? JsonObject)
+                ?.get("reasoning_tokens") as? JsonPrimitive)?.intOrNull,
         )
 
         /** Gemini: `usageMetadata` trong mỗi chunk SSE. */
         fun fromGemini(meta: JsonObject): Usage = Usage(
-            inputTokens = meta["promptTokenCount"]?.jsonPrimitive?.intOrNull,
-            outputTokens = meta["candidatesTokenCount"]?.jsonPrimitive?.intOrNull,
-            cachedTokens = meta["cachedContentTokenCount"]?.jsonPrimitive?.intOrNull,
+            inputTokens = (meta["promptTokenCount"] as? JsonPrimitive)?.intOrNull,
+            outputTokens = (meta["candidatesTokenCount"] as? JsonPrimitive)?.intOrNull,
+            cachedTokens = (meta["cachedContentTokenCount"] as? JsonPrimitive)?.intOrNull,
         )
 
         /**

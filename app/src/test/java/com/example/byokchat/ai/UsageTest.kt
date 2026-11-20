@@ -39,6 +39,43 @@ class UsageTest {
     }
 
     @Test
+    fun parsesOpenAiUsageWithNullDetails() {
+        // Máy chủ tương thích trả *_tokens_details là JSON null thay vì bỏ
+        // đi: tổng số token vẫn đọc được, chi tiết chỉ là không biết.
+        // Trước fix, ?.jsonObject ném "is not a JsonObject" (20/11/2026).
+        val u = Usage.fromOpenAi(obj("""{"prompt_tokens":300,"completion_tokens":40,"prompt_tokens_details":null,"completion_tokens_details":null}"""))
+        assertEquals(300, u.inputTokens)
+        assertEquals(40, u.outputTokens)
+        assertNull(u.cachedTokens)
+        assertNull(u.reasoningTokens)
+    }
+
+    @Test
+    fun parsesOpenAiUsageWithNullCounts() {
+        val u = Usage.fromOpenAi(obj("""{"prompt_tokens":null,"completion_tokens":null}"""))
+        assertNull(u.inputTokens)
+        assertNull(u.outputTokens)
+    }
+
+    @Test
+    fun parsesResponsesUsageWithNullDetails() {
+        val u = Usage.fromResponses(obj("""{"input_tokens":100,"output_tokens":50,"input_tokens_details":null,"output_tokens_details":null}"""))
+        assertEquals(100, u.inputTokens)
+        assertEquals(50, u.outputTokens)
+        assertNull(u.cachedTokens)
+        assertNull(u.cacheCreationTokens)
+        assertNull(u.reasoningTokens)
+    }
+
+    @Test
+    fun parsesGeminiUsageWithNullCounts() {
+        val u = Usage.fromGemini(obj("""{"promptTokenCount":null,"candidatesTokenCount":60}"""))
+        assertNull(u.inputTokens)
+        assertEquals(60, u.outputTokens)
+        assertNull(u.cachedTokens)
+    }
+
+    @Test
     fun mergeKeepsLatestNonNull() {
         val start = Usage(inputTokens = 1200, cachedTokens = 1000)
         val delta = Usage(outputTokens = 56)

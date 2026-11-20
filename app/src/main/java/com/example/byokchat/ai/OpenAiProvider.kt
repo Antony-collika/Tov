@@ -50,25 +50,30 @@ class OpenAiProvider(
                 if (raw.length > 1_000_000) raw.setLength(1_000_000)
                 val obj = runCatching { Json.parseToJsonElement(ev.data).jsonObject }.getOrNull() ?: return@collect
                 obj["error"]?.let { throw AiException(errorText(it)) }
-                // Số token thật nằm ở chunk cuối (khi stream_options.include_usage bật).
-                obj["usage"]?.jsonObject?.let { usage = Usage.merge(usage, Usage.fromOpenAi(it)) }
-                val delta = obj["choices"]?.jsonArray?.firstOrNull()?.jsonObject?.get("delta")?.jsonObject
-                    ?: return@collect
-                delta["content"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
+                // usage là null ở mọi chunk trừ chunk cuối khi
+                // stream_options.include_usage bật (tài liệu OpenAI) — đọc
+                // bằng as? để JSON null chỉ bị bỏ qua, không làm hỏng cả
+                // lượt như ?.jsonObject trước đây (lỗi "is not a
+                // JsonObject" trên provider tương thích, 20/11/2026).
+                // Chunk cuối usage là object nên số token thật vẫn đọc được.
+                (obj["usage"] as? JsonObject)?.let { usage = Usage.merge(usage, Usage.fromOpenAi(it)) }
+                val delta = ((obj["choices"] as? JsonArray)?.firstOrNull() as? JsonObject)
+                    ?.get("delta") as? JsonObject ?: return@collect
+                (delta["content"] as? JsonPrimitive)?.contentOrNull?.let { if (it.isNotEmpty()) emit(AiEvent.Text(it)) }
                 // Máy chủ tương thích trả chuỗi suy luận ở reasoning_content,
                 // ngang hàng với content (vd DeepSeek): tích lũy riêng, không
                 // trộn vào câu trả lời. Đọc với mọi máy chủ Custom — máy chủ
                 // nào không gửi trường này thì không có gì để đọc.
-                delta["reasoning_content"]?.jsonPrimitive?.contentOrNull
+                (delta["reasoning_content"] as? JsonPrimitive)?.contentOrNull
                     ?.let { if (it.isNotEmpty()) emit(AiEvent.Reasoning(it)) }
-                delta["tool_calls"]?.jsonArray?.forEach { tc ->
-                    val t = tc.jsonObject
-                    val idx = t["index"]?.jsonPrimitive?.intOrNull ?: 0
+                (delta["tool_calls"] as? JsonArray)?.forEach { tc ->
+                    val t = tc as? JsonObject ?: return@forEach
+                    val idx = (t["index"] as? JsonPrimitive)?.intOrNull ?: 0
                     val p = partial.getOrPut(idx) { Partial() }
-                    t["id"]?.jsonPrimitive?.contentOrNull?.let { if (it.isNotEmpty()) p.id = it }
-                    val fn = t["function"]?.jsonObject
-                    fn?.get("name")?.jsonPrimitive?.contentOrNull?.let { if (p.name.isEmpty()) p.name = it }
-                    fn?.get("arguments")?.jsonPrimitive?.contentOrNull?.let { p.args.append(it) }
+                    (t["id"] as? JsonPrimitive)?.contentOrNull?.let { if (it.isNotEmpty()) p.id = it }
+                    val fn = t["function"] as? JsonObject
+                    (fn?.get("name") as? JsonPrimitive)?.contentOrNull?.let { if (p.name.isEmpty()) p.name = it }
+                    (fn?.get("arguments") as? JsonPrimitive)?.contentOrNull?.let { p.args.append(it) }
                 }
             }
         } catch (e: Exception) {
@@ -211,8 +216,8 @@ class OpenAiProvider(
     override suspend fun listModels(): List<String> {
         val req = Request.Builder().url("$base/models").withCustomHeaders(cfg).withAuth().get().build()
         val root = Http.client.getJson(req).jsonObject
-        return root["data"]?.jsonArray
-            ?.mapNotNull { it.jsonObject["id"]?.jsonPrimitive?.contentOrNull }
+        return (root["data"] as? JsonArray)
+            ?.mapNotNull { ((it as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull }
             ?.sorted() ?: emptyList()
     }
 }
