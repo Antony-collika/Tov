@@ -72,4 +72,17 @@ object ContextLimits {
             else -> 32_000
         }
     }
+
+    /**
+     * Các nấc giới hạn mà thanh trượt trong hộp «Context window» dừng lại
+     * (20/11/2026): chỉ dừng ở các nấc tròn, từ 32k tới 1M.
+     */
+    val STOPS = listOf(32_000, 64_000, 100_000, 128_000, 200_000, 500_000, 1_000_000)
+
+    /** Giới hạn toàn cục mặc định khi user chưa chỉnh (20/11/2026): 100k. */
+    const val DEFAULT_GLOBAL = 100_000
+
+    /** Đưa một con số bất kỳ về nấc gần nhất (khi đọc kho cũ hoặc khi lưu). */
+    fun snapToStop(value: Int): Int =
+        STOPS.minByOrNull { kotlin.math.abs(it - value) } ?: DEFAULT_GLOBAL
 }

@@ -267,6 +267,25 @@ class SettingsRepository(context: Context) {
         plain.edit().putInt("max_tool_rounds", clamped).apply()
     }
 
+    /**
+     * Giới hạn cửa sổ ngữ cảnh TOÀN CỤC (20/11/2026): một con số cho mọi chat
+     * và mọi provider; chat mới nào cũng lấy đúng số này. User chỉnh bằng
+     * thanh trượt ngay trong hộp «Context window»; mặc định 100k. Số này CHỈ
+     * để hiển thị trong hộp — hộp chỉ mang tính thông tin, không can thiệp
+     * vào cơ chế cắt lịch sử khi gửi (ngân sách cắt vẫn theo bảng tra theo
+     * tên model, xem ContextBuilder.budget).
+     */
+    private val _contextWindowTokens = MutableStateFlow(
+        ContextLimits.snapToStop(plain.getInt("context_window_tokens", ContextLimits.DEFAULT_GLOBAL)),
+    )
+    val contextWindowTokens: StateFlow<Int> = _contextWindowTokens.asStateFlow()
+
+    fun setContextWindowTokens(tokens: Int) {
+        val snapped = ContextLimits.snapToStop(tokens)
+        _contextWindowTokens.value = snapped
+        plain.edit().putInt("context_window_tokens", snapped).apply()
+    }
+
     /** Nhật ký request (Đợt B): ghi mỗi lần gọi model ra file, mặc định bật. */
 
     /**

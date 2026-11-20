@@ -160,6 +160,8 @@ fun ChatScreen(
 
     var showModelPicker by remember { mutableStateOf(false) }
     var showMemory by remember { mutableStateOf(false) }
+    // Giới hạn toàn cục hiện tại — donut cập nhật theo thời gian thực khi user trượt thanh trong hộp.
+    val contextLimit by vm.contextWindowLimit.collectAsState()
     // Số liệu «Context window» chỉ tính khi hộp thoại được mở (xem ChatViewModel.computeTokenStats).
     var memoryStats by remember { mutableStateOf<TokenStats?>(null) }
     LaunchedEffect(showMemory, messages) {
@@ -656,12 +658,14 @@ fun ChatScreen(
     if (showMemory) memoryStats?.let { st ->
         ChatMemoryDialog(
             used = st.used,
-            limit = st.limit,
+            limit = contextLimit,
             dropped = st.droppedTurns,
+            isEstimate = st.isEstimate,
             open = true,
             onDismiss = { showMemory = false; memoryStats = null },
-            onNewChat = onNewChat,
             onOpenMessages = onOpenMessages,
+            onLimitChange = { vm.setContextWindowLimit(it) },
+            onLimitChangeFinished = { scope.launch { memoryStats = vm.computeTokenStats() } },
         )
     }
     regenPrompt?.let { rp ->

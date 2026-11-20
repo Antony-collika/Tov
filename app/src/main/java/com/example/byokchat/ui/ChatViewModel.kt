@@ -18,7 +18,7 @@ import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.chat.RequestAssembler
 import com.example.byokchat.chat.TokenEstimator
-import com.example.byokchat.data.ContextLimits
+import com.example.byokchat.chat.realUsedTokens
 import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.isDefaultTitle
 import com.example.byokchat.data.MessageEntity
@@ -48,7 +48,14 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
 
-data class TokenStats(val used: Int, val limit: Int, val droppedTurns: Int, val droppedTurnIds: List<String> = emptyList())
+data class TokenStats(
+    val used: Int,
+    val limit: Int,
+    val droppedTurns: Int,
+    val droppedTurnIds: List<String> = emptyList(),
+    /** false = `used` là số thật server đếm ở lượt vừa rồi; true = ước lượng. */
+    val isEstimate: Boolean = true,
+)
 
 /** Kết quả xem trước request: sẵn sàng, hoặc lý do cụ thể vì sao chưa có gì để gửi. */
 sealed interface PreviewResult {
@@ -274,20 +281,58 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     }
 
     /**
-     * Đếm token ước lượng của phần ngữ cảnh sẽ gửi đi. Chỉ gọi khi người dùng mở hộp «Context window»
+     * Đếm token của phần ngữ cảnh sẽ gửi đi. Chỉ gọi khi người dùng mở hộp «Context window»
      * (trước đây chạy liên tục nên mỗi lần AI viết thêm chữ lại duyệt cả lịch sử).
+     * Số đã dùng ưu tiên số thật server đếm ở lượt Main gần nhất (xem realUsedOrEstimate);
+     * giới hạn là con số toàn cục do user đặt (mặc định 100k).
      */
     suspend fun computeTokenStats(): TokenStats? {
         val preview = previewAssembled()
         if (preview !is PreviewResult.Ready) return null
         val assembled = preview.request
-        val cfg = providers.value.firstOrNull { it.id == currentModelProviderId.value } ?: return null
+        val limit = app.settings.contextWindowTokens.value
+        val (used, isEstimate) = realUsedOrEstimate(assembled)
         return TokenStats(
-            assembled.historyTokens,
-            ContextLimits.forModel(cfg, currentModel.value.orEmpty()),
+            used,
+            limit,
             assembled.droppedTurnIds.size,
             assembled.droppedTurnIds,
+            isEstimate,
         )
+    }
+
+    /**
+     * Số thật đã dùng cho lượt sắp gửi (20/11/2026): input + output server
+     * đếm ở lượt Main gần nhất trong request log, điều chỉnh cho các lượt
+     * thêm vào hoặc bị cắt kể từ đó (xem realUsedTokens). Không có số thật
+     * (log tắt, hãng không báo, đổi model) thì dùng ước lượng của
+     * RequestAssembler như trước.
+     *
+     * Lưu ý: log ghi cả lượt của sub-agent; mục mới nhất cùng model/provider
+     * thường là lượt Main vừa rồi (Main stream cuối, sau khi các sub xong).
+     * Nếu hộp mở đúng lúc một sub đang chạy thì có thể hiện số của sub — chỉ
+     * ảnh hưởng con số hiển thị trong hộp, không ảnh hưởng việc gửi.
+     */
+    private suspend fun realUsedOrEstimate(assembled: AssembledRequest): Pair<Int, Boolean> {
+        val model = currentModel.value.orEmpty()
+        val cfgName = providers.value.firstOrNull { it.id == currentModelProviderId.value }?.name
+        val entry = withContext(Dispatchers.IO) { app.requestLog.entries(conversationId) }
+            .firstOrNull {
+                it.usage?.inputTokens != null && it.model == model &&
+                    (cfgName == null || it.provider == cfgName)
+            }
+            ?: return assembled.historyTokens to true
+        val lastTotal = (entry.usage?.inputTokens ?: 0) + (entry.usage?.outputTokens ?: 0)
+        val rows = withContext(Dispatchers.IO) { db.messages().getAll(conversationId) }
+        return realUsedTokens(lastTotal, entry.turnNo ?: 0, rows, assembled.droppedTurnIds.toSet()) to false
+    }
+
+    /** Giới hạn cửa sổ ngữ cảnh toàn cục (mặc định 100k) — hộp «Context window» đọc để hiện theo thời gian thực. */
+    val contextWindowLimit: StateFlow<Int> = app.settings.contextWindowTokens
+
+    /** User chỉnh giới hạn bằng thanh trượt trong hộp «Context window». */
+    fun setContextWindowLimit(tokens: Int) {
+        app.settings.setContextWindowTokens(tokens)
     }
 
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
