@@ -589,7 +589,7 @@ class SubAgentRunner(
         // plain finish); a write failure never hides the original outcome
         // (finishOrFallback always returns a result).
         val result = withContext(NonCancellable) {
-            finishOrFallback(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, allReasoning.toString(), workCallRecords, interruptedByMain = stopSource == SubStopSource.MAIN)
+            finishOrFallback(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, allReasoning.toString(), workCallRecords, interruptedByMain = stopSource == SubStopSource.MAIN, startedBy = startedBy, startedByName = startedByName)
         }
         // A stop asked while finish() was writing (the loop was already
         // over, so it had nothing to stop) must not linger into the next
@@ -807,9 +807,11 @@ class SubAgentRunner(
         reasoning: String,
         workCallRecords: List<SubRunToolCall>,
         interruptedByMain: Boolean = false,
+        startedBy: String = "main",
+        startedByName: String = "Main",
     ): SubRunResult {
         return try {
-            finish(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, reasoning, workCallRecords, interruptedByMain)
+            finish(agent, title, brief, conversationId, turnId, turnNo, startedAt, status, error, finalText, rounds, tokensUsed, toolCalls, mainOutbox, sentToUser, reasoning, workCallRecords, interruptedByMain, startedBy, startedByName)
         } catch (e: Exception) {
             SubRunResult(
                 agentId = agent.id, agentName = agent.name,
@@ -853,6 +855,8 @@ class SubAgentRunner(
         reasoning: String,
         workCallRecords: List<SubRunToolCall>,
         interruptedByMain: Boolean = false,
+        startedBy: String = "main",
+        startedByName: String = "Main",
     ): SubRunResult {
         val finishedAt = System.currentTimeMillis()
         val detail = finalText.trim()
