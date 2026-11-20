@@ -9,21 +9,29 @@ import org.junit.Test
 /**
  * Session conversation (17/11/2026, mockup v2): tapping a sub's avatar
  * in ANY turn opens the same screen — the whole Main↔sub exchange of
- * the session, Main on one side, the sub on the other, in time order.
- * The brief and the report live inside the conversation as messages.
- * The messages the sub sent to the user are NOT here (18/11/2026):
- * they already live on the main chat screen.
+ * the session, in time order. The brief and the report live inside the
+ * conversation as messages. The messages the sub sent to the user are
+ * NOT in this timeline: they live on the main chat screen.
+ *
+ * Inbox model (20/11/2026): every conversation screen is that
+ * character's inbox — each bubble carries its real speaker, so a
+ * peer's brief (Bob→Danny) shows under Bob, not Main. Main's inbox
+ * holds only exchanges involving Main, with the recipient on Main's
+ * briefs ("Main tới Bob").
  */
 class SubConversationTest {
 
     private fun run(
         id: Long, turnNo: Int, startedAt: Long, finishedAt: Long,
+        agent: String = "monica", agentName: String = "Monica",
+        startedBy: String = "main", startedByName: String = "Main",
         brief: String = "Find cheerful morning music.",
         title: String = "Find music",
         outbox: List<String> = emptyList(),
         report: String = "Sub-agent Monica finished: done.\nTask: Find cheerful morning music.\nRounds: 2/10, estimated tokens: ~100/32000.\n\nFound it: Mùa xuân đầu tiên.",
     ) = SubRunEntity(
-        id = id, conversationId = "conv-1", turnNo = turnNo, agent = "monica", agentName = "Monica",
+        id = id, conversationId = "conv-1", turnNo = turnNo, agent = agent, agentName = agentName,
+        startedBy = startedBy, startedByName = startedByName,
         title = title, brief = brief, status = "done", rounds = 2, tokens = 100,
         toolCallsJson = "[]", messagesToMainJson = encodeSubRunStrings(outbox),
         fullReport = report, reasoning = "", startedAt = startedAt, finishedAt = finishedAt,
@@ -43,12 +51,12 @@ class SubConversationTest {
         // are NOT in this timeline: they live on the main chat screen.
         assertEquals(
             listOf(
-                "Find cheerful morning music." to true,
-                "Found it: Mùa xuân đầu tiên." to false,
-                "Find a calm song." to true,
-                "Found it: Mùa xuân đầu tiên." to false,
+                "Find cheerful morning music." to "main",
+                "Found it: Mùa xuân đầu tiên." to "monica",
+                "Find a calm song." to "main",
+                "Found it: Mùa xuân đầu tiên." to "monica",
             ),
-            items.map { it.text to it.fromMain },
+            items.map { it.text to it.senderId },
         )
     }
 
@@ -71,12 +79,12 @@ class SubConversationTest {
         // bubble carries only the report body, no header, no outbox list.
         assertEquals(
             listOf(
-                "Find cheerful morning music." to true,
-                "Rõ ạ, em tìm ngay đây." to false,
-                "Báo cáo: đã tìm xong." to false,
-                "Found it: Mùa xuân đầu tiên." to false,
+                "Find cheerful morning music." to "main",
+                "Rõ ạ, em tìm ngay đây." to "monica",
+                "Báo cáo: đã tìm xong." to "monica",
+                "Found it: Mùa xuân đầu tiên." to "monica",
             ),
-            items.map { it.text to it.fromMain },
+            items.map { it.text to it.senderId },
         )
         assertTrue(items.none { it.text.contains("finished:") || it.text.contains("Rounds:") })
     }
@@ -97,7 +105,7 @@ class SubConversationTest {
         // No sub_runs record and no message source anymore: the screen
         // is empty for runs from before the table existed (18/11/2026).
         val items = buildSubConversation(runs = emptyList())
-        assertEquals(emptyList<Pair<String, Boolean>>(), items.map { it.text to it.fromMain })
+        assertEquals(emptyList<Pair<String, String>>(), items.map { it.text to it.senderId })
     }
 
     @Test
@@ -110,7 +118,7 @@ class SubConversationTest {
                 ),
             ),
         )
-        assertEquals(listOf("Find cheerful morning music." to true), items.map { it.text to it.fromMain })
+        assertEquals(listOf("Find cheerful morning music." to "main"), items.map { it.text to it.senderId })
     }
 
     @Test
@@ -119,7 +127,107 @@ class SubConversationTest {
             runs = listOf(run(id = 1, turnNo = 1, startedAt = 1000, finishedAt = 2000, brief = "", title = "Find music")),
         )
         assertEquals("Find music", items.first().text)
-        assertTrue(items.first().fromMain)
+        assertEquals("main", items.first().senderId)
+    }
+
+    @Test
+    fun peerBriefShowsItsRealSenderNotMain() {
+        // The 19/11/2026 device bug: in Danny's screen Bob's delegate
+        // brief showed as Main's message, and in Bob's screen Danny's
+        // wake showed as Main's. A brief now carries its starter.
+        val items = buildSubConversation(
+            runs = listOf(
+                run(
+                    id = 1, turnNo = 1, startedAt = 1000, finishedAt = 2000,
+                    agent = "danny", agentName = "Danny",
+                    startedBy = "bob", startedByName = "Bob",
+                    brief = "Make a table from the news.",
+                    report = "Sub-agent Danny finished: done.\nTask: Make a table.\nRounds: 1/10, estimated tokens: ~10/32000.\n\nTable done.",
+                ),
+                run(
+                    id = 2, turnNo = 1, startedAt = 3000, finishedAt = 4000,
+                    agent = "bob", agentName = "Bob",
+                    startedBy = "danny", startedByName = "Danny",
+                    brief = "Message from Danny:\nTable done, here it is.",
+                    report = "Sub-agent Bob finished: done.\nTask: Find news.\nRounds: 3/10, estimated tokens: ~30/32000.\n\nAll verified.",
+                ),
+            ),
+        )
+        assertEquals(
+            listOf(
+                "Make a table from the news." to "bob",
+                "Table done." to "danny",
+                "Message from Danny:\nTable done, here it is." to "danny",
+                "All verified." to "bob",
+            ),
+            items.map { it.text to it.senderId },
+        )
+        assertEquals(listOf("Bob", "Danny", "Danny", "Bob"), items.map { it.senderName })
+    }
+
+    @Test
+    fun mainInboxShowsOnlyMainExchangesWithRecipient() {
+        // Main's inbox: Main's briefs (with who they are to) plus each
+        // sub's messages to Main and reports. A peer's brief is neither
+        // Main's words nor addressed to Main, so it stays out.
+        val items = buildMainConversation(
+            runs = listOf(
+                run(
+                    id = 1, turnNo = 1, startedAt = 1000, finishedAt = 2000,
+                    agent = "bob", agentName = "Bob",
+                    brief = "Find sports news.",
+                    outbox = listOf("Found two sources."),
+                    report = "Sub-agent Bob finished: done.\nTask: Find sports news.\nRounds: 2/10, estimated tokens: ~20/32000.\n\nTwo sources verified.",
+                ),
+                run(
+                    id = 2, turnNo = 1, startedAt = 3000, finishedAt = 4000,
+                    agent = "danny", agentName = "Danny",
+                    startedBy = "bob", startedByName = "Bob",
+                    brief = "Make a table from the news.",
+                    report = "Sub-agent Danny finished: done.\nTask: Make a table.\nRounds: 1/10, estimated tokens: ~10/32000.\n\nTable done.",
+                ),
+                run(
+                    id = 3, turnNo = 1, startedAt = 5000, finishedAt = 6000,
+                    agent = "bob", agentName = "Bob",
+                    startedBy = "danny", startedByName = "Danny",
+                    brief = "Message from Danny:\nTable done, here it is.",
+                    outbox = listOf("All checked, reporting back."),
+                    report = "Sub-agent Bob finished: done.\nTask: Find news.\nRounds: 3/10, estimated tokens: ~30/32000.\n\nAll verified.",
+                ),
+            ),
+        )
+        // No peer brief appears: neither Bob's brief to Danny nor
+        // Danny's wake message to Bob.
+        assertTrue(items.none { it.text == "Make a table from the news." || it.text.startsWith("Message from Danny:") })
+        // Main's brief carries its recipient; the subs' messages and
+        // reports carry their own names — including Danny's report from
+        // the run Bob started, which is Danny reporting to Main.
+        assertEquals(
+            listOf(
+                Triple("Find sports news.", "main", "Bob"),
+                Triple("Found two sources.", "bob", null),
+                Triple("Two sources verified.", "bob", null),
+                Triple("Table done.", "danny", null),
+                Triple("All checked, reporting back.", "bob", null),
+                Triple("All verified.", "bob", null),
+            ),
+            items.map { Triple(it.text, it.senderId, it.toName) },
+        )
+    }
+
+    @Test
+    fun runWithoutOriginReadsAsMain() {
+        // Old rows (and old backups) have no origin: the default is
+        // Main, which is right — before peer mode every run was
+        // Main-delegated.
+        val row = SubRunEntity(
+            id = 1, conversationId = "conv-1", turnNo = 1, agent = "monica", agentName = "Monica",
+            title = "Find music", brief = "Find cheerful morning music.", status = "done", rounds = 2, tokens = 100,
+            toolCallsJson = "[]", messagesToMainJson = "[]",
+            fullReport = "", reasoning = "", startedAt = 1000, finishedAt = 2000,
+        )
+        assertEquals("main", row.startedBy)
+        assertEquals("Main", row.startedByName)
     }
 
 }
