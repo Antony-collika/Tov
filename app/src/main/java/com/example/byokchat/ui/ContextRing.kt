@@ -99,11 +99,17 @@ fun ChatMemoryDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                // Donut + legend, theo đúng mẫu: donut trái, chú thích phải.
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Donut ở trên, chú thích ở dưới, đủ rộng cho chữ (23/11/2026):
+                // để chú thích bên phải donut thì "Available" không đủ chỗ
+                // trên điện thoại, bị bóp thành từng chữ cái một dòng.
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Box(
                         modifier = Modifier.size(120.dp),
@@ -142,7 +148,7 @@ fun ChatMemoryDialog(
                         }
                     }
                     Column(
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         LegendRow(
@@ -253,7 +259,10 @@ fun ChatMemoryDialog(
 
 @Composable
 private fun LegendRow(dotColor: Color, label: String, value: String, pct: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Box(
             modifier = Modifier
                 .size(10.dp)
