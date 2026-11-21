@@ -104,21 +104,26 @@ fun ChatMemoryDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 // Donut trái, chú thích phải như mẫu — với size vừa điện thoại
-                // (23/11/2026): donut 96dp, chữ chú thích 13sp/12sp, và cột
+                // (21/11/2026): donut 80dp, chữ chú thích 12sp/11sp, và cột
                 // nội dung fillMaxWidth để weight chia đúng chỗ. Lần trước
                 // thiếu fillMaxWidth nên weight bị bóp về 0, chữ vỡ thành
-                // từng chữ cái một dòng.
+                // từng chữ cái một dòng; bản 96dp/13sp (20/11) thì "Used"
+                // vừa nhưng "Available" vẫn gãy làm đôi — đo trên ảnh chụp
+                // máy cậu (màn 360dp, nội dung popup 249dp): nhãn
+                // "Available" 13sp cần ~56dp mà chỉ còn ~39dp. Donut 80dp
+                // chừa 157dp cho chú thích, đủ cho cả nấc 1M ("Available"
+                // 12sp ~52dp + "1,000,000 tokens" 11sp ~86dp + chấm 14dp).
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Box(
-                        modifier = Modifier.size(96.dp),
+                        modifier = Modifier.size(80.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Canvas(modifier = Modifier.size(96.dp)) {
-                            val stroke = Stroke(width = 12.dp.toPx(), cap = StrokeCap.Butt)
+                        Canvas(modifier = Modifier.size(80.dp)) {
+                            val stroke = Stroke(width = 10.dp.toPx(), cap = StrokeCap.Butt)
                             drawArc(
                                 color = availableColor,
                                 startAngle = 0f,
@@ -140,11 +145,11 @@ fun ChatMemoryDialog(
                             Text(
                                 formatExactTokens(used),
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 15.sp,
+                                fontSize = 13.sp,
                             )
                             Text(
                                 "/ ${formatExactTokens(limit)}",
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -272,12 +277,12 @@ private fun LegendRow(dotColor: Color, label: String, value: String, pct: String
                 .background(dotColor),
         )
         Spacer(modifier = Modifier.width(6.dp))
-        Text(label, modifier = Modifier.weight(1f), fontSize = 13.sp)
+        Text(label, modifier = Modifier.weight(1f), fontSize = 12.sp)
         Column(horizontalAlignment = Alignment.End) {
-            Text(value, fontSize = 12.sp, textAlign = TextAlign.End)
+            Text(value, fontSize = 11.sp, textAlign = TextAlign.End)
             Text(
                 pct,
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.End,
             )
