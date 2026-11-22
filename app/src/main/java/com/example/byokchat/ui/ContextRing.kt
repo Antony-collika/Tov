@@ -405,9 +405,9 @@ private fun LegendRow(dotColor: Color, label: String, value: String, pct: String
 /**
  * Thanh trượt tự vẽ, theo mẫu: track liền mạch (không chấm nấc),
  * dày 8dp, nửa trái tím, nửa phải xám nhạt; núm tròn tím 24dp có
- * viền trắng dày; nhãn giá trị nền tím đậm chữ trắng dính sát trên
- * núm, có mũi nhọn chỉ xuống núm. Kéo hoặc chạm vào track đều
- * nhảy tới nấc gần nhất.
+ * viền trắng dày; nhãn giá trị nền tím đậm chữ trắng nổi phía trên
+ * núm và tách khỏi núm, có mũi nhọn chỉ xuống núm. Kéo hoặc chạm
+ * vào track đều nhảy tới nấc gần nhất.
  */
 @Composable
 private fun ReferenceSlider(
@@ -421,11 +421,13 @@ private fun ReferenceSlider(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .height(52.dp),
+            .height(60.dp),
     ) {
         val trackWidthPx = constraints.maxWidth.toFloat()
         val thumbRadiusPx = with(density) { 12.dp.toPx() }
-        val trackCenterYPx = with(density) { 36.dp.toPx() }
+        // Track ở 46dp: đỉnh núm ở 34dp, đáy mũi bong bóng ở ~28dp,
+        // nên bong bóng tách khỏi núm ~6dp như mẫu (không dính sát).
+        val trackCenterYPx = with(density) { 46.dp.toPx() }
         val trackTopPx = trackCenterYPx - with(density) { 4.dp.toPx() }
         fun indexFromX(x: Float): Int {
             val fraction = ((x - thumbRadiusPx) / (trackWidthPx - 2 * thumbRadiusPx))
@@ -443,7 +445,7 @@ private fun ReferenceSlider(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(52.dp)
+                .height(60.dp)
                 .pointerInput(trackWidthPx) {
                     detectTapGestures { offset ->
                         val idx = indexFromX(offset.x)
@@ -460,7 +462,7 @@ private fun ReferenceSlider(
                     }
                 },
         ) {
-            // Nhãn giá trị dính sát trên núm.
+            // Nhãn giá trị nổi phía trên núm, tách khỏi núm như mẫu.
             Column(
                 modifier = Modifier
                     .offset { IntOffset(bubbleXPx.roundToInt(), 0) }
@@ -479,9 +481,9 @@ private fun ReferenceSlider(
                 )
                 // Mũi nhọn chỉ xuống núm (hình vuông xoay 45°, nửa
                 // trên chìm sau nhãn, nửa dưới nhô ra thành mũi).
-                // Mũi 8dp, chìm 4dp: đáy mũi chạm đúng đỉnh núm
-                // (track ở 36dp, núm bắt đầu ở 24dp) nên bong bóng
-                // dính sát núm như mẫu, không còn lơ lửng.
+                // Mũi 8dp, chìm 4dp: đáy mũi ở ~28dp, đỉnh núm ở
+                // 34dp (track ở 46dp), nên bong bóng tách khỏi núm
+                // ~6dp như mẫu — không dính sát vào núm.
                 Box(
                     modifier = Modifier
                         .size(8.dp)
