@@ -93,6 +93,13 @@ private fun formatShortTokens(n: Int): String = when {
  * shrank the centre number to 13sp and made the donut look lost. This
  * build fixes the legend layout instead (value column measured first,
  * label takes the rest, wider custom dialog) and keeps the donut large.
+ *
+ * Follow-up (22/11/2026, matching the AI mockup Duy approved as the
+ * mẫu): Bold alone still read light on device, so the title, the
+ * section heading, the donut centre number and the legend values use
+ * Black/ExtraBold + pure black; the slider bubble is smaller and its
+ * pointer now touches the thumb; the heading/caption/slider gaps are
+ * tightened; the info box has no maxLines so its text is never cut.
  */
 @Composable
 fun ChatMemoryDialog(
@@ -112,8 +119,8 @@ fun ChatMemoryDialog(
     if (!open || limit <= 0) return
     val fraction = (used.toFloat() / limit.toFloat()).coerceIn(0f, 1f)
     val available = maxOf(limit - used, 0)
-    val usedPct = String.format(Locale.US, "%.1f%%", used.toFloat() / limit.toFloat() * 100)
-    val availablePct = String.format(Locale.US, "%.1f%%", available.toFloat() / limit.toFloat() * 100)
+    val usedPct = String.format(Locale.US, "(%.1f%%)", used.toFloat() / limit.toFloat() * 100)
+    val availablePct = String.format(Locale.US, "(%.1f%%)", available.toFloat() / limit.toFloat() * 100)
     val usedColor = Color(0xFFE85D5D)
     val availableColor = Color(0xFFBFE6F2)
     val stops = ContextLimits.STOPS
@@ -135,14 +142,15 @@ fun ChatMemoryDialog(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Tiêu đề + nút X trong vòng tròn xám, như mẫu.
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Context window",
                         fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Black,
+                        color = Color.Black,
                         modifier = Modifier.weight(1f),
                     )
                     Box(
@@ -194,7 +202,8 @@ fun ChatMemoryDialog(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
                                 formatExactTokens(used),
-                                fontWeight = FontWeight.Bold,
+                                fontWeight = FontWeight.Black,
+                                color = Color.Black,
                                 fontSize = 20.sp,
                                 maxLines = 1,
                             )
@@ -208,7 +217,7 @@ fun ChatMemoryDialog(
                     }
                     Column(
                         modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         LegendRow(
                             dotColor = usedColor,
@@ -232,8 +241,13 @@ fun ChatMemoryDialog(
                 )
 
                 // Thanh trượt chọn số tham chiếu.
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Context window length", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Context window length",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        color = Color.Black,
+                    )
                     // (22/11/2026, Duy): chỉ một dòng ngắn, không còn câu
                     // dài 3 dòng "Pick a reference length..." nữa.
                     Text(
@@ -284,7 +298,9 @@ fun ChatMemoryDialog(
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
                         color = onSurfaceVariant,
-                        maxLines = 2,
+                        // Không giới hạn số dòng: câu này cần 3 dòng ở bề
+                        // rộng này, maxLines = 2 đã cắt mất "more memory."
+                        // trên máy thật (22/11/2026).
                     )
                 }
 
@@ -368,13 +384,16 @@ private fun LegendRow(dotColor: Color, label: String, value: String, pct: String
             Text(
                 value,
                 fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.Black,
                 textAlign = TextAlign.End,
                 maxLines = 1,
             )
             Text(
                 pct,
                 fontSize = 10.sp,
+                lineHeight = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.End,
                 maxLines = 1,
@@ -402,11 +421,11 @@ private fun ReferenceSlider(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .height(60.dp),
+            .height(52.dp),
     ) {
         val trackWidthPx = constraints.maxWidth.toFloat()
         val thumbRadiusPx = with(density) { 12.dp.toPx() }
-        val trackCenterYPx = with(density) { 40.dp.toPx() }
+        val trackCenterYPx = with(density) { 36.dp.toPx() }
         val trackTopPx = trackCenterYPx - with(density) { 4.dp.toPx() }
         fun indexFromX(x: Float): Int {
             val fraction = ((x - thumbRadiusPx) / (trackWidthPx - 2 * thumbRadiusPx))
@@ -424,7 +443,7 @@ private fun ReferenceSlider(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(60.dp)
+                .height(52.dp)
                 .pointerInput(trackWidthPx) {
                     detectTapGestures { offset ->
                         val idx = indexFromX(offset.x)
@@ -450,20 +469,23 @@ private fun ReferenceSlider(
             ) {
                 Text(
                     formatShortTokens(stops[stopIndex]),
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(6.dp))
                         .background(primary)
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
                 )
                 // Mũi nhọn chỉ xuống núm (hình vuông xoay 45°, nửa
                 // trên chìm sau nhãn, nửa dưới nhô ra thành mũi).
+                // Mũi 8dp, chìm 4dp: đáy mũi chạm đúng đỉnh núm
+                // (track ở 36dp, núm bắt đầu ở 24dp) nên bong bóng
+                // dính sát núm như mẫu, không còn lơ lửng.
                 Box(
                     modifier = Modifier
-                        .size(10.dp)
-                        .offset(y = (-5).dp)
+                        .size(8.dp)
+                        .offset(y = (-4).dp)
                         .rotate(45f)
                         .background(primary),
                 )
