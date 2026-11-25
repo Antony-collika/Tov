@@ -253,6 +253,8 @@ class ToolRegistry(
 
     override fun endTurn(turnId: String) = confirmations.endTurn(turnId)
 
+    override fun endRun(runKey: String) = confirmations.endRun(runKey)
+
     override suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>?, conversationId: String?): ToolOutcome {
         // Mỗi lần chạy công cụ bắt đầu với bộ nhớ đệm metadata sạch (xem WorkspaceFs).
         env.fs.clearMeta()
@@ -295,7 +297,17 @@ class ToolRegistry(
             } catch (e: Exception) {
                 ModelFacingText.previewFailed(e.message) + "\n" + args.toString().take(500)
             }
-            val allowed = confirmations.ask(ConfirmRequest(displayName, tool.uid, tool.risk, detail, turnId))
+            // Who is asking (25/11/2026): a sub's id comes from CallerScope
+            // (the runner sets it around each sub tool call); Main has none.
+            // The round is the sub's run, or Main's turn when Main asks.
+            val callerId = currentCallerAgentId()
+            val agentName = callerId?.let { id ->
+                teamProvider().firstOrNull { it.id == id }?.name ?: id
+            } ?: "Main"
+            val roundId = currentRunKey() ?: "main:$turnId"
+            val allowed = confirmations.ask(
+                ConfirmRequest(displayName, tool.uid, tool.risk, detail, turnId, agentName = agentName, roundId = roundId),
+            )
             if (!allowed) return ToolOutcome(tool.uid, ModelFacingText.DENIED_ACTION, true)
         }
 

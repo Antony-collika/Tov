@@ -17,9 +17,20 @@ class ConfirmRequest(
     val uid: String,
     val risk: Risk,
     val detail: String,
-    /** The user turn (question + answer) this request belongs to; used by "Allow all in this turn". */
+    /** The user turn (question + answer) this request belongs to. */
     val turnId: String = "",
+    /** Who is asking: "Main" or the sub-agent's name — shown in the dialog and the notification (25/11/2026). */
+    val agentName: String = "Main",
+    /**
+     * The run ("round") this request belongs to; the scope of "Allow
+     * all in this round". Main's round is "main:<turnId>"; a sub's round
+     * is a fresh id per delegation, so Main calling the same sub twice
+     * in one turn is two rounds. Blank = fall back to [turnId].
+     */
+    val roundId: String = "",
 ) {
+    /** The scope key "Allow all in this round" covers. */
+    val scopeKey: String get() = roundId.ifBlank { turnId }
     val result = CompletableDeferred<Boolean>()
     val id: Int = nextId.incrementAndGet()
 
@@ -40,11 +51,12 @@ class ConfirmationBroker {
     @Volatile
     var onFinished: ((ConfirmRequest) -> Unit)? = null
 
-    // Turns for which the user chose "Allow all in this turn". Never applies to Risk.DELETE.
-    private val turnAllowed: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // Runs ("rounds") for which the user chose "Allow all in this round".
+    // One entry per agent per run — never applies to Risk.DELETE.
+    private val roundAllowed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     suspend fun ask(req: ConfirmRequest): Boolean {
-        if (req.risk != Risk.DELETE && req.turnId.isNotEmpty() && req.turnId in turnAllowed) return true
+        if (req.risk != Risk.DELETE && req.scopeKey.isNotEmpty() && req.scopeKey in roundAllowed) return true
         _pending.update { it + req }
         onRequested?.invoke(req)
         try {
@@ -60,22 +72,30 @@ class ConfirmationBroker {
     }
 
     /**
-     * "Allow all in this turn": allow this request and every later (or already waiting) non-delete request of the
-     * same turn. Deleting is never covered: a delete request is just allowed once.
+     * "Allow all in this round": allow this request and every later (or already waiting) non-delete request of the
+     * same agent in the same run. Deleting is never covered: a delete request is just allowed once. A new run of the
+     * same agent in the same turn is a different round and is asked again — the next run may ask for very different
+     * permissions.
      */
-    fun allowAllInTurn(req: ConfirmRequest) {
-        if (req.risk == Risk.DELETE || req.turnId.isEmpty()) {
+    fun allowAllInRound(req: ConfirmRequest) {
+        if (req.risk == Risk.DELETE || req.scopeKey.isEmpty()) {
             resolve(req, true)
             return
         }
-        turnAllowed.add(req.turnId)
+        roundAllowed.add(req.scopeKey)
         resolve(req, true)
-        _pending.value.filter { it.turnId == req.turnId && it.risk != Risk.DELETE }.forEach { resolve(it, true) }
+        _pending.value.filter { it.scopeKey == req.scopeKey && it.risk != Risk.DELETE }.forEach { resolve(it, true) }
     }
 
-    /** Called by the chat engine when a turn's run is over, so "Allow all in this turn" does not outlive it. */
+    /** Called by the chat engine when a turn's run is over, so "Allow all in this round" does not outlive Main's turn. */
     fun endTurn(turnId: String) {
-        turnAllowed.remove(turnId)
+        roundAllowed.remove(turnId)
+        roundAllowed.remove("main:$turnId")
+    }
+
+    /** Called when one sub-agent run is over, so its "Allow all in this round" does not outlive the run. */
+    fun endRun(roundId: String) {
+        roundAllowed.remove(roundId)
     }
 
     /** Used by the notification buttons. Does nothing if the request is already gone. */

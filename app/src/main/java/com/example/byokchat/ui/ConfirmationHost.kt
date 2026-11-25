@@ -25,8 +25,11 @@ import com.example.byokchat.tools.ToolMode
 
 /**
  * Shown on every screen when the AI wants to run a tool that is set to "Ask first".
- * Besides Allow / Deny there are two shortcuts so that a long job is not 10 separate questions:
- * "Allow all in this turn" and "Always allow this tool". Deleting is never covered by them: it is asked every time.
+ * The title names the agent asking (25/11/2026) — Main or the sub-agent's name — so the user
+ * knows who wants the permission. Besides Allow / Deny there are two shortcuts so that a long job
+ * is not 10 separate questions: "Allow all in this round" and "Always allow this tool". Deleting is
+ * never covered by them: it is asked every time. "Allow all in this round" covers only this agent's
+ * current run: a new run of the same agent is asked again.
  */
 @Composable
 fun ConfirmationHost() {
@@ -37,7 +40,7 @@ fun ConfirmationHost() {
     val danger = req.risk == Risk.DELETE
     AlertDialog(
         onDismissRequest = { /* the user must choose Allow or Deny */ },
-        title = { Text(if (danger) "The AI wants to DELETE data" else "The AI wants to do something") },
+        title = { Text(if (danger) "${req.agentName} wants to DELETE data" else "${req.agentName} wants to do something") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Tool: ${req.toolName}", style = MaterialTheme.typography.labelLarge)
@@ -62,8 +65,8 @@ fun ConfirmationHost() {
                         ) { Text("Delete") }
                     } else {
                         Button(onClick = { broker.resolve(req, true) }, modifier = Modifier.fillMaxWidth()) { Text("Allow") }
-                        OutlinedButton(onClick = { broker.allowAllInTurn(req) }, modifier = Modifier.fillMaxWidth()) {
-                            Text("Allow all in this turn")
+                        OutlinedButton(onClick = { broker.allowAllInRound(req) }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Allow all in this round")
                         }
                         TextButton(
                             onClick = {

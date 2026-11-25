@@ -23,8 +23,10 @@ interface ToolRuntime {
      */
     suspend fun definitions(exposed: List<ParsedTool>? = null): List<ToolDef>
     suspend fun execute(call: AiToolCall, turnId: String, exposed: List<ParsedTool>? = null, conversationId: String? = null): ToolOutcome
-    /** The run for this turn is over: forget turn-scoped permissions ("Allow all in this turn"). */
+    /** The run for this turn is over: forget turn-scoped permissions ("Allow all in this round" for Main). */
     fun endTurn(turnId: String)
+    /** One sub-agent run is over: forget that run's "Allow all in this round". Default: nothing to forget. */
+    fun endRun(runKey: String) {}
     /** UID của tool mà model gọi bằng [name] (tên trong danh sách đã chọn nếu có, không thì tên gốc). */
     fun uidForName(name: String, exposed: List<ParsedTool>? = null): String?
     /** Tên model thấy của tool [uid] (tên trong danh sách đã chọn nếu có, không thì tên gốc). */

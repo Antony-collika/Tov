@@ -16,6 +16,7 @@ import com.example.byokchat.data.ProviderType
 import com.example.byokchat.data.SettingsRepository
 import com.example.byokchat.tools.CallerScope
 import com.example.byokchat.tools.ParsedTool
+import com.example.byokchat.tools.RunScope
 import com.example.byokchat.tools.WorkspaceFs
 import com.example.byokchat.tools.schema
 import com.example.byokchat.tools.str
@@ -234,9 +235,13 @@ class SubAgentRunner(
         val deferred = CompletableDeferred<SubRunResult>()
         if (runResults.putIfAbsent(key, deferred) != null) return null
         runTickets[key] = greetingTickets.getOrPut(conversationId) { AtomicInteger(0) }.getAndIncrement()
+        // One fresh round id per delegation (25/11/2026): "Allow all in
+        // this round" covers only this run — Main calling the same sub
+        // twice in one turn is two rounds.
+        val runKey = "sub:${agent.id}:${UUID.randomUUID()}"
         val job = runScope.launch {
             try {
-                val result = run(agent, title, brief, conversationId, turnId, startedBy, startedByName)
+                val result = run(agent, title, brief, conversationId, turnId, startedBy, startedByName, runKey)
                 deferred.complete(result)
                 // Wake Main (GĐ4 batch): bookkeeping only — it must never
                 // break the run's completion, so a failure here is swallowed.
@@ -248,6 +253,9 @@ class SubAgentRunner(
             } finally {
                 runJobs.remove(key)
                 runResults.remove(key)
+                // The run is over: its "Allow all in this round" must not
+                // outlive it. Never breaks completion, so swallowed.
+                runCatching { tools.endRun(runKey) }
             }
         }
         runJobs[key] = job
@@ -339,6 +347,7 @@ class SubAgentRunner(
         turnId: String,
         startedBy: String = "main",
         startedByName: String = "Main",
+        runKey: String = "sub:${agent.id}:${UUID.randomUUID()}",
     ): SubRunResult {
         val startedAt = System.currentTimeMillis()
         val msgDao = db.messages()
@@ -537,7 +546,7 @@ class SubAgentRunner(
                             val toolUid = call.uid ?: tools.uidForName(call.name, exposed) ?: call.name
                             val result = errorBlocker.refusalFor(toolUid, call.name)?.let { refusal ->
                                 ToolOutcome(toolUid, refusal, false)
-                            } ?: withContext(CallerScope(agent.id)) {
+                            } ?: withContext(CallerScope(agent.id) + RunScope(runKey)) {
                                 tools.execute(call, turnId, exposed, conversationId)
                             }.also { errorBlocker.record(toolUid, it.isError) }
                             runCatching {

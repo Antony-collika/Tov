@@ -57,6 +57,25 @@ class CallerScope(val agentId: String) : CoroutineContext.Element {
 /** Id of the agent making the tool call running in this coroutine, null when Main is the caller. */
 suspend fun currentCallerAgentId(): String? = currentCoroutineContext()[CallerScope]?.agentId
 
+/**
+ * Coroutine-context element carrying one run (25/11/2026): the "round"
+ * a tool call belongs to. For Main, a run is a turn; for a sub, a run
+ * is one delegation (Main calling the same sub twice in one turn is
+ * two runs). The runner sets it around each sub tool call, next to
+ * [CallerScope]; [ToolRegistry.execute] only adds elements, so it
+ * survives into the tool's run. It is the scope of "Allow all in this
+ * round": one Allow-all covers only this run, never the next run of
+ * the same agent in the same turn.
+ */
+class RunScope(val runKey: String) : CoroutineContext.Element {
+    companion object Key : CoroutineContext.Key<RunScope>
+
+    override val key: CoroutineContext.Key<*> get() = Key
+}
+
+/** Key of the run the tool call running in this coroutine belongs to, null when Main is the caller. */
+suspend fun currentRunKey(): String? = currentCoroutineContext()[RunScope]?.runKey
+
 class ToolEnv(
     val app: Context,
     val fs: WorkspaceFs,

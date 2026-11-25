@@ -70,7 +70,7 @@ class ChatNotifier(private val context: Context) {
         return true
     }
 
-    /** "AI is waiting for your permission": shown when a tool needs confirmation while the app is in the background. */
+    /** "<Agent> is waiting for your permission": shown when a tool needs confirmation while the app is in the background. */
     fun notifyConfirmation(req: ConfirmRequest) {
         val manager = NotificationManagerCompat.from(context)
         if (!canNotify(manager)) return
@@ -100,9 +100,9 @@ class ChatNotifier(private val context: Context) {
         val detail = req.detail.trim().take(400)
         val builder = NotificationCompat.Builder(context, CHANNEL_CONFIRM)
             .setSmallIcon(R.drawable.ic_stat_tov)
-            .setContentTitle(if (danger) "AI wants to DELETE data" else "AI is waiting for your permission")
-            .setContentText("${req.toolName}: ${detail.lineSequence().firstOrNull().orEmpty()}")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("${req.toolName}\n$detail"))
+            .setContentTitle(if (danger) "${req.agentName} wants to DELETE data" else "${req.agentName} is waiting for your permission")
+            .setContentText("${req.agentName} · ${req.toolName}: ${detail.lineSequence().firstOrNull().orEmpty()}")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("${req.agentName}\n${req.toolName}\n$detail"))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setContentIntent(open)
