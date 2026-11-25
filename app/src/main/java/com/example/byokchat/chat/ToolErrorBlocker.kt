@@ -2,7 +2,7 @@ package com.example.byokchat.chat
 
 /**
  * Blocks a tool that keeps failing in one run (24/11/2026): the lesson
- * from Bob calling get_subagent_result 8 times in a row, about 3 seconds
+ * from Bob calling get_completed_subagent_run 8 times in a row, about 3 seconds
  * apart, with no backoff — every call erroring, and the model just
  * calling again.
  *

@@ -173,7 +173,7 @@ data class RecentlyPlayedEntity(
 /**
  * One stored sub-agent run (context-manager phase, 17/11/2026): the full
  * record of a run, keyed by conversation + agent + turn number, so Main
- * can read it back later with get_subagent_result and the run detail
+ * can read it back later with get_completed_subagent_run and the run detail
  * screen can show it. This table is ADDITIVE: the sub_runs.meta.json
  * journal file in the session folder stays as it is (the user-readable
  * journal); both are written when a run ends, and this table is what

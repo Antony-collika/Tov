@@ -282,7 +282,7 @@ class SettingsRepository(context: Context) {
 
     /** How many times the same tool may fail in a row in one run before
      *  it is switched off for the rest of that run (24/11/2026): the
-     *  lesson from Bob polling get_subagent_result 8 times in a row.
+     *  lesson from Bob polling get_completed_subagent_run 8 times in a row.
      *  One common number for every tool, set in Manage tools next to
      *  Max tool rounds; default 3. A new run starts counting again. */
     private val _maxConsecutiveToolErrors = MutableStateFlow(

@@ -78,6 +78,7 @@ class SubAgentToolsTest {
         assertEquals("send_message", SubAgentRunner.SEND_TOOL_NAME)
         assertEquals("recruit_teammate", tools.first { it.uid == SubAgentTools.RECRUIT_TOOL_UID }.defaultName)
         assertEquals("wake_agent", tools.first { it.uid == SubAgentTools.WAKE_TOOL_UID }.defaultName)
+        assertEquals("get_completed_subagent_run", tools.first { it.uid == SubAgentTools.RECALL_TOOL_UID }.defaultName)
     }
 
     @Test fun delegateSchemaHasRequiredTitleParam() {
@@ -158,10 +159,11 @@ class SubAgentToolsTest {
         ),
         reasoning: String = "Let me think about cheerful music.",
         fullReport: String = "Sub-agent Monica finished: done.\nTask: Find cheerful morning music.\n\nSongs that'll make you dance.",
+        status: String = "done",
     ) = SubRunEntity(
         conversationId = "conv-1", turnNo = 3, agent = "monica", agentName = "Monica",
         title = "Find cheerful morning music", brief = "Find cheerful morning music on YouTube and play it.",
-        status = "done", rounds = 4, tokens = 4756,
+        status = status, rounds = 4, tokens = 4756,
         toolCallsJson = toolCallsJson, messagesToMainJson = "[]",
         fullReport = fullReport, reasoning = reasoning,
         startedAt = 1000L, finishedAt = 2000L,
@@ -274,6 +276,53 @@ class SubAgentToolsTest {
         assertTrue(!text.contains("Tools called:"))
         assertTrue(!text.contains("Reasoning:"))
         assertTrue(text.contains("Full report:"))
+    }
+
+    @Test fun formatSubRunRecordShowsStepResultsForFailedRun() {
+        // A web search that fetched four of five pages before the run
+        // failed: the four already fetched are enough to answer, so the
+        // delegator must see them, not just the tool names.
+        val calls = encodeSubRunToolCalls(
+            listOf(
+                SubRunToolCall("web_search", "{\"q\": \"football news\"}", "Page 1: City won 2-0. Page 2: United drew 1-1."),
+                SubRunToolCall("web_fetch", "{\"url\": \"https://news.example/3\"}", "Page 3: Arsenal lost 0-1."),
+                SubRunToolCall("web_fetch", "{\"url\": \"https://news.example/4\"}", ""),
+            ),
+        )
+        val record = storedRun(status = "failed", toolCallsJson = calls, fullReport = "Sub-agent Danny finished: failed.")
+        val text = SubAgentTools.formatSubRunRecord(record)
+        assertTrue(text.contains("Steps completed before the run ended:"))
+        assertTrue(text.contains("City won 2-0"))
+        assertTrue(text.contains("Arsenal lost 0-1"))
+        // The third call has no result, so it gets no step line at all
+        // (its URL still shows in "Tools called:" above, as it should).
+        assertTrue(!text.contains("- web_fetch: \n"))
+    }
+
+    @Test fun formatSubRunRecordOmitsStepResultsForDoneRun() {
+        // A finished run keeps no step results (its full report carries
+        // the outcome); even if a record somehow holds them, recall does
+        // not show the section.
+        val calls = encodeSubRunToolCalls(
+            listOf(SubRunToolCall("web_search", "{\"q\": \"football news\"}", "Page 1: City won 2-0.")),
+        )
+        val record = storedRun(status = "done", toolCallsJson = calls)
+        assertTrue(!SubAgentTools.formatSubRunRecord(record).contains("Steps completed before the run ended:"))
+    }
+
+    @Test fun decodeSubRunToolCallsReadsOldRowsWithoutResult() {
+        val calls = com.example.byokchat.chat.decodeSubRunToolCalls("[{\"name\":\"web_search\",\"args\":\"{}\"}]")
+        assertEquals(1, calls.size)
+        assertEquals("", calls.first().result)
+    }
+
+    @Test fun truncateStepResultCapsPerCallAndBudget() {
+        val long = "x".repeat(5000)
+        assertEquals(2000, com.example.byokchat.chat.truncateStepResult(long, 20000).length)
+        assertEquals(300, com.example.byokchat.chat.truncateStepResult(long, 300).length)
+        assertEquals("", com.example.byokchat.chat.truncateStepResult(long, 0))
+        assertEquals("", com.example.byokchat.chat.truncateStepResult(long, -5))
+        assertEquals("short", com.example.byokchat.chat.truncateStepResult("short", 20000))
     }
 
     private fun availableTools() = listOf(

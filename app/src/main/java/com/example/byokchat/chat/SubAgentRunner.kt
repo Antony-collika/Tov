@@ -83,7 +83,7 @@ data class ActiveSubRun(
  * delivered as a NEW message at the bottom of the chat (never inserted
  * into its old turn), carrying the task title as its anchor, and the full
  * report is stored in the sub_runs table, so Main can read it back later
- * with get_subagent_result instead of carrying it in its context
+ * with get_completed_subagent_run instead of carrying it in its context
  * (context manager, 17/11/2026). The sub greets the user itself, with
  * its send_message tool at the start of its first round (taught in its
  * system prompt) — Main never scripts the greeting. Every run is also
@@ -269,7 +269,7 @@ class SubAgentRunner(
      * keep going — and awaits the run's report (partial results). Null
      * when the agent is not running, or when its report did not land in
      * time (it still lands in the sub_runs table — read it back with
-     * get_subagent_result).
+     * get_completed_subagent_run).
      */
     suspend fun stopAgent(conversationId: String, agentId: String, source: SubStopSource): SubRunResult? {
         val key = SubRunKey(conversationId, agentId)
@@ -375,6 +375,9 @@ class SubAgentRunner(
         // Work tool calls with their arguments, for the stored run record
         // (send_message is not work — its messages already are).
         val workCallRecords = mutableListOf<SubRunToolCall>()
+        // Chars of per-step results stored so far in this run (25/11/2026):
+        // at most 2,000 per call, 20,000 per run in total.
+        var stepResultsChars = 0
         val key = SubRunKey(conversationId, agent.id)
         var status = SubRunStatus.DONE
         var error: String? = null
@@ -551,6 +554,22 @@ class SubAgentRunner(
                             }.also { errorBlocker.record(toolUid, it.isError) }
                             runCatching {
                                 writeSubToolResult(conversationId, turnId, turnNo, call, result)
+                            }
+                            // Per-step result for the stored record
+                            // (25/11/2026): the call's returned text, cut
+                            // to the per-call and per-run caps, so a run
+                            // that ends early still shows what its steps
+                            // already found. A finished run's results are
+                            // dropped at finish time instead.
+                            val lastIdx = workCallRecords.lastIndex
+                            if (lastIdx >= 0) {
+                                val stored = truncateStepResult(
+                                    result.resultText,
+                                    RUN_STEP_RESULTS_MAX_CHARS - stepResultsChars,
+                                )
+                                stepResultsChars += stored.length
+                                workCallRecords[lastIdx] =
+                                    workCallRecords[lastIdx].copy(result = stored)
                             }
                             result
                         }
@@ -936,6 +955,14 @@ class SubAgentRunner(
         // user-readable journal. A failed table write must not hide the
         // receipt — the file record still lands, and the receipt still
         // returns (the run just cannot be read back from the table).
+        // Per-step results are only kept for runs that did not finish
+        // cleanly (25/11/2026): a finished run already has the sub's full
+        // report, so its step results are dropped here instead of stored.
+        val storedCalls = if (status == SubRunStatus.DONE) {
+            workCallRecords.map { it.copy(result = "") }
+        } else {
+            workCallRecords
+        }
         runCatching {
             db.subRuns().insert(
                 SubRunEntity(
@@ -950,7 +977,7 @@ class SubAgentRunner(
                     status = status.name.lowercase(),
                     rounds = rounds,
                     tokens = tokensUsed,
-                    toolCallsJson = encodeSubRunToolCalls(workCallRecords),
+                    toolCallsJson = encodeSubRunToolCalls(storedCalls),
                     messagesToMainJson = encodeSubRunStrings(mainOutbox),
                     fullReport = detailed,
                     reasoning = reasoning,

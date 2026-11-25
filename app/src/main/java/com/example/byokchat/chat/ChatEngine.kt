@@ -225,7 +225,7 @@ class ChatEngine(
      * Start a Main turn that reports finished sub runs (wake, GĐ4 batch):
      * a fresh turn, numbered after the latest one. The wake text itself
      * is in-memory only — the durable record stays in the sub_runs table,
-     * so Main can read it back with get_subagent_result.
+     * so Main can read it back with get_completed_subagent_run.
      */
     private suspend fun startWake(conversationId: String, wakeText: String) {
         val turnId = UUID.randomUUID().toString()

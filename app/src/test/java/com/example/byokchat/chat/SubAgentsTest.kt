@@ -113,7 +113,7 @@ class SubAgentsTest {
         assertTrue(receipt.contains("\"Find cheerful morning music\""))
         assertTrue(receipt.contains("Turn: 3"))
         assertTrue(receipt.contains("done"))
-        assertTrue(receipt.contains("get_subagent_result"))
+        assertTrue(receipt.contains("get_completed_subagent_run"))
         assertTrue(receipt.contains("\"monica\""))
         assertTrue(!receipt.contains("Morning Coffee"))
     }
@@ -125,7 +125,7 @@ class SubAgentsTest {
         assertTrue(receipt.contains("Turn: 3"))
         assertTrue(receipt.contains("started"))
         assertTrue(!receipt.contains("finished"))
-        assertTrue(receipt.contains("get_subagent_result"))
+        assertTrue(receipt.contains("get_completed_subagent_run"))
         assertTrue(receipt.contains("\"monica\""))
     }
 

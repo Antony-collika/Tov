@@ -177,10 +177,24 @@ data class SubRunResult(
     val receipt: String,
 )
 
-/** One tool call in a stored run: name + arguments (JSON string). Results
- * stay in the turn's message rows; the full report carries the outcome. */
+/**
+ * Per-step results in a stored run (25/11/2026): each tool call keeps
+ * its returned text, cut to at most [STEP_RESULT_MAX_CHARS] per call and
+ * [RUN_STEP_RESULTS_MAX_CHARS] per run in total. Only runs that did not
+ * finish cleanly keep them — a finished run already has the sub's full
+ * report, so its results are dropped at finish time. Old rows (no
+ * `result` field) decode with "".
+ */
+const val STEP_RESULT_MAX_CHARS = 2000
+const val RUN_STEP_RESULTS_MAX_CHARS = 20000
+
+/** One tool call in a stored run: name + arguments (JSON string) + returned text, cut by [truncateStepResult]. */
 @Serializable
-data class SubRunToolCall(val name: String, val args: String)
+data class SubRunToolCall(val name: String, val args: String, val result: String = "")
+
+/** Cut one tool-call result for the stored record: at most 2,000 chars per call and never more than the run's remaining budget. Pure. */
+fun truncateStepResult(text: String, remainingBudget: Int): String =
+    text.take(minOf(STEP_RESULT_MAX_CHARS, remainingBudget.coerceAtLeast(0)))
 
 private val subRunToolCallsSer = ListSerializer(SubRunToolCall.serializer())
 private val subRunStringsSer = ListSerializer(String.serializer())
@@ -211,18 +225,18 @@ fun decodeSubRunStrings(json: String): List<String> =
 fun buildSubRunReceipt(agentName: String, agentId: String, title: String, turnNo: Int, status: SubRunStatus): String =
     "Sub-agent $agentName finished: ${status.name.lowercase().replace('_', ' ')}. " +
         "Task: \"$title\". Turn: $turnNo. " +
-        "To read the full result, call get_subagent_result with agent \"$agentId\" and turn $turnNo."
+        "To read the full result, call get_completed_subagent_run with agent \"$agentId\" and turn $turnNo."
 
 /**
  * The receipt Main gets when a run STARTS (Phase 4 async): the run is
  * still going, so there is no status yet — just the agent, the task
  * title and the turn number, so Main can read the full result back with
- * get_subagent_result once the sub-agent's message arrives.
+ * get_completed_subagent_run once the sub-agent's message arrives.
  */
 fun buildSubRunStartedReceipt(agentName: String, agentId: String, title: String, turnNo: Int): String =
     "Sub-agent $agentName started: \"$title\". Turn: $turnNo. " +
         "The run is still going — its result arrives as the sub-agent's own message in the chat. " +
-        "To read the full result, call get_subagent_result with agent \"$agentId\" and turn $turnNo."
+        "To read the full result, call get_completed_subagent_run with agent \"$agentId\" and turn $turnNo."
 
 /**
  * Whether a finished run wakes Main at once (wake, GĐ4 batch): a run

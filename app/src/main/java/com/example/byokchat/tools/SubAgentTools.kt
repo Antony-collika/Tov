@@ -18,7 +18,7 @@ import kotlinx.serialization.json.JsonObject
  * short receipt comes back as this tool's result at once (agent, task
  * title, turn number), and the full report is stored in the sub_runs
  * table when the run finishes — Main reads it back with
- * get_subagent_result when it needs the details (context manager,
+ * get_completed_subagent_run when it needs the details (context manager,
  * 17/11/2026). A brief report is shown to the user as the sub-agent's
  * own message (the sub sends it with its send_message tool). Dismiss is
  * implicit: when the run ends, the sub leaves the member list (it stays
@@ -66,7 +66,7 @@ object SubAgentTools {
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "delegate_to_subagent",
-            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs in the background — you do not wait for it. This tool returns a short receipt (agent, task title, turn number) right away; the sub-agent's result arrives later as its own message in the chat, and the full result is stored for get_subagent_result. Give a one-line title for the task plus a clear brief with exactly what to find and what to include. The sub-agent greets the user itself when it starts. An agent runs one task at a time — delegating to a busy agent is refused. Do not delegate tasks the agent's tools cannot do.",
+            defaultDescription = "Delegate a task to a sub-agent (a specialist team member). The sub-agent runs in the background — you do not wait for it. This tool returns a short receipt (agent, task title, turn number) right away; the sub-agent's result arrives later as its own message in the chat, and the full result is stored for get_completed_subagent_run. Give a one-line title for the task plus a clear brief with exactly what to find and what to include. The sub-agent greets the user itself when it starts. An agent runs one task at a time — delegating to a busy agent is refused. Do not delegate tasks the agent's tools cannot do.",
             schema = delegateSchema(teamProvider()),
             schemaProvider = { delegateSchema(teamProvider()) },
         ) { env, args ->
@@ -132,7 +132,7 @@ object SubAgentTools {
             uid = RECALL_TOOL_UID,
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
-            defaultName = "get_subagent_result",
+            defaultName = "get_completed_subagent_run",
             defaultDescription = "Read back the full stored result of a finished sub-agent run, by agent and turn number. Use it when you need the details of work you delegated earlier — the delegate tool only returns a short receipt. Only use it for a run that has already finished: if the run is still working, this tool tells you to finish your turn and wait to be woken with the result instead of polling it.",
             schema = recallSchema(teamProvider()),
             schemaProvider = { recallSchema(teamProvider()) },
@@ -190,9 +190,9 @@ object SubAgentTools {
             val team = teamProvider()
             // The caller: a sub-agent's id from the runner (CallerScope);
             // Main never holds this tool — it talks to agents with
-            // delegate_to_subagent and get_subagent_result instead.
+            // delegate_to_subagent and get_completed_subagent_run instead.
             val callerId = currentCallerAgentId()
-                ?: throw ToolException("wake_agent is for sub-agents — Main talks to agents with delegate_to_subagent and get_subagent_result.")
+                ?: throw ToolException("wake_agent is for sub-agents — Main talks to agents with delegate_to_subagent and get_completed_subagent_run.")
             val callerName = team.firstOrNull { it.id == callerId }?.name ?: callerId
             val targetId = args.reqStr("agent")
             val message = args.reqStr("message")
@@ -338,6 +338,17 @@ object SubAgentTools {
         if (calls.isNotEmpty()) {
             appendLine("Tools called:")
             calls.forEach { appendLine("- ${it.name}: ${it.args.ifBlank { "(no arguments)" }}") }
+        }
+        // Per-step results (25/11/2026): only stored for runs that did
+        // not finish cleanly, so the delegator sees what the run's steps
+        // already found before it ended early — e.g. a web search that
+        // fetched four of five pages, where the four are already enough
+        // to answer. A finished run has no step results (its full report
+        // below carries the outcome).
+        val stepsWithResults = calls.filter { it.result.isNotBlank() }
+        if (record.status != "done" && stepsWithResults.isNotEmpty()) {
+            appendLine("Steps completed before the run ended:")
+            stepsWithResults.forEach { appendLine("- ${it.name}: ${it.result}") }
         }
         if (record.reasoning.isNotBlank()) {
             appendLine("Reasoning:")
