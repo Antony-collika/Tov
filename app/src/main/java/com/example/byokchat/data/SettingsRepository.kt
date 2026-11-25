@@ -37,6 +37,19 @@ const val MAX_TOOL_ROUNDS_LIMIT = 50
 fun clampMaxToolRounds(rounds: Int): Int = rounds.coerceIn(MIN_TOOL_ROUNDS, MAX_TOOL_ROUNDS_LIMIT)
 
 /**
+ * Số lỗi liên tiếp tối đa của cùng một tool trong một lượt chạy
+ * (24/11/2026): mặc định 3. Kẹp 1–10 — 1 là chặn ngay sau lỗi đầu
+ * tiên, 10 là nới tay nhất.
+ */
+const val MAX_CONSECUTIVE_TOOL_ERRORS_DEFAULT = 3
+const val MIN_CONSECUTIVE_TOOL_ERRORS = 1
+const val MAX_CONSECUTIVE_TOOL_ERRORS_LIMIT = 10
+
+/** Kẹp số lỗi liên tiếp về 1–10; dùng cho cả lúc lưu setting lẫn lúc đọc kho cũ. */
+fun clampMaxConsecutiveToolErrors(errors: Int): Int =
+    errors.coerceIn(MIN_CONSECUTIVE_TOOL_ERRORS, MAX_CONSECUTIVE_TOOL_ERRORS_LIMIT)
+
+/**
  * Chuẩn hóa thư mục con cho phép ghi (Đợt E, quyết định 6): trim, '\' -> '/',
  * bỏ '/' ở hai đầu, gộp '/' lặp. Rỗng = ghi anywhere bên trong các folder playground.
  */
@@ -265,6 +278,22 @@ class SettingsRepository(context: Context) {
         val clamped = clampMaxToolRounds(rounds)
         _maxToolRounds.value = clamped
         plain.edit().putInt("max_tool_rounds", clamped).apply()
+    }
+
+    /** How many times the same tool may fail in a row in one run before
+     *  it is switched off for the rest of that run (24/11/2026): the
+     *  lesson from Bob polling get_subagent_result 8 times in a row.
+     *  One common number for every tool, set in Manage tools next to
+     *  Max tool rounds; default 3. A new run starts counting again. */
+    private val _maxConsecutiveToolErrors = MutableStateFlow(
+        clampMaxConsecutiveToolErrors(plain.getInt("max_consecutive_tool_errors", MAX_CONSECUTIVE_TOOL_ERRORS_DEFAULT)),
+    )
+    val maxConsecutiveToolErrors: StateFlow<Int> = _maxConsecutiveToolErrors.asStateFlow()
+
+    fun setMaxConsecutiveToolErrors(errors: Int) {
+        val clamped = clampMaxConsecutiveToolErrors(errors)
+        _maxConsecutiveToolErrors.value = clamped
+        plain.edit().putInt("max_consecutive_tool_errors", clamped).apply()
     }
 
     /**

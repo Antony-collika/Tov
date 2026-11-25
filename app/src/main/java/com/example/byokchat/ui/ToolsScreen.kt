@@ -69,6 +69,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     val workspaceOk by container.fs.accessible.collectAsState()
     val searchKey by container.settings.searchApiKey.collectAsState()
     val maxToolRounds by container.settings.maxToolRounds.collectAsState()
+    val maxConsecutiveToolErrors by container.settings.maxConsecutiveToolErrors.collectAsState()
     var query by remember { mutableStateOf("") }
 
     Scaffold(
@@ -148,6 +149,42 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 Text(
                     "How many rounds of tool calls Main may run in one turn. " +
                         "When the AI keeps calling tools past this many rounds, the turn stops with an error.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                )
+                // Max consecutive tool errors (24/11/2026): same pattern
+                // as Max tool rounds above — one common number for every
+                // tool, default 3. When the same tool fails this many
+                // times in a row in one run, it is switched off for the
+                // rest of that run; a new run starts counting again.
+                var errorsText by remember(maxConsecutiveToolErrors) { mutableStateOf(maxConsecutiveToolErrors.toString()) }
+                var errorsFocused by remember { mutableStateOf(false) }
+                Text(
+                    "Max consecutive tool errors (1–10)",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                )
+                OutlinedTextField(
+                    value = errorsText,
+                    onValueChange = { input ->
+                        val digits = input.filter { it.isDigit() }
+                        errorsText = digits
+                        digits.toIntOrNull()?.let { container.settings.setMaxConsecutiveToolErrors(it) }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        .onFocusChanged { focus ->
+                            if (errorsFocused && !focus.isFocused && errorsText.toIntOrNull() == null) {
+                                errorsText = maxConsecutiveToolErrors.toString()
+                            }
+                            errorsFocused = focus.isFocused
+                        },
+                )
+                Text(
+                    "How many times the same tool may fail in a row in one run before it is switched off for the rest of that run. " +
+                        "A new run starts counting again.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),

@@ -283,6 +283,10 @@ class ChatEngine(
             msgDao.getAll(conversationId).filter { it.role == "tool" }.maxByOrNull { it.seq }?.turnId
         } else null
         var rounds = 0
+        // Consecutive-error block (24/11/2026): one blocker per turn —
+        // a tool that fails 3 times in a row (default) is switched off
+        // for the rest of this turn. A new turn starts counting again.
+        val errorBlocker = ToolErrorBlocker(settings.maxConsecutiveToolErrors.value)
         while (true) {
             val conv = db.conversations().get(conversationId) ?: return
             val assistantId = UUID.randomUUID().toString()
@@ -556,8 +560,11 @@ class ChatEngine(
                 return
             }
             for (call in calls) {
-                val outcome = try {
-                    tools.execute(call, turnId, exposed, conversationId)
+                val toolUid = call.uid ?: tools.uidForName(call.name, exposed) ?: call.name
+                val outcome = errorBlocker.refusalFor(toolUid, call.name)?.let { refusal ->
+                    ToolOutcome(toolUid, refusal, false)
+                } ?: try {
+                    tools.execute(call, turnId, exposed, conversationId).also { errorBlocker.record(toolUid, it.isError) }
                 } catch (e: CancellationException) {
                     // The user stopped the turn mid-tool: mark every call of
                     // this round that has no result yet as Interrupted, so

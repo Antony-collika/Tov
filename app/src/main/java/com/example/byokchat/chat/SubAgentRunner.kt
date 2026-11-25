@@ -346,6 +346,12 @@ class SubAgentRunner(
         // or regenerating the turn takes them along.
         val turnNo = msgDao.getTurn(conversationId, turnId).firstOrNull { it.role == "user" }?.turnNo ?: 0
         var rounds = 0
+        // Consecutive-error block (24/11/2026): one blocker per run —
+        // a tool that fails 3 times in a row (default) is switched off
+        // for the rest of this run. A new run (Main delegating this sub
+        // again) starts counting again. send_message is not counted:
+        // it is handled locally below, not through tools.execute.
+        val errorBlocker = ToolErrorBlocker(settings.maxConsecutiveToolErrors.value)
         var tokensUsed = 0
         val toolCalls = mutableListOf<String>()
         // Messages the sub sent with its send_message tool: to Main (kept
@@ -528,9 +534,12 @@ class SubAgentRunner(
                             // to know who called it (wake_agent) can read
                             // it. execute() only adds context elements, so
                             // the scope survives into the tool's run.
-                            val result = withContext(CallerScope(agent.id)) {
+                            val toolUid = call.uid ?: tools.uidForName(call.name, exposed) ?: call.name
+                            val result = errorBlocker.refusalFor(toolUid, call.name)?.let { refusal ->
+                                ToolOutcome(toolUid, refusal, false)
+                            } ?: withContext(CallerScope(agent.id)) {
                                 tools.execute(call, turnId, exposed, conversationId)
-                            }
+                            }.also { errorBlocker.record(toolUid, it.isError) }
                             runCatching {
                                 writeSubToolResult(conversationId, turnId, turnNo, call, result)
                             }
