@@ -70,6 +70,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
     val searchKey by container.settings.searchApiKey.collectAsState()
     val maxToolRounds by container.settings.maxToolRounds.collectAsState()
     val maxConsecutiveToolErrors by container.settings.maxConsecutiveToolErrors.collectAsState()
+    val maxToolRoundTimeoutMinutes by container.settings.maxToolRoundTimeoutMinutes.collectAsState()
     var query by remember { mutableStateOf("") }
 
     Scaffold(
@@ -185,6 +186,42 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 Text(
                     "How many times the same tool may fail in a row in one run before it is switched off for the rest of that run. " +
                         "A new run starts counting again.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
+                )
+                // Max tool-round timeout (25/11/2026): same pattern as
+                // above — minutes, default 3, no upper limit. One run of
+                // one agent (Main's turn loop, or one sub-agent run), not
+                // the whole turn: each run has its own time budget.
+                var timeoutText by remember(maxToolRoundTimeoutMinutes) { mutableStateOf(maxToolRoundTimeoutMinutes.toString()) }
+                var timeoutFocused by remember { mutableStateOf(false) }
+                Text(
+                    "Max tool-round timeout (minutes)",
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                )
+                OutlinedTextField(
+                    value = timeoutText,
+                    onValueChange = { input ->
+                        val digits = input.filter { it.isDigit() }
+                        timeoutText = digits
+                        digits.toIntOrNull()?.let { container.settings.setMaxToolRoundTimeoutMinutes(it) }
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                        .onFocusChanged { focus ->
+                            if (timeoutFocused && !focus.isFocused && timeoutText.toIntOrNull() == null) {
+                                timeoutText = maxToolRoundTimeoutMinutes.toString()
+                            }
+                            timeoutFocused = focus.isFocused
+                        },
+                )
+                Text(
+                    "How long one agent's tool round may run before it stops. " +
+                        "One run of one agent — Main's turn loop or one sub-agent run — not the whole turn. " +
+                        "No upper limit: some jobs need a long time.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),

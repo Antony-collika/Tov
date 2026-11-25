@@ -444,6 +444,13 @@ class SubAgentRunner(
                     ProviderType.CUSTOM -> "custom"
                     else -> null
                 }
+                // Tool-round timeout (25/11/2026): this run's own time
+                // budget, from the Manage tools setting (default 3
+                // minutes, no upper limit). One run of one agent — not
+                // the whole turn. Checked between rounds, like the round
+                // cap; a single very long tool call can still overrun.
+                val timeoutMinutes = settings.maxToolRoundTimeoutMinutes.value
+                val deadlineMs = startedAt + timeoutMinutes * 60_000L
                 // The loop runs under the sub's own job, so stopSub can
                 // cancel it without touching Main's turn. finish() below
                 // runs outside it, in Main's context.
@@ -456,6 +463,11 @@ class SubAgentRunner(
                         toolDefs.sumOf { TokenEstimator.text(it.name + it.description + it.schema.toString()) }
                     tokensUsed = maxOf(tokensUsed, estimate)
                     updateActive(key, agent, rounds, tokensUsed)
+                    if (System.currentTimeMillis() > deadlineMs) {
+                        status = SubRunStatus.TIMEOUT
+                        error = "Stopped: the run took longer than $timeoutMinutes minute(s) (Max tool-round timeout)."
+                        break
+                    }
                     if (estimate > agent.tokenBudget) {
                         status = SubRunStatus.BUDGET_EXCEEDED
                         error = "Stopped: the estimated request ($estimate tokens) passed this agent's token budget (${agent.tokenBudget})."
@@ -926,6 +938,7 @@ class SubAgentRunner(
                 SubRunStatus.BUDGET_EXCEEDED -> "${agent.name} did part of the task, then ran out of token budget."
                 SubRunStatus.FAILED -> "${agent.name} couldn't finish: ${error ?: "unknown error"}"
                 SubRunStatus.INTERRUPTED -> "${agent.name} was stopped."
+                SubRunStatus.TIMEOUT -> "${agent.name} did part of the task, then ran out of time."
             }
         } else {
             fallbackBrief(finalText, sentToUser)

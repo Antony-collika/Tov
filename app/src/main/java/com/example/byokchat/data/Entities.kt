@@ -207,7 +207,7 @@ data class SubRunEntity(
     val title: String,
     /** The detailed brief Main gave the agent. */
     val brief: String,
-    /** Lowercase SubRunStatus name: done / failed / round_cap / budget_exceeded / interrupted. */
+    /** Lowercase SubRunStatus name: done / failed / round_cap / budget_exceeded / interrupted / timeout. */
     val status: String,
     val rounds: Int,
     val tokens: Int,

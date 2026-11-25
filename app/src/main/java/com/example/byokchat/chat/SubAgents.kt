@@ -150,7 +150,7 @@ data class SubAgentTeam(
 fun emptyTeam(): SubAgentTeam = SubAgentTeam(agents = emptyList())
 
 /** How a sub run ended. */
-enum class SubRunStatus { DONE, FAILED, ROUND_CAP, BUDGET_EXCEEDED, INTERRUPTED }
+enum class SubRunStatus { DONE, FAILED, ROUND_CAP, BUDGET_EXCEEDED, INTERRUPTED, TIMEOUT }
 
 /** The outcome of one sub run: the brief for the user, the detail for Main. */
 data class SubRunResult(
@@ -240,12 +240,14 @@ fun buildSubRunStartedReceipt(agentName: String, agentId: String, title: String,
 
 /**
  * Whether a finished run wakes Main at once (wake, GĐ4 batch): a run
- * that failed, ran out of rounds or ran out of tokens is an error worth
- * waking for. A run Main or the user stopped (INTERRUPTED) is not — it
- * just counts as finished for the all-done wake.
+ * that failed, ran out of rounds, ran out of tokens or ran out of time
+ * is an error worth waking for. A run Main or the user stopped
+ * (INTERRUPTED) is not — it just counts as finished for the all-done
+ * wake.
  */
 fun isWakeError(status: SubRunStatus): Boolean =
-    status == SubRunStatus.FAILED || status == SubRunStatus.ROUND_CAP || status == SubRunStatus.BUDGET_EXCEEDED
+    status == SubRunStatus.FAILED || status == SubRunStatus.ROUND_CAP ||
+        status == SubRunStatus.BUDGET_EXCEEDED || status == SubRunStatus.TIMEOUT
 
 /**
  * The text Main reads in its wake turn (wake, GĐ4 batch): a short header

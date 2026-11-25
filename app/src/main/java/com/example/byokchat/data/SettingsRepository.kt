@@ -50,6 +50,21 @@ fun clampMaxConsecutiveToolErrors(errors: Int): Int =
     errors.coerceIn(MIN_CONSECUTIVE_TOOL_ERRORS, MAX_CONSECUTIVE_TOOL_ERRORS_LIMIT)
 
 /**
+ * Thời gian tối đa một vòng tool của một agent được chạy, tính bằng phút
+ * (25/11/2026): mặc định 3. Không giới hạn trên — có những job cần chạy
+ * lâu. Chỉ kẹp dưới 1 phút. Một vòng là một lượt chạy của đúng agent đó
+ * (lượt gọi tool của Main, hoặc một lượt chạy của sub), không phải thời
+ * gian của cả turn — một turn của Main có thể chứa nhiều lượt chạy của
+ * sub, mỗi lượt có ngân sách thời gian riêng.
+ */
+const val MAX_TOOL_ROUND_TIMEOUT_DEFAULT = 3
+const val MIN_TOOL_ROUND_TIMEOUT_MINUTES = 1
+
+/** Kẹp thời gian tối đa một vòng tool về tối thiểu 1 phút, không giới hạn trên. */
+fun clampMaxToolRoundTimeoutMinutes(minutes: Int): Int =
+    minutes.coerceAtLeast(MIN_TOOL_ROUND_TIMEOUT_MINUTES)
+
+/**
  * Chuẩn hóa thư mục con cho phép ghi (Đợt E, quyết định 6): trim, '\' -> '/',
  * bỏ '/' ở hai đầu, gộp '/' lặp. Rỗng = ghi anywhere bên trong các folder playground.
  */
@@ -294,6 +309,21 @@ class SettingsRepository(context: Context) {
         val clamped = clampMaxConsecutiveToolErrors(errors)
         _maxConsecutiveToolErrors.value = clamped
         plain.edit().putInt("max_consecutive_tool_errors", clamped).apply()
+    }
+
+    /** How long one agent's tool round may run, in minutes (25/11/2026):
+     *  default 3, no upper limit. One run of one agent — Main's turn loop
+     *  or one sub-agent run — not the whole turn. Not backed up, like
+     *  Max tool rounds and Max consecutive tool errors. */
+    private val _maxToolRoundTimeoutMinutes = MutableStateFlow(
+        clampMaxToolRoundTimeoutMinutes(plain.getInt("max_tool_round_timeout_minutes", MAX_TOOL_ROUND_TIMEOUT_DEFAULT)),
+    )
+    val maxToolRoundTimeoutMinutes: StateFlow<Int> = _maxToolRoundTimeoutMinutes.asStateFlow()
+
+    fun setMaxToolRoundTimeoutMinutes(minutes: Int) {
+        val clamped = clampMaxToolRoundTimeoutMinutes(minutes)
+        _maxToolRoundTimeoutMinutes.value = clamped
+        plain.edit().putInt("max_tool_round_timeout_minutes", clamped).apply()
     }
 
     /**

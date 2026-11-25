@@ -152,8 +152,16 @@ class SubAgentsTest {
         assertTrue(isWakeError(SubRunStatus.FAILED))
         assertTrue(isWakeError(SubRunStatus.ROUND_CAP))
         assertTrue(isWakeError(SubRunStatus.BUDGET_EXCEEDED))
+        assertTrue(isWakeError(SubRunStatus.TIMEOUT))
         assertFalse(isWakeError(SubRunStatus.DONE))
         assertFalse(isWakeError(SubRunStatus.INTERRUPTED))
+    }
+
+    @Test fun toolRoundTimeoutClampsToAtLeastOneMinuteWithNoUpperLimit() {
+        assertEquals(3, com.example.byokchat.data.clampMaxToolRoundTimeoutMinutes(3))
+        assertEquals(1, com.example.byokchat.data.clampMaxToolRoundTimeoutMinutes(0))
+        assertEquals(1, com.example.byokchat.data.clampMaxToolRoundTimeoutMinutes(-5))
+        assertEquals(120, com.example.byokchat.data.clampMaxToolRoundTimeoutMinutes(120))
     }
 
     @Test fun wakeTextListsEachRunWithItsReportVerbatim() {

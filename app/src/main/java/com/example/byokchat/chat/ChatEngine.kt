@@ -287,6 +287,12 @@ class ChatEngine(
         // a tool that fails 3 times in a row (default) is switched off
         // for the rest of this turn. A new turn starts counting again.
         val errorBlocker = ToolErrorBlocker(settings.maxConsecutiveToolErrors.value)
+        // Tool-round timeout (25/11/2026): this turn loop's own time
+        // budget, from the Manage tools setting (default 3 minutes, no
+        // upper limit). Main's turn loop is Main's own run — a sub run
+        // has its own separate budget.
+        val timeoutMinutes = settings.maxToolRoundTimeoutMinutes.value
+        val roundDeadlineMs = System.currentTimeMillis() + timeoutMinutes * 60_000L
         while (true) {
             val conv = db.conversations().get(conversationId) ?: return
             val assistantId = UUID.randomUUID().toString()
@@ -556,6 +562,25 @@ class ChatEngine(
                 )
                 notifyFinished(conversationId, displayTitle(conv.title), success = false, answer = "")
                 // Ghi file ở nền (Đợt fix 12/11/2026 — nút gửi): như trên.
+                exportHistoryInBackground(conversationId, turnNo)
+                return
+            }
+            // Tool-round timeout (25/11/2026): checked between rounds,
+            // like the round cap; a single very long tool call can still
+            // overrun.
+            if (System.currentTimeMillis() > roundDeadlineMs) {
+                msgDao.upsert(
+                    base.copy(
+                        id = UUID.randomUUID().toString(),
+                        turnNo = turnNo,
+                        seq = (msgDao.maxSeq(conversationId) ?: 0) + 1,
+                        status = "error",
+                        text = "",
+                        toolCallsJson = null,
+                        error = "Stopped because the tool round took longer than $timeoutMinutes minute(s) (Max tool-round timeout).",
+                    )
+                )
+                notifyFinished(conversationId, displayTitle(conv.title), success = false, answer = "")
                 exportHistoryInBackground(conversationId, turnNo)
                 return
             }
