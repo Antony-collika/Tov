@@ -1,5 +1,6 @@
 package com.example.byokchat.tools
 
+import com.example.byokchat.chat.ActiveSubRun
 import com.example.byokchat.chat.DiagnosticsLog
 import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.chat.SubAgentRunner
@@ -132,18 +133,26 @@ object SubAgentTools {
             group = ToolGroup.AGENTS,
             risk = Risk.READ,
             defaultName = "get_subagent_result",
-            defaultDescription = "Read back the full stored result of a past sub-agent run, by agent and turn number. Use it when you need the details of work you delegated earlier — the delegate tool only returns a short receipt.",
+            defaultDescription = "Read back the full stored result of a finished sub-agent run, by agent and turn number. Use it when you need the details of work you delegated earlier — the delegate tool only returns a short receipt. Only use it for a run that has already finished: if the run is still working, this tool tells you to finish your turn and wait to be woken with the result instead of polling it.",
             schema = recallSchema(teamProvider()),
             schemaProvider = { recallSchema(teamProvider()) },
         ) { env, args ->
             val conversationId = currentConversationId() ?: throw ToolException("No conversation is open.")
             val agentId = args.reqStr("agent")
             val turn = args.int("turn") ?: throw ToolException("Missing parameter 'turn'.")
+            // The caller's current turn number, for the same-turn check in
+            // recallSubRun: a recall of a run delegated in this very turn
+            // while it is still working is polling, not reading a past run.
+            val callerTurnNo = currentTurnId()?.let { turnId ->
+                env.db.messages().getTurn(conversationId, turnId).firstOrNull()?.turnNo
+            }
             recallSubRun(
                 lookup = { cid, agent, turnNo -> env.db.subRuns().get(cid, agent, turnNo) },
                 conversationId = conversationId,
                 agentId = agentId,
                 turnNo = turn,
+                activeRun = subRunner()?.activeRun(conversationId, agentId),
+                callerTurnNo = callerTurnNo,
             )
         },
         Tool(
@@ -268,16 +277,52 @@ object SubAgentTools {
      * NOT checked against the team: a run stays readable even after its
      * agent was turned off or removed. Throws a clear ToolException when
      * nothing is stored for that agent and turn — never invents a result.
+     *
+     * Recall refusal (24/11/2026): the stored record is checked FIRST,
+     * so a finished run always reads back, even in the turn it was
+     * delegated in. Only when there is no stored record yet AND the
+     * target run is still working in this very turn — the same agent,
+     * the same turn number, and the caller is in that turn too — does
+     * the tool return a refusal instead of "No stored result": the
+     * caller delegated this run in this turn and is polling it before
+     * it finished. The refusal is a normal result, not an error, so
+     * the caller reads it as an instruction to finish its turn and
+     * wait to be woken. The check is per run (agent + turn number),
+     * not per agent: recalling a finished turn 1 while turn 2 is
+     * still running still reads turn 1 back.
      */
     suspend fun recallSubRun(
         lookup: SubRunLookup,
         conversationId: String,
         agentId: String,
         turnNo: Int,
+        activeRun: ActiveSubRun? = null,
+        callerTurnNo: Int? = null,
     ): String {
         val record = lookup(conversationId, agentId, turnNo)
-            ?: throw ToolException("No stored result for sub-agent '$agentId' turn $turnNo in this conversation.")
-        return formatSubRunRecord(record)
+        if (record != null) return formatSubRunRecord(record)
+        if (activeRun != null && activeRun.turnNo == turnNo &&
+            (callerTurnNo == null || callerTurnNo == turnNo)
+        ) {
+            return buildRecallRunningRefusal(activeRun)
+        }
+        throw ToolException("No stored result for sub-agent '$agentId' turn $turnNo in this conversation.")
+    }
+
+    /**
+     * The refusal for recalling a run that is still working in this
+     * turn (24/11/2026): names the agent, the turn and the task title,
+     * tells the caller to finish its turn and wait to be woken, and
+     * tells it not to start the worker's job itself — the duplicate
+     * work Bob did while Danny was still running (20/11/2026). Pure,
+     * so it can be unit-tested without Android.
+     */
+    fun buildRecallRunningRefusal(activeRun: ActiveSubRun): String {
+        val title = activeRun.title.takeIf { it.isNotBlank() }?.let { " — \"$it\"" }.orEmpty()
+        return "${activeRun.name} is still working on turn ${activeRun.turnNo}$title. " +
+            "Finish your turn now — you will be woken with the result when ${activeRun.name} finishes. " +
+            "Do not call this tool while the sub-agent is working. " +
+            "Do not start ${activeRun.name}'s work yourself."
     }
 
     /**

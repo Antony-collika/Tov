@@ -1,5 +1,6 @@
 package com.example.byokchat.tools
 
+import com.example.byokchat.chat.ActiveSubRun
 import com.example.byokchat.chat.SubAgentConfig
 import com.example.byokchat.chat.SubAgentRunner
 import com.example.byokchat.chat.SubRunToolCall
@@ -190,6 +191,81 @@ class SubAgentToolsTest {
             assertTrue(e.message!!.contains("monica"))
             assertTrue(e.message!!.contains("9"))
         }
+    }
+
+    private fun runningDanny(turnNo: Int = 1) = ActiveSubRun(
+        agentId = "danny", name = "Danny", brief = "Find football news.",
+        startedAt = 1000L, turnNo = turnNo, title = "Find football news",
+        startedBy = "bob", startedByName = "Bob",
+    )
+
+    @Test fun recallSubRunReturnsRefusalWhenSameTurnRunStillWorking() = runBlocking {
+        // Bob delegated Danny in turn 1 and polls it in the same turn:
+        // no stored record yet, the run is still working — return the
+        // refusal as a normal result, not an error, so the caller reads
+        // it as an instruction to finish its turn and wait to be woken.
+        val text = SubAgentTools.recallSubRun(
+            lookup = { _, _, _ -> null },
+            conversationId = "conv-1", agentId = "danny", turnNo = 1,
+            activeRun = runningDanny(turnNo = 1), callerTurnNo = 1,
+        )
+        assertTrue(text.contains("Danny"))
+        assertTrue(text.contains("turn 1"))
+        assertTrue(text.contains("Find football news"))
+        assertTrue(text.contains("Finish your turn now"))
+        assertTrue(text.contains("Do not call this tool while the sub-agent is working"))
+        assertTrue(text.contains("Do not start Danny's work yourself"))
+    }
+
+    @Test fun recallSubRunStillReturnsFinishedRecordWhenRunAlreadyStored() = runBlocking {
+        // Stored record wins: even if a run with the same agent and turn
+        // is somehow still listed as active, a finished turn 1 reads back.
+        val text = SubAgentTools.recallSubRun(
+            lookup = { _, agent, turn -> if (agent == "danny" && turn == 1) storedRun() else null },
+            conversationId = "conv-1", agentId = "danny", turnNo = 1,
+            activeRun = runningDanny(turnNo = 1), callerTurnNo = 1,
+        )
+        assertTrue(text.contains("Songs that'll make you dance"))
+        assertTrue(!text.contains("still working"))
+    }
+
+    @Test fun recallSubRunThrowsWhenActiveRunIsADifferentTurn() = runBlocking {
+        // Per-run check, not per-agent: Danny turn 2 is still working,
+        // but the caller asked for turn 1, which was never stored and
+        // is not running — so this is a missing run, not polling.
+        try {
+            SubAgentTools.recallSubRun(
+                lookup = { _, _, _ -> null },
+                conversationId = "conv-1", agentId = "danny", turnNo = 1,
+                activeRun = runningDanny(turnNo = 2), callerTurnNo = 1,
+            )
+            fail("Expected ToolException for a missing run.")
+        } catch (e: ToolException) {
+            assertTrue(e.message!!.contains("No stored result"))
+        }
+    }
+
+    @Test fun recallSubRunThrowsWhenCallerIsInALaterTurn() = runBlocking {
+        // Same-turn scope: the run was delegated in turn 1 and is still
+        // working, but the caller is now in turn 2 — the refusal only
+        // covers polling inside the turn that delegated it.
+        try {
+            SubAgentTools.recallSubRun(
+                lookup = { _, _, _ -> null },
+                conversationId = "conv-1", agentId = "danny", turnNo = 1,
+                activeRun = runningDanny(turnNo = 1), callerTurnNo = 2,
+            )
+            fail("Expected ToolException for a missing run.")
+        } catch (e: ToolException) {
+            assertTrue(e.message!!.contains("No stored result"))
+        }
+    }
+
+    @Test fun buildRecallRunningRefusalNamesAgentTurnAndTitle() {
+        val text = SubAgentTools.buildRecallRunningRefusal(runningDanny(turnNo = 2))
+        assertTrue(text.contains("Danny"))
+        assertTrue(text.contains("turn 2"))
+        assertTrue(text.contains("Find football news"))
     }
 
     @Test fun formatSubRunRecordOmitsEmptySections() {

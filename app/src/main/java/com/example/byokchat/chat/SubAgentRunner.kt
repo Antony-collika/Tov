@@ -62,6 +62,11 @@ data class ActiveSubRun(
     val roundCap: Int = SubAgentConfig.DEFAULT_ROUND_CAP,
     val tokensUsed: Int = 0,
     val tokenBudget: Int = SubAgentConfig.DEFAULT_TOKEN_BUDGET,
+    /** Which turn this run was delegated in, what it was called, and who delegated it — the recall tool needs all three to tell a still-running run apart from a finished one and from a run that was never delegated (recall refusal, 24/11/2026). */
+    val turnNo: Int = 0,
+    val title: String = "",
+    val startedBy: String = "main",
+    val startedByName: String = "Main",
 )
 
 /**
@@ -145,6 +150,10 @@ class SubAgentRunner(
 
     private val _activeSubs = MutableStateFlow<Map<SubRunKey, ActiveSubRun>>(emptyMap())
     val activeSubs: StateFlow<Map<SubRunKey, ActiveSubRun>> = _activeSubs.asStateFlow()
+
+    /** The run currently in progress for one agent in a conversation, if any (recall refusal, 24/11/2026). */
+    fun activeRun(conversationId: String, agentId: String): ActiveSubRun? =
+        _activeSubs.value[SubRunKey(conversationId, agentId)]
 
     /** Tokens used by finished sub runs, per conversation — the session token bar on the Members screen. */
     private val _sessionSubTokens = MutableStateFlow<Map<String, Int>>(emptyMap())
@@ -357,7 +366,7 @@ class SubAgentRunner(
         var finalText = ""
         var stopSource: SubStopSource? = null
         _activeSubs.update {
-            it + (key to ActiveSubRun(agent.id, agent.name, brief, startedAt, roundCap = agent.roundCap, tokenBudget = agent.tokenBudget))
+            it + (key to ActiveSubRun(agent.id, agent.name, brief, startedAt, roundCap = agent.roundCap, tokenBudget = agent.tokenBudget, turnNo = turnNo, title = title, startedBy = startedBy, startedByName = startedByName))
         }
         // The sub's own job: a child of the launcher job in the runner's
         // own scope (Phase 4) — never of Main's turn job, so stopping Main
