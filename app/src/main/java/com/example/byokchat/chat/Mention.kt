@@ -109,6 +109,102 @@ fun mentionTitle(brief: String, agent: SubAgentConfig): String =
     brief.lineSequence().firstOrNull { it.isNotBlank() }?.trim()?.take(Mention.TITLE_MAX_CHARS)
         ?: agent.name
 
+/** What regenerating a turn does: re-run the sub-agent it mentions, or Main. */
+sealed interface RegenDecision {
+    /** No mention — Main's turn, exactly as today. */
+    data object RunMain : RegenDecision
+
+    /** Re-run this agent with this brief. */
+    data class RunSub(val agent: SubAgentConfig, val brief: String) : RegenDecision
+
+    /** The mentioned agent is turned off — tell the user, run nothing. */
+    data class AgentOff(val agent: SubAgentConfig) : RegenDecision
+
+    /** The mentioned agent is already running a task — tell the user, run nothing. */
+    data class AgentBusy(val agent: SubAgentConfig) : RegenDecision
+
+    /** The stored mention points at an agent no longer in the team — tell the user, run nothing. */
+    data class AgentGone(val agentId: String) : RegenDecision
+}
+
+/**
+ * The brief for a stored mention: the user text with the leading
+ * "@Name" token stripped (the agent's name or id, case-insensitive,
+ * word boundary — the same match as [parseMention]). Null when the text
+ * no longer starts with that agent's token (e.g. edited outside the
+ * app) or nothing but the token follows it; the caller then falls back
+ * to the whole text as the brief.
+ */
+fun briefAfterMention(text: String, agent: SubAgentConfig): String? {
+    val trimmed = text.trim()
+    if (!trimmed.startsWith("@")) return null
+    val afterAt = trimmed.drop(1)
+    val key = listOf(agent.name, agent.id).firstOrNull { k ->
+        k.isNotBlank() && afterAt.startsWith(k, ignoreCase = true) &&
+            (afterAt.length == k.length || afterAt[k.length].isWhitespace())
+    } ?: return null
+    return afterAt.drop(key.length).trim().ifBlank { null }
+}
+
+/**
+ * Decide what regenerating a turn does. [userText] is the turn's user
+ * text (after any edit), [storedMentionAgentId] the mention saved on
+ * the user row, [textEdited] whether this regenerate carries new text
+ * (Edit & regenerate — plain Regenerate / Retry pass false).
+ * [isBusy] answers whether the agent is already running a task in this
+ * conversation (the runner's [SubAgentRunner.activeRun]); it is a
+ * parameter so the decision stays pure and unit-testable.
+ *
+ * - Edited text is the source of truth: it is re-read with
+ *   [parseMention] — same agent → same agent, new brief; a different
+ *   @Name → that agent; no leading @Name → [RegenDecision.RunMain]
+ *   (the mention is dropped; the caller clears the stored state).
+ * - Plain Regenerate / Retry reads the current text first (it may have
+ *   changed by plain Edit or an outside edit since the state was
+ *   saved); otherwise the stored state decides, so a turn still belongs
+ *   to its agent even if the @ token is gone from the text.
+ * - Off / busy / gone never silently falls back to Main or another
+ *   agent: the caller shows one short notice and runs nothing.
+ */
+fun decideRegenerate(
+    userText: String,
+    storedMentionAgentId: String?,
+    textEdited: Boolean,
+    team: SubAgentTeam,
+    isBusy: (String) -> Boolean,
+): RegenDecision {
+    if (textEdited) {
+        val target = parseMention(userText, team) ?: return RegenDecision.RunMain
+        if (!target.agent.enabled) return RegenDecision.AgentOff(target.agent)
+        if (isBusy(target.agent.id)) return RegenDecision.AgentBusy(target.agent)
+        return RegenDecision.RunSub(target.agent, target.brief)
+    }
+    val target = parseMention(userText, team)
+    if (target != null) {
+        if (!target.agent.enabled) return RegenDecision.AgentOff(target.agent)
+        if (isBusy(target.agent.id)) return RegenDecision.AgentBusy(target.agent)
+        return RegenDecision.RunSub(target.agent, target.brief)
+    }
+    val storedId = storedMentionAgentId ?: return RegenDecision.RunMain
+    val agent = team.byId(storedId) ?: return RegenDecision.AgentGone(storedId)
+    if (!agent.enabled) return RegenDecision.AgentOff(agent)
+    if (isBusy(agent.id)) return RegenDecision.AgentBusy(agent)
+    val brief = briefAfterMention(userText, agent) ?: userText.trim()
+    return RegenDecision.RunSub(agent, brief)
+}
+
+/**
+ * End offset of the leading "@Name" token in [text] (first whitespace,
+ * or the end of the text) — the span the user bubble styles for a
+ * stored mention. Null when the text does not start with "@", or the
+ * token is just "@" on its own.
+ */
+fun mentionTokenEnd(text: String): Int? {
+    if (!text.startsWith("@")) return null
+    val end = text.indexOfFirst { it.isWhitespace() }.let { if (it == -1) text.length else it }
+    return if (end > 1) end else null
+}
+
 /**
  * The @word being typed at the end of the draft, without the "@" —
  * null when the draft does not end with an @word. "@" alone gives an

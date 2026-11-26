@@ -136,4 +136,72 @@ class MentionTest {
         assertEquals("@Bob ", inserted.text)
         assertEquals(TextRange(5), inserted.selection)
     }
+
+    @Test fun briefAfterMentionStripsToken() {
+        assertEquals("find news", briefAfterMention("@Bob find news", bob))
+        assertEquals("find news", briefAfterMention("@bOb find news", bob))
+        assertEquals("find news", briefAfterMention("@bob find news", bob))
+        assertNull(briefAfterMention("@Danny find news", bob))
+        assertNull(briefAfterMention("find news", bob))
+        assertNull(briefAfterMention("@Bob", bob))
+    }
+
+    @Test fun mentionTokenEndLeadingToken() {
+        assertEquals(4, mentionTokenEnd("@Bob find news"))
+        assertEquals(4, mentionTokenEnd("@Bob"))
+        assertNull(mentionTokenEnd("find news"))
+        assertNull(mentionTokenEnd("@"))
+        assertNull(mentionTokenEnd("@ find news"))
+    }
+
+    @Test fun decideRegenerateStoredMentionRerunsAgent() {
+        // Plain Regenerate: the text still names the agent.
+        assertEquals(
+            RegenDecision.RunSub(bob, "find news"),
+            decideRegenerate("@Bob find news", "bob", false, team) { false },
+        )
+        // The stored state alone is enough: the @ token is gone from the
+        // text (edited outside the app), the turn still belongs to Bob.
+        assertEquals(
+            RegenDecision.RunSub(bob, "find news"),
+            decideRegenerate("find news", "bob", false, team) { false },
+        )
+    }
+
+    @Test fun decideRegenerateNoMentionRunsMain() {
+        assertEquals(RegenDecision.RunMain, decideRegenerate("find news", null, false, team) { false })
+        assertEquals(RegenDecision.RunMain, decideRegenerate("@Nobody find news", null, false, team) { false })
+    }
+
+    @Test fun decideRegenerateOffBusyGone() {
+        val offTeam = SubAgentTeam(agents = listOf(testAgent(id = "bob", name = "Bob", enabled = false)))
+        assertEquals(
+            RegenDecision.AgentOff(offTeam.agents[0]),
+            decideRegenerate("@Bob find news", "bob", false, offTeam) { false },
+        )
+        assertEquals(
+            RegenDecision.AgentBusy(bob),
+            decideRegenerate("@Bob find news", "bob", false, team) { it == "bob" },
+        )
+        assertEquals(
+            RegenDecision.AgentGone("ghost"),
+            decideRegenerate("find news", "ghost", false, team) { false },
+        )
+    }
+
+    @Test fun decideRegenerateEditedTextSwitchesAgent() {
+        assertEquals(
+            RegenDecision.RunSub(danny, "fresh news"),
+            decideRegenerate("@Danny fresh news", "bob", true, team) { false },
+        )
+        assertEquals(
+            RegenDecision.RunSub(bob, "fresh news"),
+            decideRegenerate("@Bob fresh news", "bob", true, team) { false },
+        )
+    }
+
+    @Test fun decideRegenerateEditedTextWithoutMentionRunsMain() {
+        assertEquals(RegenDecision.RunMain, decideRegenerate("find news", "bob", true, team) { false })
+        assertEquals(RegenDecision.RunMain, decideRegenerate("@Bob", "bob", true, team) { false })
+    }
 }
