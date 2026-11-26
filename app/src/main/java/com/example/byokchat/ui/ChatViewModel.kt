@@ -18,11 +18,14 @@ import com.example.byokchat.chat.HistoryExporter
 import com.example.byokchat.chat.HistorySync
 import com.example.byokchat.chat.Mention
 import com.example.byokchat.chat.MentionDecision
+import com.example.byokchat.chat.RegenDecision
 import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.chat.RequestAssembler
 import com.example.byokchat.chat.TokenEstimator
 import com.example.byokchat.chat.decideMention
+import com.example.byokchat.chat.decideRegenerate
 import com.example.byokchat.chat.mentionTitle
+import com.example.byokchat.chat.parseMention
 import com.example.byokchat.chat.realUsedTokens
 import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.isDefaultTitle
@@ -583,6 +586,16 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         if (app.engine.isActive(conversationId)) return
         viewModelScope.launch {
             app.ops.editMessage(messageId, text)
+            // @mention (GĐ5): giữ trạng thái mention theo kịp chữ hiển thị —
+            // sửa mất @Name thì bỏ mention, sửa sang @Name khác thì đổi
+            // agent. Chỉ tin của bạn mới mang trạng thái mention.
+            val row = db.messages().get(messageId)
+            if (row != null && row.role == "user") {
+                val newStored = parseMention(text, team.value)?.agent?.id
+                if (newStored != row.mentionAgentId) {
+                    db.messages().upsert(row.copy(mentionAgentId = newStored))
+                }
+            }
             app.engine.exportHistory(conversationId)
         }
     }
@@ -606,6 +619,55 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
 
     suspend fun laterTurnCount(turnId: String): Int = app.ops.laterTurnCount(conversationId, turnId)
 
+    /**
+     * Chạy lại một lượt đã chuẩn bị (sau prepare / branch): Main, trừ khi
+     * tin nhắn của lượt đó mention một sub-agent — xem [decideRegenerate].
+     * [edited] nói rằng chữ của bạn vừa được thay (Edit & regenerate):
+     * trạng thái mention lưu trên tin nhắn được đọc lại từ chữ mới và ghi
+     * lại. Agent tắt / bận / không còn trong team thì chỉ báo một dòng
+     * ngắn, không chạy gì cả — không tự đổi sang Main hay agent khác.
+     */
+    private suspend fun rerunTurn(conversationId: String, turnId: String, edited: Boolean, repair: RepairMode? = null) {
+        val user = db.messages().getTurn(conversationId, turnId).firstOrNull { it.role == "user" }
+        val decision = if (user == null) {
+            RegenDecision.RunMain
+        } else {
+            decideRegenerate(user.text, user.mentionAgentId, edited, team.value) { id ->
+                app.subRunner.activeRun(conversationId, id) != null
+            }
+        }
+        if (edited && user != null) {
+            val newStored: String? = when (decision) {
+                is RegenDecision.RunSub -> decision.agent.id
+                is RegenDecision.AgentOff -> decision.agent.id
+                is RegenDecision.AgentBusy -> decision.agent.id
+                else -> null
+            }
+            if (newStored != user.mentionAgentId) {
+                db.messages().upsert(user.copy(mentionAgentId = newStored))
+            }
+        }
+        when (decision) {
+            RegenDecision.RunMain -> {
+                if (repair == null) app.engine.start(conversationId, turnId)
+                else app.engine.start(conversationId, turnId, repair)
+            }
+            is RegenDecision.RunSub -> {
+                val key = app.subRunner.startRun(
+                    decision.agent, mentionTitle(decision.brief, decision.agent), decision.brief,
+                    conversationId, turnId,
+                    startedBy = Mention.STARTED_BY, startedByName = Mention.STARTED_BY_NAME,
+                )
+                if (key == null) {
+                    _events.emit(ChatEvent.Error("${decision.agent.name} is busy. Ask Main instead."))
+                }
+            }
+            is RegenDecision.AgentOff -> _events.emit(ChatEvent.Error("${decision.agent.name} is off."))
+            is RegenDecision.AgentBusy -> _events.emit(ChatEvent.Error("${decision.agent.name} is busy. Ask Main instead."))
+            is RegenDecision.AgentGone -> _events.emit(ChatEvent.Error("That agent is no longer in the team."))
+        }
+    }
+
     /** Tạo lại ngay trong cuộc hiện tại (các lượt phía sau, nếu có, bị xóa). */
     fun regenerateHere(turnId: String, newUserText: String?) {
         if (app.engine.isActive(conversationId)) return
@@ -620,7 +682,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             // Fork history: bản cũ giữ trong file cũ, bản tạo lại sang file
             // mới (history_(NN).md). Best-effort — lỗi thì vẫn tạo lại như cũ.
             app.historySync?.forkHistory(conversationId, turnId)
-            app.engine.start(conversationId, turnId)
+            rerunTurn(conversationId, turnId, newUserText != null)
         }
     }
 
@@ -635,7 +697,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             }
             try {
                 val r = app.ops.branchForRegenerate(conversationId, turnId, newUserText)
-                app.engine.start(r.conversationId, r.turnMap.getValue(turnId))
+                rerunTurn(r.conversationId, r.turnMap.getValue(turnId), newUserText != null)
                 _events.emit(ChatEvent.OpenBranch(r.conversationId))
             } catch (e: Exception) {
                 _events.emit(ChatEvent.Error(e.message ?: "Couldn't create the branch."))
@@ -676,7 +738,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
             app.ops.prepareRegenerateHere(conversationId, turnId, null)
             // Retry cũng là tạo lại tại chỗ: fork như regenerate để giữ bản lỗi cũ.
             app.historySync?.forkHistory(conversationId, turnId)
-            app.engine.start(conversationId, turnId, repair)
+            rerunTurn(conversationId, turnId, edited = false, repair = repair)
         }
     }
 
