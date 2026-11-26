@@ -119,6 +119,11 @@ data class MessageEntity(
     val reasoningReplay: String? = null,
     /** Hãng đã sinh ra suy luận của tin này ("openai" / "custom" / "deepseek" — "deepseek" là dữ liệu cũ, nay DeepSeek dùng qua Custom; "anthropic" là dữ liệu cũ, hãng đó đã bỏ). */
     val reasoningProvider: String? = null,
+    /**
+     * Kept unused for DB v14 compatibility (see MIGRATION_13_14);
+     * @mention itself is parked on feat/group-chat-ui.
+     */
+    val mentionAgentId: String? = null,
 )
 
 @Serializable
