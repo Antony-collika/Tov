@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import com.example.byokchat.chat.Mention
 import com.example.byokchat.chat.decodeSubRunStrings
 import com.example.byokchat.data.SubRunEntity
 
@@ -113,6 +114,11 @@ private fun buildConversation(
     val timed = mutableListOf<Timed>()
     var order = 0
     for (run in runs) {
+        // @mention (GĐ5): a run the user started is a direct exchange
+        // between the user and that sub — it never appears in Main's
+        // inbox. It still shows in the sub's own screen, and Main can
+        // read it back with get_completed_subagent_run.
+        if (mainInbox && run.startedBy == Mention.STARTED_BY) continue
         val brief = run.brief.ifBlank { run.title }
         // Main's inbox holds only exchanges involving Main: a peer's
         // brief is neither Main's words nor addressed to Main.

@@ -190,6 +190,13 @@ class SubAgentRunner(
      *  skips those outcomes, so Main never gets the same result twice.
      *  One-shot: an entry is consumed when its run finishes. */
     private val manualWakeDelivered = ConcurrentHashMap<String, MutableSet<String>>()
+    /** Runs the user started with @mention (GĐ5, 26/11/2026):
+     *  conversation → agent ids. Their outcomes never wake Main — not
+     *  queued, and not waking at once on error. One-shot, in the same
+     *  style as [manualWakeDelivered]: an entry is consumed when its
+     *  run finishes, and dropped in the launcher's finally so a
+     *  cancelled launcher cannot leave a stale entry behind. */
+    private val userStartedRuns = ConcurrentHashMap<String, MutableSet<String>>()
     /** Serializes the wake bookkeeping in [noteRunFinished]. */
     private val wakeMutex = Mutex()
 
@@ -219,8 +226,8 @@ class SubAgentRunner(
      * a time per agent, the delegate tool reports that instead of
      * queueing a second task behind the first. [startedBy]/[startedByName]
      * say who started the run ("main"/"Main" for Main, else the peer
-     * sub-agent's id/name) — the conversation screens show the brief
-     * under that name (20/11/2026).
+     * sub-agent's id/name, or "user"/"You" for a @mention the user typed)
+     * — the conversation screens show the brief under that name (20/11/2026).
      */
     fun startRun(
         agent: SubAgentConfig,
@@ -234,6 +241,11 @@ class SubAgentRunner(
         val key = SubRunKey(conversationId, agent.id)
         val deferred = CompletableDeferred<SubRunResult>()
         if (runResults.putIfAbsent(key, deferred) != null) return null
+        // @mention (GĐ5): remember a user-started run, so its outcome
+        // never wakes Main (see noteRunFinished).
+        if (startedBy == Mention.STARTED_BY) {
+            userStartedRuns.getOrPut(conversationId) { ConcurrentHashMap.newKeySet() } += agent.id
+        }
         runTickets[key] = greetingTickets.getOrPut(conversationId) { AtomicInteger(0) }.getAndIncrement()
         // One fresh round id per delegation (25/11/2026): "Allow all in
         // this round" covers only this run — Main calling the same sub
@@ -253,6 +265,9 @@ class SubAgentRunner(
             } finally {
                 runJobs.remove(key)
                 runResults.remove(key)
+                // A cancelled launcher never reaches noteRunFinished, so
+                // drop its @mention entry here instead of leaving it stale.
+                userStartedRuns[key.conversationId]?.remove(key.agentId)
                 // The run is over: its "Allow all in this round" must not
                 // outlive it. Never breaks completion, so swallowed.
                 runCatching { tools.endRun(runKey) }
@@ -318,9 +333,16 @@ class SubAgentRunner(
             // finishes once.
             val manuallyDelivered = manualWakeDelivered[key.conversationId]?.remove(key.agentId) == true &&
                 result.status == SubRunStatus.DONE
+            // @mention (GĐ5): a run the user started never wakes Main —
+            // its outcome is not queued, and its error does not wake at
+            // once either. The entry is consumed either way. A Main run's
+            // outcome already queued still wakes when the last run
+            // finishes (this run's finish is what makes "all done"
+            // true), just without this run's result in it.
+            val userStarted = userStartedRuns[key.conversationId]?.remove(key.agentId) == true
             val list = pendingOutcomes.getOrPut(key.conversationId) { mutableListOf() }
-            if (!manuallyDelivered) list += result
-            val error = isWakeError(result.status)
+            if (!manuallyDelivered && !userStarted) list += result
+            val error = isWakeError(result.status) && !userStarted
             // runResults still holds this run (the launcher's finally
             // removes it after this returns), so exclude this key when
             // asking whether anything else is still running.
@@ -435,7 +457,10 @@ class SubAgentRunner(
                 val toolDefs = defs.map { it.second } + sendDef
                 val system = agent.systemPrompt
                 val subMessages = mutableListOf<AiMessage>()
-                if (agent.historyVisibility == HistoryVisibility.SEES_HISTORY) {
+                // @mention (GĐ5): the sub knows only the @ message
+                // itself, whatever its history setting says — no earlier
+                // chat history in its request.
+                if (agent.historyVisibility == HistoryVisibility.SEES_HISTORY && startedBy != Mention.STARTED_BY) {
                     subMessages += historyForSub(conversationId, turnId)
                 }
                 subMessages += AiMessage(Role.USER, text = brief)

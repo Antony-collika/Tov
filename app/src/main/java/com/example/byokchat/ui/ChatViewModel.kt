@@ -15,9 +15,13 @@ import com.example.byokchat.chat.AssembledRequest
 import com.example.byokchat.chat.ContextBuilder
 import com.example.byokchat.chat.HistoryExporter
 import com.example.byokchat.chat.HistorySync
+import com.example.byokchat.chat.Mention
+import com.example.byokchat.chat.MentionDecision
 import com.example.byokchat.chat.RepairMode
 import com.example.byokchat.chat.RequestAssembler
 import com.example.byokchat.chat.TokenEstimator
+import com.example.byokchat.chat.decideMention
+import com.example.byokchat.chat.mentionTitle
 import com.example.byokchat.chat.realUsedTokens
 import com.example.byokchat.data.ConversationEntity
 import com.example.byokchat.data.isDefaultTitle
@@ -395,6 +399,36 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         val text = draft.trim()
         val images = pendingImages.toList()
         if (text.isEmpty() && images.isEmpty()) return
+        // @mention (GĐ5, 26/11/2026): a leading @Name routes the message
+        // straight to that sub-agent instead of Main — decided before the
+        // draft is cleared, so a refused send keeps the user's text.
+        // With images the message goes to Main as today: a sub run takes
+        // a text brief only. A running Main turn is left alone — the
+        // @mention runs in the runner's own scope, beside it.
+        if (images.isEmpty()) {
+            when (val decision = decideMention(text, team.value) { agentId ->
+                app.subRunner.activeRun(conversationId, agentId) != null
+            }) {
+                is MentionDecision.Route -> {
+                    draft = ""
+                    viewModelScope.launch { sendMention(decision, text) }
+                    return
+                }
+                is MentionDecision.AgentOff -> {
+                    viewModelScope.launch {
+                        _events.emit(ChatEvent.Error("${decision.agent.name} is off."))
+                    }
+                    return
+                }
+                is MentionDecision.AgentBusy -> {
+                    viewModelScope.launch {
+                        _events.emit(ChatEvent.Error("${decision.agent.name} is busy. Ask Main instead."))
+                    }
+                    return
+                }
+                MentionDecision.NoMention -> Unit
+            }
+        }
         draft = ""
         pendingImages.clear()
         viewModelScope.launch {
@@ -432,6 +466,44 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 db.conversations().rename(conversationId, title)
             }
             app.engine.start(conversationId, turnId)
+        }
+    }
+
+    /**
+     * @mention (GĐ5): write the user's row (text as typed, with the
+     * @Name visible) and start the sub run directly — the same machinery
+     * as a delegate, only the starter is the user. A null return is the
+     * small race where the agent started another run between the check
+     * in [send] and here: the message row stays, and the user is told
+     * the agent is busy.
+     */
+    private suspend fun sendMention(route: MentionDecision.Route, text: String) {
+        val turnId = UUID.randomUUID().toString()
+        val turnNo = (db.messages().maxTurnNo(conversationId) ?: 0) + 1
+        val seq = (db.messages().maxSeq(conversationId) ?: 0) + 1
+        db.messages().upsert(
+            MessageEntity(
+                id = UUID.randomUUID().toString(),
+                conversationId = conversationId,
+                turnId = turnId,
+                turnNo = turnNo,
+                seq = seq,
+                role = "user",
+                text = text,
+                createdAt = System.currentTimeMillis(),
+            )
+        )
+        val title = mentionTitle(route.brief, route.agent)
+        val conv = db.conversations().get(conversationId)
+        if (conv != null && isDefaultTitle(conv.title)) {
+            db.conversations().rename(conversationId, title)
+        }
+        val key = app.subRunner.startRun(
+            route.agent, title, route.brief, conversationId, turnId,
+            startedBy = Mention.STARTED_BY, startedByName = Mention.STARTED_BY_NAME,
+        )
+        if (key == null) {
+            _events.emit(ChatEvent.Error("${route.agent.name} is busy. Ask Main instead."))
         }
     }
 
