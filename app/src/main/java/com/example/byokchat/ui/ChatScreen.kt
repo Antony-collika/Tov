@@ -380,7 +380,7 @@ fun ChatScreen(
                 onRemoveImage = vm::removePendingImage,
                 generating = generating,
                 onSend = {
-                    if (!generating && (vm.draft.isNotBlank() || vm.pendingImages.isNotEmpty())) followNewest = true
+                    if (!generating && (vm.draft.text.isNotBlank() || vm.pendingImages.isNotEmpty())) followNewest = true
                     askNotificationPermissionOnce()
                     vm.send()
                 },

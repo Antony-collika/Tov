@@ -46,6 +46,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -62,8 +63,8 @@ import java.io.File
  */
 @Composable
 internal fun InputBar(
-    draft: String,
-    onDraft: (String) -> Unit,
+    draft: TextFieldValue,
+    onDraft: (TextFieldValue) -> Unit,
     images: List<String>,
     onRemoveImage: (String) -> Unit,
     generating: Boolean,
@@ -82,7 +83,7 @@ internal fun InputBar(
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
     // @mention picker (GĐ5): the @word being typed at the end of the
     // draft, and the agents matching it.
-    val mentionQueryText = mentionQuery(draft)
+    val mentionQueryText = mentionQuery(draft.text)
     val mentionMatches = remember(mentionQueryText, mentionAgents) {
         mentionQueryText?.let { filterMentionAgents(it, mentionAgents) } ?: emptyList()
     }
@@ -191,12 +192,12 @@ internal fun InputBar(
                             // draft (or images) it becomes Send, and sending
                             // while generating stops the old turn and sends the
                             // new message in the same tap.
-                            if (generating && draft.isBlank() && images.isEmpty()) {
+                            if (generating && draft.text.isBlank() && images.isEmpty()) {
                                 FilledIconButton(onClick = onStop) {
                                     Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp)))
                                 }
                             } else {
-                                FilledIconButton(onClick = onSend, enabled = draft.isNotBlank() || images.isNotEmpty()) {
+                                FilledIconButton(onClick = onSend, enabled = draft.text.isNotBlank() || images.isNotEmpty()) {
                                     Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                                 }
                             }

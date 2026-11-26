@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.byokchat.AppContainer
@@ -376,7 +377,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         }
     }
 
-    var draft by mutableStateOf("")
+    var draft by mutableStateOf(TextFieldValue(""))
     val pendingImages = mutableStateListOf<String>()
 
     // ---------- Soạn và gửi ----------
@@ -396,7 +397,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     }
 
     fun send() {
-        val text = draft.trim()
+        val text = draft.text.trim()
         val images = pendingImages.toList()
         if (text.isEmpty() && images.isEmpty()) return
         // @mention (GĐ5, 26/11/2026): a leading @Name routes the message
@@ -410,7 +411,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 app.subRunner.activeRun(conversationId, agentId) != null
             }) {
                 is MentionDecision.Route -> {
-                    draft = ""
+                    draft = TextFieldValue("")
                     viewModelScope.launch { sendMention(decision, text) }
                     return
                 }
@@ -429,7 +430,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 MentionDecision.NoMention -> Unit
             }
         }
-        draft = ""
+        draft = TextFieldValue("")
         pendingImages.clear()
         viewModelScope.launch {
             if (app.engine.isActive(conversationId)) {
