@@ -48,7 +48,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.example.byokchat.chat.SubAgentConfig
@@ -82,16 +81,15 @@ internal fun InputBar(
     var attachMenu by remember { mutableStateOf(false) }
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
     // @mention picker (GĐ5): the @word being typed at the end of the
-    // draft, and the agents matching it.
+    // draft, and the agents matching it. It shows while the query has
+    // matches and closes by itself once the insert leaves "@Name "
+    // (no @word left) — there is no dismiss gesture: it is an inline
+    // card, not a popup, so tapping the field just focuses it.
     val mentionQueryText = mentionQuery(draft.text)
     val mentionMatches = remember(mentionQueryText, mentionAgents) {
         mentionQueryText?.let { filterMentionAgents(it, mentionAgents) } ?: emptyList()
     }
-    // A dismissed picker stays dismissed for that exact query: tapping
-    // outside closes it, and typing (a new query) opens it again.
-    var pickerDismissedFor by remember { mutableStateOf<String?>(null) }
-    val mentionPickerOpen = mentionQueryText != null && mentionMatches.isNotEmpty() &&
-        pickerDismissedFor != mentionQueryText
+    val mentionPickerOpen = mentionQueryText != null && mentionMatches.isNotEmpty()
     Surface(tonalElevation = 3.dp) {
         // As a Scaffold bottomBar it must handle the navigation bar and the keyboard itself (order matters).
         Column(Modifier.navigationBarsPadding().imePadding().padding(horizontal = 8.dp, vertical = 8.dp)) {
@@ -127,98 +125,93 @@ internal fun InputBar(
                     }
                 }
             }
-            // The Box is the @mention picker's anchor (GĐ5): it wraps
-            // the input block, so the menu's bottom sits 8dp above the
-            // input and its left edge lines up with the input's left
-            // edge. There is never room below this anchor for the menu
-            // (only the navigation-bar padding), so the menu always
-            // opens upward — never downward off the screen. The anchor's
-            // top moves only when the input grows (a new line), so while
-            // the user types one line the menu stands still: filtering
-            // changes only its height (it grows upward) and its right
-            // edge, never its bottom or left edge.
-            Box(Modifier.fillMaxWidth()) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column {
-                        TextField(
-                            value = draft,
-                            onValueChange = onDraft,
-                            modifier = Modifier.fillMaxWidth().focusRequester(inputFocus),
-                            placeholder = { Text("Ask anything") },
-                            maxLines = 6,
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                disabledContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                disabledIndicatorColor = Color.Transparent,
-                            ),
-                        )
-                        Row(
-                            Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, bottom = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+            // @mention picker (GĐ5): an inline card directly above the
+            // input — same window, no popup, so it never steals focus
+            // from the text field or hides the keyboard (26/11/2026).
+            // Its bottom edge is the input's top edge, so while the
+            // user types on one line it stands still: filtering changes
+            // only its height (it grows upward). Tapping a row inserts
+            // "@Name " with the cursor at the end and keeps focus on
+            // the field, so the user types on straight away.
+            if (mentionPickerOpen) {
+                MentionPickerCard(
+                    actions = mentionMatches.map { agent ->
+                        MenuAction(
+                            icon = Icons.Default.AccountCircle,
+                            label = agent.name,
+                            enabled = agent.enabled,
                         ) {
-                            Box {
-                                IconButton(onClick = { attachMenu = true }) { Icon(Icons.Default.Add, contentDescription = "Attach image") }
-                                DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
-                                    DropdownMenuItem(text = { Text("Choose from gallery") }, onClick = { attachMenu = false; onPickGallery() })
-                                    DropdownMenuItem(text = { Text("Take photo") }, onClick = { attachMenu = false; onPickCamera() })
-                                }
+                            onDraft(insertMention(draft, agent.name))
+                            inputFocus.requestFocus()
+                        }
+                    },
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+            }
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column {
+                    TextField(
+                        value = draft,
+                        onValueChange = onDraft,
+                        modifier = Modifier.fillMaxWidth().focusRequester(inputFocus),
+                        placeholder = { Text("Ask anything") },
+                        maxLines = 6,
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            disabledContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent,
+                        ),
+                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box {
+                            IconButton(onClick = { attachMenu = true }) { Icon(Icons.Default.Add, contentDescription = "Attach image") }
+                            DropdownMenu(expanded = attachMenu, onDismissRequest = { attachMenu = false }) {
+                                DropdownMenuItem(text = { Text("Choose from gallery") }, onClick = { attachMenu = false; onPickGallery() })
+                                DropdownMenuItem(text = { Text("Take photo") }, onClick = { attachMenu = false; onPickCamera() })
                             }
-                            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                                AssistChip(
-                                    onClick = onPickModel,
-                                    label = { Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                                    colors = if (modelMissing) {
-                                        AssistChipDefaults.assistChipColors(
-                                            containerColor = MaterialTheme.colorScheme.errorContainer,
-                                            labelColor = MaterialTheme.colorScheme.onErrorContainer,
-                                            trailingIconContentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                        )
-                                    } else {
-                                        AssistChipDefaults.assistChipColors()
-                                    },
-                                    modifier = Modifier.widthIn(max = 260.dp),
-                                )
+                        }
+                        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                            AssistChip(
+                                onClick = onPickModel,
+                                label = { Text(modelLabel, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                                colors = if (modelMissing) {
+                                    AssistChipDefaults.assistChipColors(
+                                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                                        labelColor = MaterialTheme.colorScheme.onErrorContainer,
+                                        trailingIconContentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                } else {
+                                    AssistChipDefaults.assistChipColors()
+                                },
+                                modifier = Modifier.widthIn(max = 260.dp),
+                            )
+                        }
+                        // One button, toggling state: while generating with
+                        // nothing typed it is Stop; as soon as there is a
+                        // draft (or images) it becomes Send, and sending
+                        // while generating stops the old turn and sends the
+                        // new message in the same tap.
+                        if (generating && draft.text.isBlank() && images.isEmpty()) {
+                            FilledIconButton(onClick = onStop) {
+                                Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp)))
                             }
-                            // One button, toggling state: while generating with
-                            // nothing typed it is Stop; as soon as there is a
-                            // draft (or images) it becomes Send, and sending
-                            // while generating stops the old turn and sends the
-                            // new message in the same tap.
-                            if (generating && draft.text.isBlank() && images.isEmpty()) {
-                                FilledIconButton(onClick = onStop) {
-                                    Box(Modifier.size(14.dp).background(MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(3.dp)))
-                                }
-                            } else {
-                                FilledIconButton(onClick = onSend, enabled = draft.text.isNotBlank() || images.isNotEmpty()) {
-                                    Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
-                                }
+                        } else {
+                            FilledIconButton(onClick = onSend, enabled = draft.text.isNotBlank() || images.isNotEmpty()) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send")
                             }
                         }
                     }
-                }
-                // @mention picker (GĐ5): the same white floating card as
-                // the long-press message menu (MessageMenuDropdown) — one
-                // row per agent, avatar icon + name, off agents dimmed.
-                if (mentionPickerOpen) {
-                    MessageMenuDropdown(
-                        actions = mentionMatches.map { agent ->
-                            MenuAction(
-                                icon = Icons.Default.AccountCircle,
-                                label = agent.name,
-                                enabled = agent.enabled,
-                            ) { onDraft(insertMention(draft, agent.name)) }
-                        },
-                        lockedNote = null,
-                        offset = DpOffset(0.dp, 8.dp),
-                    ) { pickerDismissedFor = mentionQueryText }
                 }
             }
         }
