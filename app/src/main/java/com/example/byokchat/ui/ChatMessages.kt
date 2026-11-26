@@ -65,6 +65,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.example.byokchat.chat.mentionTokenEnd
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
 import com.example.byokchat.util.TextUtil
@@ -110,6 +111,30 @@ private fun highlighted(text: String, hl: Highlight?): AnnotatedString {
     }
 }
 
+/**
+ * The user bubble's text with a picked @mention styled: when the
+ * message carries a stored mention ([MessageEntity.mentionAgentId]),
+ * its leading "@Name" token is bold in that agent's member colour
+ * ([memberColor] — the same colour as the agent's name in bubbles), so
+ * the pick reads as a mention, not plain text. Messages without a
+ * stored mention render exactly as today — no styling even if the text
+ * happens to start with "@Name". (26/11/2026: user bubbles do not
+ * support markdown like assistant bubbles do; this styles only the
+ * one token, it does not convert the bubble to MarkdownBody.)
+ */
+private fun userAnnotated(m: MessageEntity, hl: Highlight?): AnnotatedString {
+    val base = highlighted(m.text, hl)
+    val agentId = m.mentionAgentId ?: return base
+    val tokenEnd = mentionTokenEnd(m.text) ?: return base
+    return buildAnnotatedString {
+        append(base)
+        addStyle(
+            SpanStyle(fontWeight = FontWeight.Bold, color = memberColor(subAgentMember(agentId))),
+            0, tokenEnd,
+        )
+    }
+}
+
 @Composable
 private fun EditedLabel() {
     Text("edited", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -141,7 +166,7 @@ internal fun UserMessage(
     var viewerIndex by remember { mutableStateOf<Int?>(null) }
     // Decoded once per change instead of on every redraw.
     val imgs = remember(m.imagePaths) { m.images() }
-    val annotated = remember(m.text, hl) { highlighted(m.text, hl) }
+    val annotated = remember(m.text, m.mentionAgentId, hl) { userAnnotated(m, hl) }
     val haptic = LocalHapticFeedback.current
     // Position of the last finger-down inside this message (px, relative to the
     // outer Column). combinedClickable's onLongClick does not report where the
