@@ -477,7 +477,7 @@ fun ChatScreen(
                 Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "No AI playground folder is chosen (or access was lost), so file tools are blocked. Other tools still work.",
+                            "No playground folder is chosen",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )
@@ -519,7 +519,7 @@ fun ChatScreen(
                 Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "No data storage folder is chosen, so this chat has no history file and edits outside the app won't sync. Chat still works.",
+                            "No storage folder is chosen, so this chat has no history file and edits outside the app won't sync.",
                             style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.weight(1f),
                         )

@@ -309,9 +309,7 @@ fun BackupScreen(onBack: () -> Unit) {
                         )
                     }
                     Text(
-                        "If the backup mentioned folders to pick again, choose them in " +
-                            "Settings → Select Storage and Playground folder — the backup cannot " +
-                            "restore folder permissions.",
+                        "Pick the folders again in Settings → Select Storage and Playground folder.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -329,10 +327,7 @@ fun BackupScreen(onBack: () -> Unit) {
                 }
                 else -> {
                     Text(
-                        "One encrypted file holds everything in the database: providers and API keys, " +
-                            "sub-agents, chats, notes, tool edits and the default system prompt. " +
-                            "The Request panel, theme, max tool rounds and the request log are not " +
-                            "backed up. Files in the playground are not included either — copy them yourself.",
+                        "One encrypted file: providers and keys, sub-agents, chats, notes, tool edits and the default system prompt. Not included: Request panel, theme, limits, request log, playground files.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Card(onClick = { showExportPassword = true }, modifier = Modifier.fillMaxWidth()) {
@@ -350,9 +345,7 @@ fun BackupScreen(onBack: () -> Unit) {
                         Column(Modifier.padding(12.dp)) {
                             Text("Restore backup", style = MaterialTheme.typography.titleSmall)
                             Text(
-                                "Open a backup file with its password. Nothing is replaced: new chats, " +
-                                    "providers and agents are added, and where the backup differs from " +
-                                    "this device you choose keep current or use backup.",
+                                "Nothing is replaced. Where the backup differs, you choose keep current or use backup.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -539,9 +532,7 @@ private fun BackupPasswordDialog(
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    "If you forget the password, the backup cannot be opened — there is no way to recover it. " +
-                        "A weak password can be guessed by trying many passwords offline. " +
-                        "The backup file contains your API keys — keep it private, don't send it to anyone.",
+                    "If you forget the password, the backup cannot be opened. It holds your API keys — keep it private.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

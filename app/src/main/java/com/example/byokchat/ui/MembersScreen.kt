@@ -237,7 +237,7 @@ fun MembersScreen(
                     InfoRow("Team structure", "Main controls directly · no sub-subs")
                     InfoRow("Main Stop button", "Stops Main only")
                     Text(
-                        "An agent that finished its run stays in the team — Main calls it again when needed, with the same role and tools. Tap an agent's avatar to edit its folder, tools and role.",
+                        "A finished agent stays in the team. Tap an avatar to edit it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

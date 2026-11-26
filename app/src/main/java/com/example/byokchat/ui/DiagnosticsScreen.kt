@@ -220,10 +220,7 @@ fun DiagnosticsScreen(onBack: () -> Unit, onOpenRequestLog: () -> Unit) {
                 .verticalScroll(rememberScrollState()),
         ) {
             Text(
-                "Sub-agent handoff log: each step from a sub finishing to the next request. " +
-                    "Copy or export it and send it to Muse when a turn gets stuck. " +
-                    "If a turn is stuck right now, tap Coroutine dump first to capture where the turn is parked, then copy or export. " +
-                    "Tap Clear before a fresh test run so the log starts empty and sessions don't mix.",
+                "Each step from a sub finishing to the next request. Copy or export it and send it to Muse when a turn gets stuck. Tap Clear before a fresh test run.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Spacer(Modifier.height(12.dp))

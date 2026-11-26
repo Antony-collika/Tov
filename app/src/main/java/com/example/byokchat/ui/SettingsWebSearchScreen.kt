@@ -88,7 +88,7 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
                     singleLine = true,
                     visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "Hide" else "Show") } },
-                    supportingText = { Text("If empty, the web search tool is not offered to the AI (unless DuckDuckGo is selected). The key is encrypted on this device.") },
+                    supportingText = { Text("If empty, web search is not offered to the AI (unless DuckDuckGo is selected).") },
                     keyboardOptions = KeyboardOptions.Default,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -101,7 +101,7 @@ fun SettingsWebSearchScreen(onBack: () -> Unit) {
                 singleLine = true,
                 visualTransformation = if (showYoutubeKey) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = { TextButton(onClick = { showYoutubeKey = !showYoutubeKey }) { Text(if (showYoutubeKey) "Hide" else "Show") } },
-                supportingText = { Text("If empty, YouTube search and comments are not offered to the AI. Downloads and audio playback do not need this key. The key is encrypted on this device.") },
+                supportingText = { Text("If empty, YouTube search and comments are not offered to the AI. Downloads and playback do not need this key.") },
                 keyboardOptions = KeyboardOptions.Default,
                 modifier = Modifier.fillMaxWidth(),
             )

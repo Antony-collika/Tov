@@ -79,7 +79,7 @@ data class RequestCard(
         CardKind.FREE -> label.ifBlank { "Free card" }
         CardKind.HISTORY -> "History"
         CardKind.LAST_TURN -> "Last turn"
-        CardKind.TOOLS -> "Tools"
+        CardKind.TOOLS -> "Main's Toolbox"
     }
 
     /**

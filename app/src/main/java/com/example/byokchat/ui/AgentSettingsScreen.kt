@@ -293,7 +293,7 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                 Text(configFileName, style = MaterialTheme.typography.bodyMedium)
             }
             Text(
-                "Link a file and the fields stay in sync with it: opening this screen reads the file, saving writes the fields back. The file is a plain markdown file — edit it in any editor.",
+                "The fields stay in sync with the file. It is a plain markdown file — edit it in any editor.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -343,7 +343,7 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                 Text(workspaceFolder, style = MaterialTheme.typography.bodyMedium)
             }
             Text(
-                "The sub works inside this folder in the AI playground; picking a folder adds it to the playground.",
+                "The sub works inside this folder.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -390,7 +390,7 @@ fun AgentSettingsScreen(agentId: String, onBack: () -> Unit) {
                 Column {
                     Text("send_message", style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        "sub.send — built-in, always on. Only the sub can use it, to send a message to the user or to Main. Main cannot call it.",
+                        "Only the sub can use this tool to message you or Main.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

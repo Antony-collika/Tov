@@ -107,9 +107,6 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
         )
     }
 
-    // Cảnh báo (không chặn lưu): API key sắp được gửi qua địa chỉ http không mã hóa.
-    val insecureHttp = baseUrl.trim().startsWith("http://", ignoreCase = true) && apiKey.isNotBlank()
-
     fun save() {
         val cfg = buildConfig()
         when {
@@ -161,14 +158,6 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                 label = { Text(if (type == ProviderType.CUSTOM) "Server address (required)" else "Server address (optional)") },
                 placeholder = { Text(if (type == ProviderType.CUSTOM) "https://ten-may-chu/v1" else existing?.effectiveBaseUrl() ?: ProviderConfig("", type, "").effectiveBaseUrl()) },
                 singleLine = true,
-                supportingText = if (insecureHttp) {
-                    {
-                        Text(
-                            "This address uses http (not encrypted). The API key will be sent in plain text and others on the same network could read it. Only use this for a server on your own home network.",
-                            color = MaterialTheme.colorScheme.error,
-                        )
-                    }
-                } else null,
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -232,7 +221,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
                     Column(Modifier.weight(1f)) {
                         Text("Ask for real token counts")
                         Text(
-                            "Sends stream_options.include_usage so the log shows real counts. Some self-hosted servers reject this — turn it off if requests fail.",
+                            "Shows real token counts in the log. Turn it off if requests fail.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -298,7 +287,7 @@ fun ProviderEditScreen(providerId: String?, newType: String?, onDone: () -> Unit
             // thêm token/thời gian và có thể làm câu trả lời kém hơn.
             if (type == ProviderType.OPENAI) {
                 Text(
-                    "Note: if you edit or delete earlier messages, newer OpenAI models may drop the reasoning they sent before, so the next reply can cost extra tokens and time, and may be less good. Adding new messages is always safe.",
+                    "Editing or deleting earlier messages can make the next reply cost extra tokens and time.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(bottom = 24.dp),

@@ -98,9 +98,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
         LazyColumn(Modifier.fillMaxSize().padding(padding)) {
             item {
                 Text(
-                    "Tap a tool to see its UID, its original name and description, the name and description the model sees, " +
-                        "and its mode. The description the model sees can be edited here (tap the tool to open it); the name " +
-                        "is fixed. Changes apply from the next message you send.",
+                    "Tap a tool to open, change permission and edit description",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(16.dp),
@@ -148,8 +146,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                         },
                 )
                 Text(
-                    "How many rounds of tool calls Main may run in one turn. " +
-                        "When the AI keeps calling tools past this many rounds, the turn stops with an error.",
+                    "Maximum tool rounds Main could run in one turn.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
@@ -184,8 +181,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                         },
                 )
                 Text(
-                    "How many times the same tool may fail in a row in one run before it is switched off for the rest of that run. " +
-                        "A new run starts counting again.",
+                    "Maximum consecutive error of the same tool-call.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
@@ -219,9 +215,7 @@ fun ToolsScreen(onBack: () -> Unit, onOpen: (String) -> Unit) {
                         },
                 )
                 Text(
-                    "How long one agent's tool round may run before it stops. " +
-                        "One run of one agent — Main's turn loop or one sub-agent run — not the whole turn. " +
-                        "No upper limit: some jobs need a long time.",
+                    "Maximum duration one agent's tool round may run.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp),
@@ -376,12 +370,6 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
             if (tool.risk == Risk.DELETE) {
                 Text("Delete tools always ask you first.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(
-                "A tool that is turned off is still shown to the model, but the model is told it is turned off when it tries to call it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
             HorizontalDivider()
             Text("What the AI sees", style = MaterialTheme.typography.titleSmall)
             Text("Name", style = MaterialTheme.typography.labelLarge)
@@ -410,7 +398,7 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
                 }) { Text("Use original description") }
             }
             Text(
-                "The model sees this description. Edit it here — the original description above stays as a reference.",
+                "The description the AI sees.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -418,17 +406,11 @@ fun ToolDetailScreen(uid: String, onBack: () -> Unit) {
             HorizontalDivider()
             Text("Parameters", style = MaterialTheme.typography.labelLarge)
             Text(
-                "What each parameter means to the AI. The descriptions come from the app and cannot be changed here.",
+                "What each parameter means to the AI.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             ParametersSection(tool)
-            Text(
-                "The way the tool works is handled by the app. The model calls a tool by its name, " +
-                    "the app maps it back to the UID, so older conversations keep working.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.height(24.dp))
         }
     }

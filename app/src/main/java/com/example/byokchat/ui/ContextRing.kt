@@ -307,7 +307,7 @@ fun ChatMemoryDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     if (dropped > 0) {
                         Text(
-                            "The $dropped oldest turn(s) are no longer sent to the AI so the chat fits the limit.",
+                            "The oldest turns are no longer sent to the AI, so the chat fits the limit.",
                             fontSize = 11.sp,
                         )
                     }

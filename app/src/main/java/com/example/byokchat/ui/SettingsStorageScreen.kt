@@ -190,22 +190,10 @@ fun SettingsStorageScreen(onBack: () -> Unit) {
                 onValueChange = { subfolderText = it; settings.setAllowedWriteSubfolder(it) },
                 label = { Text("Subfolder the AI may write in") },
                 singleLine = true,
-                supportingText = { Text("Empty means the AI can write anywhere inside the playground folders. Example: notes — then every AI write must stay under notes/ inside each folder.") },
+                supportingText = { Text("Empty means the AI can write anywhere inside the playground folders.") },
                 modifier = Modifier.padding(vertical = 4.dp),
             )
 
-            // ---------- Text-only writes (always on, no switch) ----------
-            StorageSectionTitle("What the AI may write")
-            Text(
-                "Text tools can only write text files — files whose content is plain text, " +
-                    "whatever the extension (.md, .txt, .json, .csv, .html, …). " +
-                    "Other tools keep the file type their job needs (.zip, .json, .csv, …), " +
-                    "but every AI write must stay inside the subfolder above. " +
-                    "This limit is always on — there is no switch for it — and a blocked " +
-                    "write is reported to the AI instead of asking you first.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             Spacer(Modifier.height(24.dp))
         }
     }

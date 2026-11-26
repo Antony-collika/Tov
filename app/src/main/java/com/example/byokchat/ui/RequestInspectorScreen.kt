@@ -249,7 +249,7 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
             // không phải danh sách message thường — ghi rõ để user không nhầm.
             if (type == ProviderType.OPENAI) {
                 Text(
-                    "Sent as Responses API items: reasoning, messages and tool calls are replayed in order.",
+                    "Reasoning, messages and tool calls are replayed in order.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -268,8 +268,7 @@ private fun InspectorContent(a: AssembledRequest, ready: PreviewResult.Ready, mo
                 Spacer(Modifier.height(8.dp))
                 SectionTitle("Not sent (over budget)")
                 Text(
-                    "The ${a.droppedTurnIds.size} oldest turn(s) are left out so the chat fits the limit. " +
-                        "Turn IDs: ${a.droppedTurnIds.joinToString { it.take(8) }}.",
+                    "The oldest turns are left out so the chat fits the limit.",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

@@ -160,9 +160,7 @@ fun MessagesScreen(conversationId: String, onBack: () -> Unit) {
             }
             item {
                 Text(
-                    "Editing or deleting here changes what the model sees from that point on, " +
-                        "so the provider reads the chat again from there (its cache restarts at " +
-                        "that message). Turn numbers are never reused, even after a turn is deleted.",
+                    "Editing or deleting here changes what the AI sees from that point on. Turn numbers are never reused.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

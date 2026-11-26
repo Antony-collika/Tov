@@ -347,13 +347,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     // dùng chung được; máy chủ tương thích gửi lại
                     // reasoning_content; Gemini như cũ). D3 cũ (Chat
                     // Completions ép effort "none" cho OpenAI) đã bỏ.
-                    Text("How hard the model thinks", style = MaterialTheme.typography.labelLarge)
-                    Text(
-                        "How hard the model thinks before it answers. Harder thinking " +
-                            "takes longer and costs more, but can give better answers.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Text("Effort", style = MaterialTheme.typography.labelLarge)
                     savedMetadata.effortOptionsFor(providerType).forEach { option ->
                         PolicyOption(
                             selected = effort == option,
@@ -386,7 +380,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         )
                     } else {
                         Text(
-                            "Longest answer (tokens): choose a provider and model first (it is saved per provider).",
+                            "Choose a provider and model first.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -402,8 +396,7 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "If the model is about to write one of these, it stops there instead. " +
-                            "For example, write \"User:\" so the model never starts a new turn by itself.",
+                        "AI stop before generate one of these words. Use comma \",\" to separate. Example: \"User, politics \".",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -580,19 +573,6 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                     // tầng quyền ở Settings/Manage Tools, tầng chọn ở đây.
                     // Chưa có lựa chọn đã lưu thì mặc định chọn hết; bỏ hết
                     // tick rồi Save thì không offer tool nào (như tắt thẻ).
-                    Text(
-                        "This card is not a message: it is the tool list sent with the request, " +
-                            "so its position in the panel changes nothing. Every tool selected is " +
-                            "offered to the model, in the app's group order. A card with no saved " +
-                            "choice offers all tools — uncheck the ones you don't want. " +
-                            "Uncheck all of them to offer no tools at all.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    val namesByUid = container.registry.all.associate { it.uid to it.defaultName }
-                    Text(
-                        toolSelectionSummary(selectedUids, namesByUid),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
                     TextButton(onClick = { showToolPicker = true }) { Text("Choose tools") }
                     if (showToolPicker) {
                         ToolPickerSheet(
@@ -608,18 +588,15 @@ fun CardEditScreen(cardId: String, onBack: () -> Unit, onOpenMessages: (() -> Un
                             onDismiss = { showToolPicker = false },
                         )
                     }
-                    Text("What the model will see", style = MaterialTheme.typography.labelLarge)
-                    val offered = container.registry.all.filter { it.uid in selectedUids }
+                    val namesByUid = container.registry.all.associate { it.uid to it.defaultName }
                     Text(
-                        if (offered.isEmpty()) "No tools — nothing is offered to the model."
-                        else "Offers ${offered.size} tool(s): " + offered.joinToString(", ") { it.defaultName },
-                        style = MaterialTheme.typography.bodySmall,
+                        toolSelectionSummary(selectedUids, namesByUid),
+                        style = MaterialTheme.typography.bodyMedium,
                     )
                 }
                 CardKind.LAST_TURN -> {
                     Text(
-                        "The last turn is your latest message and the tool round in progress. " +
-                            "It is always sent, and always after History.",
+                        "Your latest message and the tool round in progress.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -671,11 +648,7 @@ private fun SwitchRow(title: String, desc: String, checked: Boolean, onChange: (
 @Composable
 private fun TimeCardEditor() {
     Text(
-        "When this card is on, the current time is added at the end of the system prompt " +
-            "as \"Current time: YYYY-MM-DD HH:MM\" (date and time only — no time zone, " +
-            "no location, no seconds). When it is off, no time is added. Either way, the " +
-            "model can still call the time tool (time.now) from the Tools list whenever " +
-            "it wants the time.",
+        "Adds the current date and time to the system prompt.",
         style = MaterialTheme.typography.bodyMedium,
     )
     Text(
@@ -753,10 +726,7 @@ private fun FileSection(
         Text(displayName, style = MaterialTheme.typography.bodyMedium)
     }
     Text(
-        "It can be any file on this device — it does not have to be in the AI playground. " +
-            "Its content is read again on every send. Edit the file in any editor and the next send " +
-            "uses the new text. When you save here, the text above is also written back to the file. " +
-            "If the file cannot be read, the card's saved text is used instead and an error is shown.",
+        "Re-read on every send. Saving here writes back to the file.",
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )

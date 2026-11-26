@@ -120,13 +120,6 @@ fun ToolPickerSheet(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (searching) {
-                Text(
-                    "Search only picks single tools — clear the search to select a whole section or all tools.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
                 if (shown.isEmpty()) {
                     item(key = "empty") {
