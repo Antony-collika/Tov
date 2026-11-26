@@ -119,6 +119,13 @@ data class MessageEntity(
     val reasoningReplay: String? = null,
     /** Hãng đã sinh ra suy luận của tin này ("openai" / "custom" / "deepseek" — "deepseek" là dữ liệu cũ, nay DeepSeek dùng qua Custom; "anthropic" là dữ liệu cũ, hãng đó đã bỏ). */
     val reasoningProvider: String? = null,
+    /**
+     * @mention (GĐ5, 26/11/2026): id của sub-agent mà tin của bạn này gọi
+     * thẳng — lựa chọn đã chọn, lưu thành trạng thái, để Regenerate /
+     * Edit & regenerate gọi lại đúng agent đó thay vì Main. Null = tin
+     * thường gửi Main. Chỉ tin của bạn mới có trường này.
+     */
+    val mentionAgentId: String? = null,
 )
 
 @Serializable

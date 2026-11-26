@@ -491,6 +491,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 seq = seq,
                 role = "user",
                 text = text,
+                mentionAgentId = route.agent.id,
                 createdAt = System.currentTimeMillis(),
             )
         )
