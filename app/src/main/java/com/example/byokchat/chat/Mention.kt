@@ -14,8 +14,9 @@ package com.example.byokchat.chat
  *   token stripped; the user message row keeps the text as typed.
  * - The run uses the same machinery as a delegate (own tools, caps,
  *   greeting, pill, journal) — only the starter is the user
- *   ([MENTION_STARTED_BY]/[MENTION_STARTED_BY_NAME]), and its outcome
- *   never wakes Main (see [SubAgentRunner.noteRunFinished]).
+ *   ([Mention.STARTED_BY]/[Mention.STARTED_BY_NAME]), and its outcome
+ *   never wakes Main (the runner excludes user-started runs from its
+ *   wake bookkeeping).
  * - The picker (typing "@") is a separate, wider aid: it offers an
  *   agent for the @word being typed anywhere in the draft, and only
  *   inserts "@Name " — routing still needs the leading token.

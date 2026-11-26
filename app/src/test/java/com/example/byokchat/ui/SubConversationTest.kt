@@ -1,5 +1,6 @@
 package com.example.byokchat.ui
 
+import com.example.byokchat.chat.Mention
 import com.example.byokchat.chat.encodeSubRunStrings
 import com.example.byokchat.data.SubRunEntity
 import org.junit.Assert.assertEquals
@@ -228,6 +229,82 @@ class SubConversationTest {
         )
         assertEquals("main", row.startedBy)
         assertEquals("Main", row.startedByName)
+    }
+
+    @Test
+    fun mainInboxExcludesUserStartedRun() {
+        // @mention (GĐ5): a run the user started is a direct exchange
+        // between the user and that sub — it never appears in Main's
+        // inbox, brief, outbox and report alike.
+        val items = buildMainConversation(
+            runs = listOf(
+                run(
+                    id = 1, turnNo = 1, startedAt = 1000, finishedAt = 2000,
+                    agent = "bob", agentName = "Bob",
+                    startedBy = Mention.STARTED_BY, startedByName = Mention.STARTED_BY_NAME,
+                    brief = "find news", title = "find news",
+                    outbox = listOf("Short note."),
+                    report = "Sub-agent Bob finished: done.\nTask: find news.\nRounds: 1/10, estimated tokens: ~10/32000.\n\nDetailed report.",
+                ),
+            ),
+        )
+        assertEquals(emptyList<SubConversationItem>(), items)
+    }
+
+    @Test
+    fun mainInboxMixedRunsShowOnlyMainStarted() {
+        val items = buildMainConversation(
+            runs = listOf(
+                run(
+                    id = 1, turnNo = 1, startedAt = 1000, finishedAt = 2000,
+                    agent = "bob", agentName = "Bob",
+                    startedBy = Mention.STARTED_BY, startedByName = Mention.STARTED_BY_NAME,
+                    brief = "find news", title = "find news",
+                    report = "Sub-agent Bob finished: done.\nTask: find news.\nRounds: 1/10, estimated tokens: ~10/32000.\n\nDetailed report.",
+                ),
+                run(
+                    id = 2, turnNo = 1, startedAt = 3000, finishedAt = 4000,
+                    agent = "bob", agentName = "Bob",
+                    brief = "Find sports news.",
+                    outbox = listOf("Found two sources."),
+                    report = "Sub-agent Bob finished: done.\nTask: Find sports news.\nRounds: 2/10, estimated tokens: ~20/32000.\n\nTwo sources verified.",
+                ),
+            ),
+        )
+        assertTrue(items.none { it.senderName == Mention.STARTED_BY_NAME })
+        assertEquals(
+            listOf(
+                Triple("Find sports news.", "main", "Bob"),
+                Triple("Found two sources.", "bob", null),
+                Triple("Two sources verified.", "bob", null),
+            ),
+            items.map { Triple(it.text, it.senderId, it.toName) },
+        )
+    }
+
+    @Test
+    fun subScreenShowsUserStartedRunUnderYou() {
+        // The same run shows in the sub's own screen, the brief under "You".
+        val items = buildSubConversation(
+            runs = listOf(
+                run(
+                    id = 1, turnNo = 1, startedAt = 1000, finishedAt = 2000,
+                    agent = "bob", agentName = "Bob",
+                    startedBy = Mention.STARTED_BY, startedByName = Mention.STARTED_BY_NAME,
+                    brief = "find news", title = "find news",
+                    outbox = listOf("Short note."),
+                    report = "Sub-agent Bob finished: done.\nTask: find news.\nRounds: 1/10, estimated tokens: ~10/32000.\n\nDetailed report.",
+                ),
+            ),
+        )
+        assertEquals(
+            listOf(
+                Triple("find news", "user", "You"),
+                Triple("Short note.", "bob", "Bob"),
+                Triple("Detailed report.", "bob", "Bob"),
+            ),
+            items.map { Triple(it.text, it.senderId, it.senderName) },
+        )
     }
 
 }
