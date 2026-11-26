@@ -128,6 +128,8 @@ fun ChatScreen(
     val generating by vm.generating.collectAsState()
     // Group chat members (Phase 1): You + Main; Main's status follows `generating`.
     val members by vm.members.collectAsState()
+    /** The sub-agent team, for the @mention picker (GĐ5). */
+    val team by vm.team.collectAsState()
     /** Phase 4: a finished sub waiting for its turn to speak — agent id → the agent currently speaking. */
     val waitingDeliveries by vm.waitingDeliveries.collectAsState()
     val mainMember = members.firstOrNull { it.id == "main" }
@@ -389,6 +391,7 @@ fun ChatScreen(
                 modelLabel = chipLabel,
                 modelMissing = modelMissing,
                 onPickModel = { showModelPicker = true },
+                mentionAgents = team.agents,
             )
         },
         topBar = {
