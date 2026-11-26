@@ -1,5 +1,8 @@
 package com.example.byokchat.chat
 
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+
 /**
  * @mention (GĐ5, 26/11/2026): the user talks straight to one sub-agent
  * from the chat input, bypassing Main.
@@ -128,8 +131,19 @@ fun filterMentionAgents(query: String, agents: List<SubAgentConfig>): List<SubAg
     }
 }
 
-/** Replace the @word at the end of the draft with "@Name ". */
-fun insertMention(draft: String, name: String): String {
-    val tail = draft.substringAfterLast(' ').substringAfterLast('\n')
-    return if (tail.startsWith("@")) draft.dropLast(tail.length) + "@$name " else draft
+/**
+ * Replace the @word at the end of the draft with "@Name " — and put
+ * the cursor at the very end, so the user types on straight away.
+ * (26/11/2026: with a plain-String draft the field kept the old
+ * cursor offset, so "@" + pick Bob gave "@|Bob" and the user had to
+ * tap to move the cursor. Carrying the selection in the returned
+ * TextFieldValue fixes that.) A draft with no trailing @word is
+ * returned unchanged, selection included.
+ */
+fun insertMention(draft: TextFieldValue, name: String): TextFieldValue {
+    val text = draft.text
+    val tail = text.substringAfterLast(' ').substringAfterLast('\n')
+    if (!tail.startsWith("@")) return draft
+    val inserted = text.dropLast(tail.length) + "@$name "
+    return TextFieldValue(inserted, TextRange(inserted.length))
 }

@@ -1,5 +1,7 @@
 package com.example.byokchat.chat
 
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -117,8 +119,21 @@ class MentionTest {
     }
 
     @Test fun insertMentionReplacesTrailingAtWord() {
-        assertEquals("@Bob ", insertMention("@Bo", "Bob"))
-        assertEquals("hi @Danny ", insertMention("hi @Da", "Danny"))
-        assertEquals("hello", insertMention("hello", "Bob"))
+        val inserted = insertMention(TextFieldValue("@Bo"), "Bob")
+        assertEquals("@Bob ", inserted.text)
+        assertEquals(TextRange("@Bob ".length), inserted.selection)
+        val midSentence = insertMention(TextFieldValue("hi @Da"), "Danny")
+        assertEquals("hi @Danny ", midSentence.text)
+        assertEquals(TextRange("hi @Danny ".length), midSentence.selection)
+        val unchanged = TextFieldValue("hello", TextRange(2))
+        assertEquals(unchanged, insertMention(unchanged, "Bob"))
+    }
+
+    @Test fun insertMentionPutsCursorAtEndAfterBareAt() {
+        // The reported bug (26/11/2026): draft "@", pick Bob, the input
+        // showed "@|Bob" — the cursor stayed behind the inserted name.
+        val inserted = insertMention(TextFieldValue("@", TextRange(1)), "Bob")
+        assertEquals("@Bob ", inserted.text)
+        assertEquals(TextRange(5), inserted.selection)
     }
 }
