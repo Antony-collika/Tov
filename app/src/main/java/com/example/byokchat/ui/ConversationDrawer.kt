@@ -396,7 +396,7 @@ fun ConversationDrawerContent(
                         Text("No pinned conversations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(horizontal = 20.dp, bottom = 24.dp)) {
+                LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
                     groups.forEach { (bucket, list) ->
                         item(key = "h_" + bucket.name) {
                             Text(
@@ -448,7 +448,6 @@ fun ConversationDrawerContent(
                 modifier = Modifier.clickable { onSettings() },
                 headlineContent = { Text("Settings", fontSize = 15.sp) },
                 leadingContent = { Icon(Icons.Default.Settings, contentDescription = null) },
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
             )
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
