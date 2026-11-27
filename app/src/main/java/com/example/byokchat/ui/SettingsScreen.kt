@@ -3,12 +3,15 @@ package com.example.byokchat.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -43,7 +46,7 @@ import kotlinx.coroutines.withContext
 // the theme system comes in a later stage, do not build it here.
 private val SettingsWhite = Color(0xFFFFFFFF)
 private val SettingsInk = Color(0xFF191C20)
-private val SettingsMuted = Color(0xFF5A5E66)
+private val SettingsSummary = Color(0xFF6B7280)
 private val SettingsSectionPurple = Color(0xFF7E57C2)
 private val SettingsCardBorder = Color(0xFFE6E4EA)
 private val SettingsDivider = Color(0xFFF0F0F3)
@@ -99,7 +102,9 @@ fun SettingsScreen(
     Scaffold(
         containerColor = SettingsWhite,
         topBar = {
-            Column {
+            // Status-bar inset: the title row must not sit tight against
+            // the phone status bar (on-device check 27/11/2026).
+            Column(Modifier.statusBarsPadding()) {
                 Row(
                     Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -153,7 +158,7 @@ fun SettingsScreen(
                 onClick = onWebSearch,
             )
             SettingsCard(
-                title = "Select Storage and Playground folder",
+                title = "Storage & AI workspace",
                 summary = when {
                     playgroundUris.isEmpty() -> "No folder chosen"
                     playgroundUris.size > 3 -> "Playground: ${playgroundUris.size} folders · Storage: ${sessionPath ?: "not chosen"}"
@@ -165,7 +170,7 @@ fun SettingsScreen(
             SettingsSectionTitle("Intelligence")
             SettingsCard(
                 title = "System prompt & request panel",
-                summary = "What the AI sees, and in which order — system prompt, time tool, history and tools",
+                summary = "System prompt, context and history",
                 onClick = onRequestPanel,
             )
             SettingsCard(
@@ -177,13 +182,13 @@ fun SettingsScreen(
             SettingsCard(
                 title = "Manage tools",
                 badge = "$enabledToolCount enabled",
-                summary = "Turn tools on or off and choose how much control you keep. Edit the name and description the AI sees here.",
+                summary = "Enable/Disable tools and permission.",
                 onClick = onTools,
             )
             SettingsSectionTitle("Data & Storage")
             SettingsCard(
                 title = "Backup",
-                summary = "Save your providers and keys, sub-agents, chats and tool edits into one encrypted file — or restore one.",
+                summary = "Save your providers and keys, sub-agents, chats and tool edits into one encrypted file",
                 onClick = onBackup,
             )
             SettingsSectionTitle("Appearance")
@@ -211,9 +216,15 @@ private fun SettingsSectionTitle(text: String) {
 
 /**
  * One Settings card, per the mockup: 1dp #E6E4EA border, 16dp corners,
- * 14dp vertical / 16dp horizontal inner padding, 10dp below; title 15.5sp
- * bold on one line, summary 13.5sp / 1.45 line height, chevron at right,
- * optional green badge right after the title.
+ * 14dp vertical / 16dp left inner padding, 10dp below; title 16sp bold
+ * on one line, summary 13sp #6B7280 / 1.3 line height, 2dp below the
+ * title, optional green badge right after the title.
+ *
+ * The chevron lives in its own fixed 32dp zone at the card's right edge,
+ * vertically centred across the full card height. The text column
+ * (weight 1f) ends before that zone, so text never runs under the
+ * chevron or gets cut mid-word (on-device bug 27/11/2026: "how mu[ch]",
+ * "sub-agen[ts]", "encrypted f[ile]").
  */
 @Composable
 private fun SettingsCard(title: String, summary: String, badge: String? = null, onClick: () -> Unit) {
@@ -224,31 +235,45 @@ private fun SettingsCard(title: String, summary: String, badge: String? = null, 
         color = SettingsWhite,
         border = BorderStroke(1.dp, SettingsCardBorder),
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    title,
-                    fontSize = 15.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = SettingsInk,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                if (badge != null) {
+        Row(Modifier.padding(start = 16.dp, top = 14.dp, bottom = 14.dp)) {
+            Column(Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Text(
-                        badge,
-                        fontSize = 12.sp,
+                        title,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = SettingsBadgeText,
+                        color = SettingsInk,
                         maxLines = 1,
-                        modifier = Modifier.background(SettingsBadgeBackground, RoundedCornerShape(20.dp))
-                            .padding(horizontal = 9.dp, vertical = 3.dp),
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
                     )
+                    if (badge != null) {
+                        Text(
+                            badge,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = SettingsBadgeText,
+                            maxLines = 1,
+                            modifier = Modifier.background(SettingsBadgeBackground, RoundedCornerShape(20.dp))
+                                .padding(horizontal = 9.dp, vertical = 3.dp),
+                        )
+                    }
                 }
+                Text(
+                    summary,
+                    fontSize = 13.sp,
+                    lineHeight = 16.9.sp,
+                    color = SettingsSummary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            Box(
+                modifier = Modifier.width(32.dp).align(Alignment.CenterVertically),
+                contentAlignment = Alignment.Center,
+            ) {
                 Icon(
                     Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
@@ -256,13 +281,6 @@ private fun SettingsCard(title: String, summary: String, badge: String? = null, 
                     modifier = Modifier.size(20.dp),
                 )
             }
-            Text(
-                summary,
-                fontSize = 13.5.sp,
-                lineHeight = 19.6.sp,
-                color = SettingsMuted,
-                modifier = Modifier.padding(top = 4.dp),
-            )
         }
     }
 }
