@@ -3,6 +3,7 @@ package com.example.byokchat.ui
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -19,6 +20,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import com.example.byokchat.container
 import kotlinx.coroutines.launch
 
@@ -88,7 +91,14 @@ fun ChatHost(
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet {
+            // The drawer is 90% of the screen width (the chat screen peeks out
+            // behind it), with a plain white background: the default sheet colour
+            // is surfaceContainerLow, and its tonal elevation would tint white.
+            ModalDrawerSheet(
+                modifier = Modifier.fillMaxWidth(0.9f),
+                drawerContainerColor = Color.White,
+                drawerTonalElevation = 0.dp,
+            ) {
                 ConversationDrawerContent(
                     isOpen = drawerOpen,
                     currentId = conversationId,
