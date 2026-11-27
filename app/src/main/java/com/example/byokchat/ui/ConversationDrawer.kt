@@ -265,7 +265,7 @@ fun ConversationDrawerContent(
                 ) {
                     IconButton(onClick = { exitSelection() }) { Icon(Icons.Default.Close, contentDescription = "Cancel selection") }
                     Text("${selected.size} selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = { selected = conversations.map { it.id }.toSet() }) {
+                    IconButton(onClick = { selected = filtered.map { it.id }.toSet() }) {
                         Icon(Icons.Default.SelectAll, contentDescription = "Select all")
                     }
                     IconButton(
@@ -595,7 +595,7 @@ private fun ConversationRow(
                 ),
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 11.dp),
+                Modifier.fillMaxWidth().padding(vertical = 11.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (selecting) {
