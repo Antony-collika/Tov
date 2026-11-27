@@ -47,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -220,26 +221,36 @@ fun MembersScreen(
     }
 }
 
+/**
+ * One tab: the text itself is the tab (wrap-content width). The active
+ * underline is drawn under the text with drawBehind — never a fillMaxWidth
+ * child: that made the first tab stretch full-width, pushed the Working
+ * tab off-screen (working agents "disappeared"), and stretched the tab
+ * row tall, leaving the big blank gap above the list.
+ */
 @Composable
 private fun MemberTabItem(title: String, selected: Boolean, onClick: () -> Unit) {
-    Column(
-        modifier = Modifier.clickable(onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            title,
-            fontSize = 16.sp,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) BrandBlue else SubGrey,
-        )
-        Spacer(Modifier.height(8.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(2.dp)
-                .background(if (selected) BrandBlue else Color.Transparent),
-        )
-    }
+    Text(
+        title,
+        fontSize = 16.sp,
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        color = if (selected) BrandBlue else SubGrey,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(bottom = 10.dp)
+            .drawBehind {
+                if (selected) {
+                    val stroke = 2.dp.toPx()
+                    val y = size.height - stroke / 2
+                    drawLine(
+                        color = BrandBlue,
+                        start = Offset(0f, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = stroke,
+                    )
+                }
+            },
+    )
 }
 
 @Composable
