@@ -166,7 +166,7 @@ fun groupMembers(members: List<GroupMember>): List<MemberGroup> {
 /** Status-dot colour: working is yellow, as in the group-chat design. */
 fun memberStatusColor(status: MemberStatus): Color = when (status) {
     MemberStatus.WORKING -> Color(0xFFF9A825)
-    MemberStatus.IDLE -> Color(0xFF9E9E9E)
+    MemberStatus.IDLE -> Color(0xFF43A047)
     MemberStatus.WAITING -> Color(0xFF7E57C2)
     MemberStatus.DONE -> Color(0xFF43A047)
     MemberStatus.NEEDS_INPUT -> Color(0xFFE53935)

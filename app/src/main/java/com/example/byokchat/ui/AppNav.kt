@@ -205,6 +205,7 @@ fun AppNav() {
                     onBack = { nav.popBackStack() },
                     onAgentSettings = { agentId -> nav.navigate("agent-settings/" + Uri.encode(agentId)) },
                     onAddAgent = { nav.navigate("agent-settings/new") },
+                    onRequestPanel = { nav.navigate("panel?id=" + Uri.encode(entry.arguments?.getString("id") ?: "")) },
                 )
             }
             composable(
