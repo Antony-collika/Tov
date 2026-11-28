@@ -134,6 +134,9 @@ fun ChatScreen(
     // Đợt bỏ provider 12/11/2026: các lượt đã Retry một lần mà vẫn lỗi —
     // bong bóng lỗi của lượt đó thêm nút "Start a new chat".
     val retriedTurns by vm.retriedTurns.collectAsState()
+    // Các tin nhắn lỗi đã bấm X tắt (chỉ trong phiên này, trong bộ nhớ
+    // ViewModel — xem ChatViewModel.dismissError).
+    val dismissedErrorIds by vm.dismissedErrorIds.collectAsState()
     val providers by vm.providers.collectAsState()
     val currentProviderId by vm.currentModelProviderId.collectAsState()
     val currentModelName by vm.currentModel.collectAsState()
@@ -632,6 +635,8 @@ fun ChatScreen(
                                 fileCards = fileCardsByMessageId[m.id].orEmpty(),
                                 senderMember = senderMember,
                                 onAvatarClick = avatarClick,
+                                errorDismissed = m.id in dismissedErrorIds,
+                                onDismissError = { vm.dismissError(m.id) },
                                 showActions = m.id == lastAnswerId,
                                 errorFix = fix,
                                 onErrorFix = { f ->

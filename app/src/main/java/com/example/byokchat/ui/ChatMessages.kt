@@ -262,6 +262,14 @@ internal fun AssistantMessage(
     senderMember: GroupMember? = null,
     /** Tapping a sub-agent's avatar opens its Main↔sub conversation; null = avatar does nothing (Main). */
     onAvatarClick: (() -> Unit)? = null,
+    /** Whether this message's error card was dismissed (state lives in the
+     * ViewModel, not in this composable's remember — a LazyColumn item's
+     * composition is disposed when it scrolls off-screen, so a remember
+     * here is lost on scroll and the card reappears; the ViewModel set
+     * survives scrolling and dies with the chat = session only). */
+    errorDismissed: Boolean = false,
+    /** Dismiss this message's error card (records its id in the ViewModel). */
+    onDismissError: (() -> Unit)? = null,
     showActions: Boolean,
     errorFix: ErrorFix?,
     onErrorFix: (ErrorFix) -> Unit,
@@ -282,10 +290,10 @@ internal fun AssistantMessage(
     onNewChat: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    // Dismissing the error card only hides it for this view (remember,
-    // keyed by message id): reopening the chat shows it again. Nothing is
-    // deleted or retried.
-    var errorDismissed by remember(m.id) { mutableStateOf(false) }
+    // Dismissing the error card hides it for this session: the dismissed
+    // ids live in the ViewModel ([errorDismissed] / [onDismissError]),
+    // so scrolling does not bring the card back. Nothing is deleted or
+    // retried; reopening the chat shows it again.
     val context = LocalContext.current
     // Opens a created file with the app's shared opener; a missing file
     // only shows a toast, never a crash.
@@ -377,6 +385,10 @@ internal fun AssistantMessage(
                         MemberAvatar(senderMember, size = 32.dp, onClick = onAvatarClick)
                     }
                     if (senderMember != null) {
+                        // The name is tappable with the same action as
+                        // the avatar (28/11/2026, Duy): a sub's name opens
+                        // its Main↔sub conversation, Main's name opens
+                        // Main's inbox — same as [onAvatarClick].
                         Text(
                             senderMember.name,
                             fontSize = 15.sp,
@@ -384,7 +396,8 @@ internal fun AssistantMessage(
                             color = memberColor(senderMember),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f)
+                                .then(if (onAvatarClick != null) Modifier.clickable(onClick = onAvatarClick) else Modifier),
                         )
                     } else {
                         Spacer(Modifier.weight(1f))
@@ -449,10 +462,11 @@ internal fun AssistantMessage(
                                     )
                                 }
                             }
-                            // Dismiss (chat redesign 28/11/2026): hides
-                            // this card for this view only — no retry,
-                            // nothing deleted, the message itself is untouched.
-                            IconButton(onClick = { errorDismissed = true }, modifier = Modifier.size(32.dp)) {
+                            // Dismiss (chat redesign 28/11/2026, fixed
+                            // 28/11/2026): hides this card for this session
+                            // — no retry, nothing deleted, the message
+                            // itself is untouched.
+                            IconButton(onClick = { onDismissError?.invoke() }, modifier = Modifier.size(32.dp)) {
                                 Icon(Icons.Default.Close, contentDescription = "Dismiss error", modifier = Modifier.size(20.dp))
                             }
                         }

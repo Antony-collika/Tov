@@ -39,12 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.chat.ModelFacingText
@@ -61,9 +57,10 @@ private enum class StepStatus { RUNNING, WAITING, DONE, FAILED, INTERRUPTED }
  * revision, Duy): the current step, in the present tense (via
  * [pillLabel]) — whichever step the agent is on right now is the line
  * shown. Tapping it (or its chevron) opens all the steps so far
- * inline below it. Once the work is done the line collapses into the
- * agent's name plus "Worked for …" (tools) or "Thought for …"
- * (reasoning only), with the elapsed time frozen at the last activity;
+ * inline below it. Once the work is done the line collapses into
+ * "Worked for …" (tools) or "Thought for …" (reasoning only) — no
+ * agent name, the header above already says who it is (28/11/2026,
+ * Duy, option 1) — with the elapsed time frozen at the last activity;
  * tapping it (or its chevron) re-opens the step rows inline below it.
  * Only this one line ever carries a chevron (28/11/2026: the step rows
  * below it have none). A finished sub waiting for its turn to speak, a
@@ -244,12 +241,13 @@ internal fun WorkStream(
                     else ->
                         Icon(Icons.Default.CheckCircle, contentDescription = null, tint = agentColor, modifier = Modifier.size(16.dp))
                 }
+                // Collapsed line (28/11/2026, Duy, option 1): only the
+                // sentence, no agent name — the Avatar + Name header
+                // above already says who it is. Grey, like the mockup.
                 Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = agentColor)) { append(agentName) }
-                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" $collapsedLabel") }
-                    },
+                    collapsedLabel,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),

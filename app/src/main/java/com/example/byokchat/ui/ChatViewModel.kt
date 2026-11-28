@@ -607,6 +607,20 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
     private val _retriedTurns = MutableStateFlow<Set<String>>(emptySet())
     val retriedTurns: StateFlow<Set<String>> = _retriedTurns.asStateFlow()
 
+    /** Các tin nhắn lỗi đã bấm X tắt (chỉ nhớ trong phiên này, trong bộ
+     * nhớ ViewModel): thẻ lỗi sống theo message id, nên việc tắt phải
+     * sống ở đây mới qua được cuộn — cờ remember trong item tin nhắn
+     * bị dispose khi item cuộn ra khỏi màn hình, và bảng đỏ hiện lại.
+     * ViewModel bị clear / đóng chat thì set này mất = đúng "chỉ trong
+     * session đó". Không sửa status trong DB, nút Retry còn nguyên. */
+    private val _dismissedErrorIds = MutableStateFlow<Set<String>>(emptySet())
+    val dismissedErrorIds: StateFlow<Set<String>> = _dismissedErrorIds.asStateFlow()
+
+    /** Tắt thẻ lỗi của một tin nhắn (nút X): chỉ ghi id vào set trên. */
+    fun dismissError(messageId: String) {
+        _dismissedErrorIds.update { it + messageId }
+    }
+
     /**
      * Retry một lượt đã lỗi (nút Retry trong bong bóng lỗi, đợt bỏ provider
      * 12/11/2026; sửa theo ý Duy 12/11/2026): mặc định gửi lại request ĐẦY
