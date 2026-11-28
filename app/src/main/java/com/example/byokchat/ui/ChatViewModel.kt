@@ -134,13 +134,47 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
         app.subRunner.activeSubs,
         app.subRunner.waitingDeliveries,
         app.agentStore.team,
-    ) { gen, subs, waiting, team ->
+        messages,
+    ) { gen, subs, waiting, team, msgs ->
+        // The live work label for a working agent (28/11/2026, Duy):
+        // the newest real work step of the current turn, from the same
+        // stream as the chat screen — never the brief Main gave it, and
+        // never a generic "Answering…". A step already finished reads
+        // in the past tense ("Đã tìm …"), a step with no result yet
+        // reads as running ("Đang tìm …"). If the agent's latest act
+        // in this turn is already answering in words, the label says
+        // so ("Đang trả lời…"); if it is working but has no step yet,
+        // it says it is working.
+        val agentNameFor: (String) -> String = { id ->
+            team.agents.firstOrNull { it.id == id }?.name ?: id
+        }
+        val latestTurnId = msgs.lastOrNull { it.role == "assistant" }?.turnId
+        val toolResults = ToolResults(
+            msgs.filter { it.role == "tool" && it.toolCallId != null }
+                .associateBy { it.toolCallId!! },
+        )
+        val workSegments = groupWorkSegments(msgs, toolResults)
+        fun workLabel(sender: String?, working: Boolean): String? {
+            if (!working) return null
+            val seg = workSegments.lastOrNull { it.sender == sender && it.turnId == latestTurnId }
+            if (seg == null) return if (sender == null) "Đang trả lời…" else "Đang làm việc…"
+            val lastTextAt = msgs.lastOrNull {
+                it.role == "assistant" && it.sender == sender && it.turnId == latestTurnId && it.text.isNotBlank()
+            }?.createdAt ?: 0L
+            if (lastTextAt > seg.lastActivityAt) return "Đang trả lời…"
+            val last = seg.steps.lastOrNull() ?: return null
+            val running = when (last) {
+                is WorkStep.Tool -> last.result == null
+                is WorkStep.Reasoning -> true
+            }
+            return pillLabel(last, running = running, done = !running, agentNameFor = agentNameFor)
+        }
         val base = listOf(
             GroupMember(id = "you", name = "You", role = "You", status = MemberStatus.IDLE, isUser = true),
             GroupMember(
                 id = "main", name = "Main", role = "Main agent",
                 status = if (gen) MemberStatus.WORKING else MemberStatus.IDLE,
-                currentTask = if (gen) "Answering…" else null,
+                currentTask = workLabel(null, gen),
             ),
         )
         val convSubs = subs.filterKeys { it.conversationId == conversationId }
@@ -152,7 +186,7 @@ class ChatViewModel(private val app: AppContainer, val conversationId: String) :
                 running != null -> GroupMember(
                     id = agent.id, name = agent.name, role = agent.role,
                     status = MemberStatus.WORKING,
-                    currentTask = running.brief.take(120),
+                    currentTask = workLabel(agent.id, true),
                     startedAt = running.startedAt,
                     roundsUsed = running.rounds, roundCap = running.roundCap,
                     tokensUsed = running.tokensUsed, tokenBudget = running.tokenBudget,

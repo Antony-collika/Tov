@@ -21,11 +21,16 @@ sealed interface WorkStep {
 }
 
 /**
- * One stretch of work by one speaker in one turn — what the pill groups
- * (17/11/2026, approved mockup): the pill streams the latest step while
- * the agent works, and expands into the table of all its steps.
- * [anchorId] is the first row of the stretch; the pill renders there, and
- * the other rows of the stretch render no pill of their own.
+ * One burst of work by one speaker — what the work stream groups
+ * (28/11/2026 revision, Duy): one burst = consecutive tool/reasoning
+ * rows by one speaker, with no text row in between. The old 19/11 rule
+ * (one segment per speaker per turn, wherever the rows sit) is GONE for
+ * the new text UI: agents run async and interleave, and merging a whole
+ * turn hid who was working where. A burst renders under its own
+ * speaker's Avatar + Name line, at the place it happened.
+ * [anchorId] is the first row of the burst; the stream renders there
+ * (or on the text message it is attached to — see ChatScreen), and the
+ * other rows of the burst render no stream of their own.
  */
 data class WorkSegment(
     val turnId: String,
@@ -46,40 +51,33 @@ private fun parseCalls(toolCallsJson: String?): List<AiToolCall> =
     runCatching { Json.decodeFromString(callsSer, toolCallsJson ?: "[]") }.getOrDefault(emptyList())
 
 /**
- * Groups an agent's work into segments. Pure, so it can be unit-tested
+ * Groups an agent's work into bursts. Pure, so it can be unit-tested
  * without Android.
  *
- * One segment per (turnId, sender): every tool/reasoning row of one
- * speaker in one turn belongs to one segment, wherever it sits in the
- * chat (19/11/2026: the old consecutive-only rule split one agent's
- * turn into one pill per round as soon as two subs interleaved or a
- * greeting landed in between — the pill is background work, not a
- * chat bubble, so one agent's one turn gets one pill). A user message
- * or a plain text message (a greeting, a final answer) contributes
- * nothing and never splits a segment. A tool-result row never
- * contributes a step either: it sits between the rounds in the DB
- * (call row, result row, next call row) and is the answer to the step
- * above it. A text-only message therefore never becomes a step, and
- * `send_message` never becomes one either: its messages already are.
- * Segments come out in first-appearance order; within one segment the
+ * One burst = consecutive tool/reasoning rows by one speaker in one
+ * turn (28/11/2026 revision, Duy — supersedes the 19/11/2026 one-pill-
+ * per-speaker-per-turn rule). A burst ends as soon as any other row
+ * appears in between: a text message (any sender — a greeting, an
+ * answer), a work row by another speaker, a user message, or a new
+ * turn. A tool-result row never contributes a step and never breaks a
+ * burst: it sits between the rounds in the DB (call row, result row,
+ * next call row) and is the answer to the step above it. A text-only
+ * message therefore never becomes a step, and `send_message` never
+ * becomes one either: its messages already are. A work row that also
+ * carries text (a reasoning row whose text is the answer) ends its
+ * burst right after itself, so later work starts a new burst.
+ * Bursts come out in first-appearance order; within one burst the
  * steps stay in chat order. Within one row the reasoning step comes
  * first (the model thinks, then calls), then that round's calls in
  * order. Tool results attach from [results] by call id; a call with
- * no result yet is still a step, so the pill can stream it as running.
+ * no result yet is still a step, so the stream can show it as running.
  */
 fun groupWorkSegments(messages: List<MessageEntity>, results: ToolResults): List<WorkSegment> {
-    val byKey = linkedMapOf<Pair<String, String?>, MutableList<MessageEntity>>()
-    for (m in messages) {
-        // A tool-result row is the answer to the step above it; it
-        // neither contributes a step nor splits a segment.
-        if (m.role == "tool") continue
-        if (m.role != "assistant") continue
-        val calls = parseCalls(m.toolCallsJson)
-        val hasReasoning = !m.reasoningText.isNullOrBlank()
-        if (calls.isEmpty() && !hasReasoning) continue
-        byKey.getOrPut(m.turnId to m.sender) { mutableListOf() }.add(m)
-    }
-    return byKey.values.mapNotNull { rows ->
+    val segments = mutableListOf<WorkSegment>()
+    var current: MutableList<MessageEntity>? = null
+    fun flush() {
+        val rows = current ?: return
+        current = null
         val steps = rows.flatMap { row ->
             val reasoning = if (!row.reasoningText.isNullOrBlank()) {
                 listOf(WorkStep.Reasoning(row.reasoningText!!))
@@ -91,19 +89,85 @@ fun groupWorkSegments(messages: List<MessageEntity>, results: ToolResults): List
             }
             reasoning + tools
         }
-        if (steps.isEmpty()) return@mapNotNull null
-        // Every row in the segment shares one (turnId, sender) by the
-        // grouping above, so the first row's values describe it.
-        WorkSegment(
-            turnId = rows.first().turnId,
-            sender = rows.first().sender,
-            anchorId = rows.first().id,
-            steps = steps,
-            startedAt = rows.first().createdAt,
-            lastActivityAt = maxOf(
-                rows.maxOf { it.createdAt },
-                steps.filterIsInstance<WorkStep.Tool>().mapNotNull { it.result?.createdAt }.maxOrNull() ?: 0L,
+        if (steps.isEmpty()) return
+        segments.add(
+            WorkSegment(
+                turnId = rows.first().turnId,
+                sender = rows.first().sender,
+                anchorId = rows.first().id,
+                steps = steps,
+                startedAt = rows.first().createdAt,
+                lastActivityAt = maxOf(
+                    rows.maxOf { it.createdAt },
+                    steps.filterIsInstance<WorkStep.Tool>().mapNotNull { it.result?.createdAt }.maxOrNull() ?: 0L,
+                ),
             ),
         )
+    }
+    for (m in messages) {
+        // A tool-result row is the answer to the step above it; it
+        // neither contributes a step nor breaks a burst.
+        if (m.role == "tool") continue
+        if (m.role != "assistant") {
+            flush()
+            continue
+        }
+        val calls = parseCalls(m.toolCallsJson)
+        val hasReasoning = !m.reasoningText.isNullOrBlank()
+        if (calls.isEmpty() && !hasReasoning) {
+            // A text row breaks the burst (any sender — see doc above).
+            flush()
+            continue
+        }
+        // A work row: start a new burst unless the current one is the
+        // same speaker in the same turn (i.e. directly consecutive).
+        val cur = current
+        if (cur == null || cur.first().turnId != m.turnId || cur.first().sender != m.sender) {
+            flush()
+            current = mutableListOf()
+        }
+        current!!.add(m)
+        // A work row that also carries text ends its burst here: the
+        // text was already spoken, so later work is a new burst.
+        if (m.text.isNotBlank()) flush()
+    }
+    flush()
+    return segments
+}
+
+/**
+ * Where each burst renders (28/11/2026 revision, Duy): the next text
+ * message from the same speaker in the same turn, so one block reads
+ * Avatar + Name → work → text. Returns anchorId -> host message id,
+ * or null when the burst has no such text and stays standalone at its
+ * anchor (rendered there with its own header). Pure, so it can be
+ * unit-tested without Android. [messages] must be in chat order.
+ */
+fun segmentHosts(segments: List<WorkSegment>, messages: List<MessageEntity>): Map<String, String?> {
+    val anchorIds = segments.map { it.anchorId }.toSet()
+    val indexById = messages.mapIndexed { i, m -> m.id to i }.toMap()
+    return segments.associate { seg ->
+        val anchorIdx = indexById[seg.anchorId]
+        var host: String? = null
+        if (anchorIdx != null) {
+            val anchorRow = messages[anchorIdx]
+            if (anchorRow.text.isNotBlank()) {
+                host = seg.anchorId
+            } else {
+                for (i in anchorIdx + 1 until messages.size) {
+                    val m = messages[i]
+                    if (m.role == "user" || m.turnId != seg.turnId) break
+                    if (m.role != "assistant" || m.sender != seg.sender) continue
+                    if (m.text.isNotBlank()) {
+                        host = m.id
+                        break
+                    }
+                    // Another work burst by the same speaker: this
+                    // burst has no host of its own.
+                    if (m.id in anchorIds) break
+                }
+            }
+        }
+        seg.anchorId to host
     }
 }

@@ -9,20 +9,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
@@ -241,46 +234,5 @@ fun MemberAvatar(
                 .background(memberStatusColor(member.status))
                 .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape),
         )
-    }
-}
-
-/** "<name> is typing…" bubble, shown while an agent is working but has no visible message yet. */
-@Composable
-fun TypingIndicatorRow(member: GroupMember, modifier: Modifier = Modifier) {
-    Row(modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        MemberAvatar(member.copy(status = MemberStatus.WORKING), size = 28.dp)
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant,
-            shape = RoundedCornerShape(16.dp),
-            modifier = Modifier.padding(start = 8.dp),
-        ) {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("${member.name} is typing", style = MaterialTheme.typography.bodyMedium)
-                AnimatedDots()
-            }
-        }
-    }
-}
-
-@Composable
-private fun AnimatedDots() {
-    val transition = rememberInfiniteTransition(label = "typing-dots")
-    Row {
-        repeat(3) { i ->
-            val alpha by transition.animateFloat(
-                initialValue = 0.25f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 500, delayMillis = i * 170),
-                    repeatMode = RepeatMode.Reverse,
-                ),
-                label = "dot-$i",
-            )
-            Text(
-                ".",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.alpha(alpha).padding(start = 1.dp),
-            )
-        }
     }
 }

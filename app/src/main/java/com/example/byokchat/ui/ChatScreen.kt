@@ -291,14 +291,25 @@ fun ChatScreen(
     val toolResults = remember(messages) {
         ToolResults(messages.filter { it.role == "tool" && it.toolCallId != null }.associateBy { it.toolCallId!! })
     }
-    // Work pill (17/11/2026, approved mockup; 19/11/2026: one pill per
-    // speaker per turn): all tool/reasoning rows by one speaker in one
-    // turn form one segment, wherever they sit in the chat; the pill
-    // renders on the segment's first row. The pill only groups rows
-    // already in the DB — it never adds anything to Main's request
-    // (the 400 fix still holds).
+    // Work stream (28/11/2026 revision, Duy): bursts are attached to
+    // the next text message from the same speaker in the same turn, so
+    // one block reads Avatar + Name → work → text. A burst with no
+    // such text stays standalone at its anchor, rendered with its own
+    // header there. The grouping only groups rows already in the DB —
+    // it never adds anything to Main's request (the 400 fix still holds).
     val segments = remember(chrono, toolResults) {
         groupWorkSegments(chrono, toolResults)
+    }
+    // anchorId -> host message id (null = standalone at the anchor).
+    val segmentHostByAnchor: Map<String, String?> = remember(chrono, segments) {
+        segmentHosts(segments, chrono)
+    }
+    val segmentsByHost: Map<String, List<WorkSegment>> = remember(segments, segmentHostByAnchor) {
+        segments.filter { segmentHostByAnchor[it.anchorId] != null }
+            .groupBy { segmentHostByAnchor[it.anchorId]!! }
+    }
+    val standaloneAnchors: Set<String> = remember(segments, segmentHostByAnchor) {
+        segments.filter { segmentHostByAnchor[it.anchorId] == null }.map { it.anchorId }.toSet()
     }
     val segmentsByAnchor = remember(segments) {
         segments.associateBy { it.anchorId }
@@ -326,11 +337,15 @@ fun ChatScreen(
     // (no pill, no bubble) — drop it from the visible list so it leaves
     // no 14dp gap in the chat. The streaming row is never dropped: its
     // text is still arriving (liveText) even though the DB text is blank.
-    val visible = remember(chrono, segmentsByAnchor) {
+    val visible = remember(chrono, standaloneAnchors) {
         chrono.asReversed().filter { m ->
-            !(m.role == "assistant" && m.status == "done" && m.text.isBlank() &&
-                (!m.toolCallsJson.isNullOrBlank() || !m.reasoningText.isNullOrBlank()) &&
-                m.id !in segmentsByAnchor)
+            // A work row renders nothing on its own: an attached burst
+            // renders on its host text message, a non-anchor row is part
+            // of its burst. Only a standalone burst's anchor stays, so
+            // it can render its own header + work at that spot.
+            val isWorkRow = m.role == "assistant" && m.text.isBlank() &&
+                (!m.toolCallsJson.isNullOrBlank() || !m.reasoningText.isNullOrBlank())
+            !isWorkRow || m.id in standaloneAnchors
         }
     }
     // Only the very last answer of the chat gets the Copy / Regenerate / Branch row; older answers use press-and-hold.
@@ -566,22 +581,9 @@ fun ChatScreen(
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
-                    // Typing indicator (Phase 2, async in Phase 4): a sub
-                    // works in the background while Main is idle, so the
-                    // indicator names the working sub even when Main is not
-                    // generating — the earliest-started working sub, which
-                    // is the one closest to speaking (completion order).
-                    // Otherwise Main is working but has no visible message
-                    // yet — before the first streaming row appears, or
-                    // between tool rounds. The streaming row itself keeps
-                    // its own spinner (unchanged).
-                    val newest = visible.firstOrNull()
-                    val runningSub = members.filter { it.status == MemberStatus.WORKING && it.id != "main" }.minByOrNull { it.startedAt ?: Long.MAX_VALUE }
-                    val showTyping = runningSub != null || (generating && (newest == null || newest.role != "assistant" || newest.status != "streaming"))
-                    val typingMember = runningSub ?: mainMember
-                    if (showTyping && typingMember != null) {
-                        item { TypingIndicatorRow(typingMember) }
-                    }
+                    // No "[Agent] is typing…" bubble (28/11/2026
+                    // revision, Duy): the work stream line under the
+                    // agent's own Avatar + Name already shows it working.
                     items(visible, key = { it.id }, contentType = { it.role }) { m ->
                         val cur = matches.getOrNull(currentIdx)
                         val hl = if (searchOpen && query.isNotBlank()) Highlight(query, if (cur?.messageId == m.id) cur.occurrence else -1) else null
@@ -622,8 +624,11 @@ fun ChatScreen(
                                 } ?: { onOpenMainConversation() }
                                 AssistantMessage(
                                 m, generating, hl, edit, actions,
-                                workSegment = segmentsByAnchor[m.id],
-                                pillWaitingForName = segmentsByAnchor[m.id]?.sender?.let { waitingDeliveries[it] },
+                                workSegments = (segmentsByHost[m.id].orEmpty() +
+                                    if (m.id in standaloneAnchors) listOfNotNull(segmentsByAnchor[m.id]) else emptyList()),
+                                pillWaitingForName = (segmentsByHost[m.id].orEmpty() +
+                                    if (m.id in standaloneAnchors) listOfNotNull(segmentsByAnchor[m.id]) else emptyList())
+                                    .firstOrNull()?.sender?.let { waitingDeliveries[it] },
                                 fileCards = fileCardsByMessageId[m.id].orEmpty(),
                                 senderMember = senderMember,
                                 onAvatarClick = avatarClick,

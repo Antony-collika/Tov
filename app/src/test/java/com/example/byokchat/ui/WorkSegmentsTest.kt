@@ -9,10 +9,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pill grouping (17/11/2026, approved mockup; 19/11/2026: one pill per
- * speaker per turn): all tool/reasoning rows by one speaker in one turn
- * form one work segment, wherever they sit in the chat; plain text
- * messages never become steps, and tool-result rows attach by call id.
+ * Work grouping (28/11/2026 revision, Duy — supersedes the 19/11/2026
+ * one-pill-per-speaker-per-turn rule): one segment per burst of
+ * consecutive tool/reasoning rows by one speaker; a text row (any
+ * sender) breaks the burst, so work renders under its own speaker's
+ * Avatar + Name at the place it happened. Plain text messages never
+ * become steps, and tool-result rows attach by call id.
  */
 class WorkSegmentsTest {
 
@@ -109,27 +111,28 @@ class WorkSegmentsTest {
         assertTrue(segments[0].steps[0] is WorkStep.Reasoning)
     }
 
-    @Test fun textRowBetweenRoundsDoesNotBreakSegment() {
+    @Test fun textRowBetweenRoundsSplitsSegment() {
         val rows = listOf(
             row("a1", "t1", 1, toolCallsJson = calls("web_search")),
             row("a2", "t1", 2, text = "Tôi tìm thấy vài tin, để tôi đọc thêm."),
             row("a3", "t1", 3, toolCallsJson = calls("web_fetch")),
         )
         val segments = groupWorkSegments(rows, results())
-        // 19/11/2026: one pill per speaker per turn — a text message
-        // between two rounds no longer splits the stretch.
-        assertEquals(1, segments.size)
+        // 28/11/2026 revision: a text message between two rounds splits
+        // the burst — each burst renders under its own Avatar + Name,
+        // at the place it happened.
+        assertEquals(2, segments.size)
         assertEquals("a1", segments[0].anchorId)
-        assertEquals(
-            listOf("web_search", "web_fetch"),
-            segments[0].toolSteps.map { it.call.name },
-        )
+        assertEquals(listOf("web_search"), segments[0].toolSteps.map { it.call.name })
+        assertEquals("a3", segments[1].anchorId)
+        assertEquals(listOf("web_fetch"), segments[1].toolSteps.map { it.call.name })
     }
 
-    @Test fun interleavedSubsFormOneSegmentEach() {
-        // 19/11/2026: two subs working in parallel in one Main turn —
-        // their rounds interleave and greetings/results sit between
-        // them, but each agent's work is still one pill.
+    @Test fun interleavedSubsFormOneSegmentPerBurst() {
+        // 28/11/2026 revision: two subs working in parallel in one Main
+        // turn — their rounds interleave, and each burst is its own
+        // segment, so each burst renders under its own Avatar + Name
+        // at the place it happened instead of merging into one.
         val rows = listOf(
             row("u1", "t1", 1, role = "user", text = "xem tin bóng đá, mở nhạc du dương"),
             row("a1", "t1", 2, toolCallsJson = calls("delegate_to_subagent")),
@@ -142,21 +145,46 @@ class WorkSegmentsTest {
             row("b3", "t1", 9, sender = "bob", toolCallsJson = calls("web_fetch")),
         )
         val segments = groupWorkSegments(rows, results())
-        assertEquals(3, segments.size)
-        assertEquals(null, segments[0].sender)
-        assertEquals("a1", segments[0].anchorId)
-        assertEquals("bob", segments[1].sender)
-        assertEquals("b1", segments[1].anchorId)
+        assertEquals(6, segments.size)
         assertEquals(
-            listOf("web_search", "web_fetch", "web_fetch"),
-            segments[1].toolSteps.map { it.call.name },
+            listOf("a1", "b1", "m1", "b2", "m2", "b3"),
+            segments.map { it.anchorId },
         )
-        assertEquals("monica", segments[2].sender)
-        assertEquals("m1", segments[2].anchorId)
         assertEquals(
-            listOf("youtube_search", "youtube_media_play"),
-            segments[2].toolSteps.map { it.call.name },
+            listOf(null, "bob", "monica", "bob", "monica", "bob"),
+            segments.map { it.sender },
         )
+        assertEquals(
+            listOf("delegate_to_subagent", "web_search", "youtube_search", "web_fetch", "youtube_media_play", "web_fetch"),
+            segments.flatMap { it.toolSteps.map { step -> step.call.name } },
+        )
+    }
+
+    @Test fun segmentAttachesToFollowingTextOfSameSender() {
+        val rows = listOf(
+            row("u1", "t1", 1, role = "user", text = "mở nhạc gì vui đi"),
+            row("a1", "t1", 2, toolCallsJson = calls("delegate_to_subagent")),
+            row("a2", "t1", 3, text = "Mình đã nhờ Monica bật nhạc rồi nhé!"),
+            row("m1", "t1", 4, sender = "monica", toolCallsJson = calls("youtube_search")),
+            row("m2", "t1", 5, sender = "monica", toolCallsJson = calls("youtube_media_play")),
+        )
+        val segments = groupWorkSegments(rows, results())
+        val hosts = segmentHosts(segments, rows)
+        // Main's burst attaches to Main's next text; Monica's burst has
+        // no following text of her own, so it stays standalone.
+        assertEquals("a2", hosts["a1"])
+        assertEquals(null, hosts["m1"])
+    }
+
+    @Test fun segmentAttachesAcrossOtherAgentRows() {
+        val rows = listOf(
+            row("a1", "t1", 1, toolCallsJson = calls("delegate_to_subagent")),
+            row("s0", "t1", 2, text = "Chào bạn!", sender = "monica"),
+            row("a2", "t1", 3, text = "Mình đã nhờ Monica rồi nhé!"),
+        )
+        val segments = groupWorkSegments(rows, results())
+        assertEquals(1, segments.size)
+        assertEquals("a2", segmentHosts(segments, rows)["a1"])
     }
 
     @Test fun subToolRowsGroupUnderSubSenderAndGreetingIsNotAStep() {

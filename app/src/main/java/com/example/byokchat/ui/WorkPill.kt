@@ -57,21 +57,23 @@ private enum class StepStatus { RUNNING, WAITING, DONE, FAILED, INTERRUPTED }
  * One stretch of work by one agent as inline text lines (chat redesign
  * 28/11/2026): no pill, no bubble — each reasoning passage or tool call
  * is one line in the same flow as the message, in the agent's colour.
- * While the agent works, the lines are open: one row per step, the
- * running step in the present tense, finished steps in the past tense
- * (via [pillLabel]), each row tappable to open its detail in the bottom
- * sheet (always 50% height, draggable to 100%). Once the work is done
- * the lines collapse into ONE line — the agent's name plus "Worked for
- * …" (tools) or "Thought for …" (reasoning only), with the elapsed time
- * frozen at the last activity; tapping it (or its chevron) re-opens the
- * step rows inline below it. A finished sub waiting for its turn to
- * speak, a failed run and a stopped run keep their old one-line labels
+ * While the agent works, the stream is ONE line (28/11/2026
+ * revision, Duy): the current step, in the present tense (via
+ * [pillLabel]) — whichever step the agent is on right now is the line
+ * shown. Tapping it (or its chevron) opens all the steps so far
+ * inline below it. Once the work is done the line collapses into the
+ * agent's name plus "Worked for …" (tools) or "Thought for …"
+ * (reasoning only), with the elapsed time frozen at the last activity;
+ * tapping it (or its chevron) re-opens the step rows inline below it.
+ * Only this one line ever carries a chevron (28/11/2026: the step rows
+ * below it have none). A finished sub waiting for its turn to speak, a
+ * failed run and a stopped run keep their old one-line labels
  * ("Đã xong · đang chờ X nói xong" / "Lỗi khi …" / "Đã dừng") with a
  * chevron to open the rows. Reasoning appears only when the provider
  * really returned readable text — never invented. The stream only
  * renders when the turn has tool calls or readable reasoning (a plain
  * answer has no segment, so no line); the grouping lives in
- * WorkSegments and is unchanged.
+ * WorkSegments.
  */
 @Composable
 internal fun WorkStream(
@@ -162,11 +164,51 @@ internal fun WorkStream(
 
     var userExpanded by remember(segment.anchorId) { mutableStateOf(false) }
     var detailStep by remember(segment.anchorId) { mutableStateOf<WorkStep?>(null) }
+    // The step the live line follows: the running one, else the
+    // latest step (a finished step shown while the agent moves on to
+    // the next one, which has no row yet).
+    val currentStep = runningStep?.let { step -> segment.steps.lastOrNull { it == step } }
+        ?: segment.steps.lastOrNull()
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (isLive) {
-            segment.steps.forEach { step ->
-                val (status, label) = stepLine(step)
-                WorkStepLine(step, status, label, agentColor) { detailStep = step }
+        if (isLive && currentStep != null) {
+            // Live = one line, the current step (28/11/2026 revision):
+            // tapping it (or its chevron) opens all steps so far.
+            val (status, label) = stepLine(currentStep)
+            Row(
+                Modifier.fillMaxWidth().clickable { userExpanded = !userExpanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when (status) {
+                    StepStatus.RUNNING, StepStatus.WAITING ->
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    StepStatus.FAILED ->
+                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                    StepStatus.INTERRUPTED ->
+                        Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    StepStatus.DONE ->
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = agentColor, modifier = Modifier.size(16.dp))
+                }
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = agentColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    if (userExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (userExpanded) "Thu lại các bước làm việc của $agentName" else "Xem các bước làm việc của $agentName",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            if (userExpanded) {
+                segment.steps.forEach { step ->
+                    val (st, lb) = stepLine(step)
+                    WorkStepLine(step, st, lb, agentColor) { detailStep = step }
+                }
             }
             // Waiting for approval (was the old pill's "Chờ bạn duyệt…"):
             // the approval itself is asked by the ConfirmationHost dialog,
@@ -239,9 +281,10 @@ internal fun WorkStream(
 }
 
 /**
- * One inline work row: a 16dp status icon, the step's label in the
- * agent's colour, and a grey chevron at the end. Tapping the row opens
- * the step's detail in the bottom sheet.
+ * One inline work row: a 16dp status icon and the step's label in the
+ * agent's colour — no chevron (28/11/2026: only the single
+ * collapsed/expanded line carries one). Tapping the row opens the
+ * step's detail in the bottom sheet.
  */
 @Composable
 private fun WorkStepLine(
@@ -280,12 +323,6 @@ private fun WorkStepLine(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
-        )
-        Icon(
-            Icons.Default.KeyboardArrowDown,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(16.dp),
         )
     }
 }

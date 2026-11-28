@@ -223,12 +223,9 @@ internal fun UserMessage(
                     if (m.text.isNotEmpty()) {
                         Text(annotated, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
-                    Text(
-                        formatClock(m.createdAt),
-                        fontSize = 11.sp,
-                        color = Color(0xFF7A6A9E),
-                        modifier = Modifier.align(Alignment.End),
-                    )
+                    // No timestamp on a user message (28/11/2026: it
+                    // wastes space). The turn label above the bubble
+                    // stays.
                 }
             }
             if (m.edited) EditedLabel()
@@ -253,8 +250,10 @@ internal fun AssistantMessage(
     hl: Highlight?,
     edit: EditState?,
     actions: Actions,
-    /** The work segment whose stream renders on this message (null except on the segment's first row). */
-    workSegment: WorkSegment? = null,
+    /** The work segments whose stream renders on this message (the
+     * bursts attached to it, in order; empty = no work here). A burst
+     * with no following text renders on its own anchor row instead. */
+    workSegments: List<WorkSegment> = emptyList(),
     /** Phase 4: the name of the agent this segment's sub is waiting for (null = not waiting) — the collapsed line says "đang chờ [tên] nói xong". */
     pillWaitingForName: String? = null,
     /** Files this turn created (txt.create / txt.write paths): one card per file, under the turn's last text message. */
@@ -356,20 +355,20 @@ internal fun AssistantMessage(
                 MessageEditor(edit, "Save", onEditChange, onEditSave, onEditCancel)
                 return@Column
             }
-            // Work stream (chat redesign 28/11/2026): the agent's work as
-            // inline text lines at the TOP of the turn, above the answer —
-            // the old pill is gone. Reasoning only appears when the
+            // Work stream order (28/11/2026 revision, Duy): one
+            // block per agent — Avatar + Name first, then that agent's
+            // work, then its text. The work is inline text lines under
+            // its own header, at the place it happened — never a bare
+            // "X Worked for …" floating above the header, and never
+            // merged across the turn. Reasoning only appears when the
             // provider really returned readable text (never invented). A
             // turn with no tools and no reasoning has no segment, so no
             // line at all.
-            if (workSegment != null) WorkStream(workSegment, generating, waitingForName = pillWaitingForName, senderMember = senderMember)
-            if (shownText.isNotEmpty()) {
-                // No bubble (chat redesign 28/11/2026): the header row
-                // (avatar + agent name + time) sits above the answer, and
-                // the text runs full width below it. Name + avatar only
-                // appear with a text message: a work-only or empty row
-                // (a tool call with no words) shows neither, so the
-                // avatar never appears on its own looking broken.
+            if (workSegments.isNotEmpty() || shownText.isNotEmpty()) {
+                // Header row (avatar + agent name + time) sits above
+                // both the work and the answer. A work-only row still
+                // gets its header, so the work is always under the
+                // agent it belongs to.
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -396,6 +395,11 @@ internal fun AssistantMessage(
                         color = Color(0xFF8A8D94),
                     )
                 }
+                workSegments.forEach { segment ->
+                    WorkStream(segment, generating, waitingForName = pillWaitingForName, senderMember = senderMember)
+                }
+            }
+            if (shownText.isNotEmpty()) {
                 // Late result of a sub-agent (Phase 4): the task title as
                 // an anchor, so a message that arrives after the
                 // conversation moved on still says which task it belongs to.
