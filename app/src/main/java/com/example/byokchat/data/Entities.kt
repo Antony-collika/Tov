@@ -30,8 +30,10 @@ data class ConversationEntity(
     val updatedAt: Long,
     /** Id of the conversation this one was branched from (null if it is not a branch). */
     val parentId: String? = null,
-    /** Pinned conversations are listed first. */
+    /** Pinned conversations show a pin icon instead of the chat bubble. */
     @ColumnInfo(defaultValue = "0") val pinned: Boolean = false,
+    /** Archived conversations are hidden from the drawer and listed on the Backup screen. */
+    @ColumnInfo(defaultValue = "0") val archived: Boolean = false,
     /**
      * Nhánh history hiện tại của cuộc trò chuyện (fork khi regenerate,
      * quyết định 15/11/2026): 0 = file gốc history.md, N ≥ 1 = file

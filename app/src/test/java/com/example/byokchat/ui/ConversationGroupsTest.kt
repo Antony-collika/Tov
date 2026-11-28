@@ -34,11 +34,20 @@ class ConversationGroupsTest {
         assertEquals(DateBucket.OLDER, dateBucket(at(12), now, zone))
     }
 
-    @Test fun pinnedFirstThenDatesAndEmptySectionsAreSkipped() {
+    @Test fun pinnedStaysInItsDateSection() {
         val list = listOf(conv("a", at(20)), conv("b", at(1), pinned = true), conv("c", at(19)), conv("d", at(2)))
         val groups = groupConversations(list, now, zone)
-        assertEquals(listOf(DateBucket.PINNED, DateBucket.TODAY, DateBucket.YESTERDAY, DateBucket.OLDER), groups.map { it.first })
-        assertEquals(listOf("b"), groups[0].second.map { it.id })
+        assertEquals(listOf(DateBucket.TODAY, DateBucket.YESTERDAY, DateBucket.OLDER), groups.map { it.first })
+        assertEquals(listOf("a"), groups[0].second.map { it.id })
+        assertEquals(listOf("b", "d"), groups[2].second.map { it.id })
+    }
+
+    @Test fun pinnedSectionIsOneSectionInGivenOrder() {
+        val list = listOf(conv("a", at(20), pinned = true), conv("b", at(1), pinned = true))
+        val groups = groupConversations(list, now, zone, pinnedSection = true)
+        assertEquals(listOf(DateBucket.PINNED), groups.map { it.first })
+        assertEquals(listOf("a", "b"), groups[0].second.map { it.id })
+        assertEquals(emptyList(), groupConversations(emptyList(), now, zone, pinnedSection = true))
     }
 
     @Test fun previewCollapsesWhitespace() {

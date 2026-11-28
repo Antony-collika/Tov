@@ -157,7 +157,15 @@ fun AppNav() {
                 )
             }
             composable("backup") {
-                BackupScreen(onBack = { nav.popBackStack() })
+                BackupScreen(
+                    onBack = { nav.popBackStack() },
+                    // Opens the chat on top of the Settings → Backup stack, so
+                    // Back from the chat returns to the Backup screen.
+                    onOpenConversation = { id ->
+                        openChat(id)
+                        nav.navigate("chat")
+                    },
+                )
             }
             composable("settings-web-search") { SettingsWebSearchScreen(onBack = { nav.popBackStack() }) }
             composable("settings-storage") { SettingsStorageScreen(onBack = { nav.popBackStack() }) }

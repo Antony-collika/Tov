@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -20,9 +22,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,12 +53,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.byokchat.data.ConversationEntity
+import com.example.byokchat.data.displayTitle
 import com.example.byokchat.backup.ApplyResult
 import com.example.byokchat.backup.BackupOpenError
 import com.example.byokchat.backup.ConflictChoice
@@ -94,7 +106,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BackupScreen(onBack: () -> Unit) {
+fun BackupScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
     val context = LocalContext.current
     val container = context.container
     val scope = rememberCoroutineScope()
@@ -119,9 +131,24 @@ fun BackupScreen(onBack: () -> Unit) {
     var done by remember { mutableStateOf<ApplyResult?>(null) }
     // Image bytes of the opened backup, kept until the restore is applied.
     var pendingImages by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
+    // Archived chats (hidden from the drawer), with the same last-message preview as the drawer.
+    val archived by container.db.conversations().observeArchived().collectAsState(initial = emptyList())
+    val lastMessages by container.db.messages().observeLastMessages().collectAsState(initial = emptyList())
+    val archivedPreviews = remember(lastMessages) { lastMessages.associate { it.conversationId to previewOf(it.text) } }
 
     fun toast(text: String) {
         Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+    }
+
+    /** Deletes archived chats for good (no Undo on this screen). */
+    fun deleteArchived(ids: List<String>) {
+        if (ids.isEmpty()) return
+        scope.launch(Dispatchers.IO) {
+            ids.forEach { container.engine.stop(it); container.conversations.delete(it) }
+            withContext(Dispatchers.Main) {
+                toast(if (ids.size == 1) "Conversation deleted" else "${ids.size} conversations deleted")
+            }
+        }
     }
 
     fun backupFileName(): String {
@@ -326,6 +353,17 @@ fun BackupScreen(onBack: () -> Unit) {
                     )
                 }
                 else -> {
+                    if (archived.isNotEmpty()) {
+                        ArchivedSection(
+                            archived = archived,
+                            previews = archivedPreviews,
+                            onOpenConversation = onOpenConversation,
+                            onRename = { id, title -> scope.launch { container.conversations.rename(id, title) } },
+                            onTogglePin = { id, pinned -> scope.launch { container.db.conversations().setPinned(id, pinned) } },
+                            onUnarchive = { id -> scope.launch { container.db.conversations().setArchived(id, false) } },
+                            onDelete = { ids -> deleteArchived(ids) },
+                        )
+                    }
                     Text(
                         "One encrypted file: providers and keys, sub-agents, chats, notes, tool edits and the default system prompt. Not included: Request panel, theme, limits, request log, playground files.",
                         style = MaterialTheme.typography.bodyMedium,
@@ -589,4 +627,140 @@ private fun BackupPasswordDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         },
     )
+}
+
+/**
+ * Archived chats at the top of the Backup screen (drawer fix, 28/11/2026).
+ * Only shown when there is at least one archived chat. A row opens its chat
+ * on tap; its ⋮ menu is Rename / Pin / Select / Unarchive / Delete, with a
+ * white background like the drawer's menu. "Select" starts multi-select
+ * inside this list (checkboxes + a delete bar); deleting here is immediate,
+ * with a toast — there is no Undo snackbar on this screen, unlike the drawer.
+ */
+@Composable
+private fun ArchivedSection(
+    archived: List<ConversationEntity>,
+    previews: Map<String, String>,
+    onOpenConversation: (String) -> Unit,
+    onRename: (String, String) -> Unit,
+    onTogglePin: (String, Boolean) -> Unit,
+    onUnarchive: (String) -> Unit,
+    onDelete: (List<String>) -> Unit,
+) {
+    var selecting by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var renameTarget by remember { mutableStateOf<ConversationEntity?>(null) }
+
+    fun exitSelection() {
+        selecting = false
+        selected = emptySet()
+    }
+
+    Column(Modifier.fillMaxWidth()) {
+        Text("Archived", style = MaterialTheme.typography.titleMedium)
+        if (selecting) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${selected.size} selected",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    enabled = selected.isNotEmpty(),
+                    onClick = { val ids = selected.toList(); exitSelection(); onDelete(ids) },
+                ) { Text("Delete") }
+                TextButton(onClick = { exitSelection() }) { Text("Cancel") }
+            }
+        }
+        archived.forEachIndexed { index, c ->
+            ArchivedRow(
+                conversation = c,
+                preview = previews[c.id],
+                selecting = selecting,
+                checked = c.id in selected,
+                onToggleChecked = { selected = if (c.id in selected) selected - c.id else selected + c.id },
+                onOpen = { onOpenConversation(c.id) },
+                onRename = { renameTarget = c },
+                onTogglePin = { onTogglePin(c.id, !c.pinned) },
+                onStartSelecting = { selecting = true; selected = setOf(c.id) },
+                onUnarchive = { onUnarchive(c.id) },
+                onDelete = { onDelete(listOf(c.id)) },
+            )
+            if (index != archived.lastIndex) {
+                HorizontalDivider(color = Color(0xFFF2F2F5))
+            }
+        }
+    }
+
+    renameTarget?.let { c ->
+        TextEditDialog(
+            title = "Rename conversation",
+            initial = displayTitle(c.title),
+            onConfirm = { onRename(c.id, it); renameTarget = null },
+            onDismiss = { renameTarget = null },
+        )
+    }
+}
+
+/** One archived chat row: thin-outline bubble icon, title 16, preview 14, ⋮ menu. */
+@Composable
+private fun ArchivedRow(
+    conversation: ConversationEntity,
+    preview: String?,
+    selecting: Boolean,
+    checked: Boolean,
+    onToggleChecked: () -> Unit,
+    onOpen: () -> Unit,
+    onRename: () -> Unit,
+    onTogglePin: () -> Unit,
+    onStartSelecting: () -> Unit,
+    onUnarchive: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().clickable { if (selecting) onToggleChecked() else onOpen() }
+            .padding(vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (selecting) {
+            Checkbox(checked = checked, onCheckedChange = null)
+        } else {
+            ChatBubbleIcon(Modifier.size(24.dp))
+        }
+        Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
+            Text(
+                displayTitle(conversation.title),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF191C20),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!preview.isNullOrEmpty()) {
+                Text(
+                    preview,
+                    fontSize = 14.sp,
+                    color = Color(0xFF6B7280),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (!selecting) {
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Options") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Color.White) {
+                    DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                    DropdownMenuItem(
+                        text = { Text(if (conversation.pinned) "Unpin" else "Pin") },
+                        onClick = { menu = false; onTogglePin() },
+                    )
+                    DropdownMenuItem(text = { Text("Select") }, onClick = { menu = false; onStartSelecting() })
+                    DropdownMenuItem(text = { Text("Unarchive") }, onClick = { menu = false; onUnarchive() })
+                    DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
+                }
+            }
+        }
+    }
 }

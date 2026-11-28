@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -33,8 +32,6 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -44,16 +41,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -65,11 +60,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -119,9 +116,9 @@ class ConversationListViewModel(private val app: AppContainer) : ViewModel() {
     private val commitScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val drawerOpen = MutableStateFlow(false)
 
-    /** Only conversations that have at least one message; empty drafts and pending deletions are hidden. */
+    /** Only conversations that have at least one message; empty drafts, pending deletions and archived chats are hidden. */
     val conversations: StateFlow<List<ConversationEntity>> =
-        combine(app.db.conversations().observeNonEmpty(), hidden) { list, h -> list.filter { it.id !in h } }
+        combine(app.db.conversations().observeNonEmpty(), hidden) { list, h -> list.filter { it.id !in h && !it.archived } }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** Preview line (start of the last message) per conversation. Only observed while the drawer is open. */
@@ -151,6 +148,7 @@ class ConversationListViewModel(private val app: AppContainer) : ViewModel() {
 
     fun rename(id: String, title: String) = viewModelScope.launch { app.conversations.rename(id, title) }
     fun setPinned(id: String, pinned: Boolean) = viewModelScope.launch { app.db.conversations().setPinned(id, pinned) }
+    fun setArchived(id: String, archived: Boolean) = viewModelScope.launch { app.db.conversations().setArchived(id, archived) }
 
     fun hide(ids: Collection<String>) { hidden.value = hidden.value + ids }
     fun unhide(ids: Collection<String>) { hidden.value = hidden.value - ids.toSet() }
@@ -198,21 +196,15 @@ fun ConversationDrawerContent(
     /** Which filter chip is active; only filters the list in memory, never the data. */
     var filter by remember { mutableStateOf(ConversationFilter.ALL) }
 
-    /** The list as the active filter chip shows it (Archived has no data in the app yet). */
+    /** The list as the active filter chip shows it. */
     val filtered = when (filter) {
         ConversationFilter.ALL -> conversations
         ConversationFilter.PINNED -> conversations.filter { it.pinned }
-        ConversationFilter.ARCHIVED -> emptyList()
     }
-    val groups = remember(filtered) { groupConversations(filtered, System.currentTimeMillis()) }
+    val groups = remember(filtered, filter) {
+        groupConversations(filtered, System.currentTimeMillis(), pinnedSection = filter == ConversationFilter.PINNED)
+    }
     val pinnedCount = remember(conversations) { conversations.count { it.pinned } }
-    /** Rows a thin divider follows: every row except the current one, the row right above it, and the last row overall. */
-    val dividerAfter = remember(groups, currentId) {
-        val flat = groups.flatMap { it.second }.map { it.id }
-        flat.mapIndexedNotNull { i, id ->
-            if (id != currentId && flat.getOrNull(i + 1) != currentId && i != flat.lastIndex) id else null
-        }.toSet()
-    }
 
     fun exitSelection() {
         selecting = false
@@ -278,25 +270,50 @@ fun ConversationDrawerContent(
                     ) { Icon(Icons.Default.Delete, contentDescription = "Delete selected") }
                 }
             } else {
-                // Title row: "Conversations" + search icon (no Settings icon up here any more;
-                // Settings lives in the footer row at the bottom of the drawer).
+                // Title row, one row only: "Conversations" + search icon + compact
+                // "+ New chat" pill at the far right. Width budget at 360dp: the
+                // drawer is 90% = 324dp, minus 20dp margins each side leaves
+                // ~284dp for title + search + pill, so the title is 18sp (not 22sp)
+                // and the pill is kept tight — the button never drops to a second row.
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         "Conversations",
-                        fontSize = 22.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFF191C20),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                     IconButton(onClick = { searchOpen = true }) {
                         Icon(Icons.Default.Search, contentDescription = "Search chats")
                     }
+                    if (!searchOpen) {
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(Color(0xFFEA580C))
+                                .clickable(onClick = onNewChat)
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Text(
+                                "New chat",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White,
+                                maxLines = 1,
+                                modifier = Modifier.padding(start = 4.dp),
+                            )
+                        }
+                    }
                 }
                 if (searchOpen) {
-                    // The search field replaces the New chat button while it is open.
+                    // The search field appears where the New chat pill was while it is open.
                     OutlinedTextField(
                         value = query,
                         onValueChange = { vm.setQuery(it) },
@@ -313,23 +330,10 @@ fun ConversationDrawerContent(
                         },
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                     )
-                } else {
-                    Button(
-                        onClick = onNewChat,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFEA580C),
-                            contentColor = Color.White,
-                        ),
-                        shape = RoundedCornerShape(22.dp),
-                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp),
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("New chat", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 8.dp))
-                    }
                 }
-                // Filter chips, horizontally scrollable (all three do not fit even at 390dp).
-                // Hidden while searching: the list below is replaced by the search results then.
+                // Filter chips, horizontally scrollable. Only two chips now: Archived
+                // lives on the Backup screen instead. Hidden while searching: the
+                // list below is replaced by the search results then.
                 if (query.isBlank()) {
                     Row(
                         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 4.dp),
@@ -346,12 +350,6 @@ fun ConversationDrawerContent(
                             selected = filter == ConversationFilter.PINNED,
                             onClick = { filter = ConversationFilter.PINNED },
                             icon = { tint -> Icon(Icons.Default.PushPin, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp)) },
-                        )
-                        FilterChip(
-                            label = "Archived",
-                            selected = filter == ConversationFilter.ARCHIVED,
-                            onClick = { filter = ConversationFilter.ARCHIVED },
-                            icon = { tint -> Icon(Icons.Default.Archive, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp)) },
                         )
                     }
                 }
@@ -387,10 +385,6 @@ fun ConversationDrawerContent(
                     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                         Text("No conversations yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                } else if (filter == ConversationFilter.ARCHIVED) {
-                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        Text("No archived conversations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                 } else if (filtered.isEmpty()) {
                     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                         Text("No pinned conversations.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -407,7 +401,7 @@ fun ConversationDrawerContent(
                                 modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
                             )
                         }
-                        list.forEach { c ->
+                        list.forEachIndexed { index, c ->
                             item(key = c.id) {
                                 ConversationRow(
                                     title = displayTitle(c.title),
@@ -428,11 +422,13 @@ fun ConversationDrawerContent(
                                     onRename = { renameTarget = c },
                                     onTogglePin = { vm.setPinned(c.id, !c.pinned) },
                                     onStartSelecting = { selecting = true; selected = setOf(c.id) },
+                                    onArchive = { vm.setArchived(c.id, true) },
                                     onDelete = { deleteWithUndo(listOf(c.id)) },
                                     modifier = Modifier.animateItem(),
                                 )
                             }
-                            if (c.id in dividerAfter) {
+                            // A thin divider after every row except the last row of its group.
+                            if (index != list.lastIndex) {
                                 item(key = "d_" + c.id) {
                                     HorizontalDivider(color = Color(0xFFF2F2F5))
                                 }
@@ -446,6 +442,7 @@ fun ConversationDrawerContent(
             HorizontalDivider(color = Color(0xFFE8E8EC))
             ListItem(
                 modifier = Modifier.clickable { onSettings() },
+                colors = ListItemDefaults.colors(containerColor = Color.White),
                 headlineContent = { Text("Settings", fontSize = 15.sp) },
                 leadingContent = { Icon(Icons.Default.Settings, contentDescription = null) },
             )
@@ -464,47 +461,76 @@ fun ConversationDrawerContent(
 }
 
 /** Which list filter chip is active. */
-private enum class ConversationFilter { ALL, PINNED, ARCHIVED }
+private enum class ConversationFilter { ALL, PINNED }
 
 /**
- * Chat bubble with three white dots, drawn with Canvas (the app has no avatar for a
- * chat session, so this stands in for one). The bubble colour follows its context:
- * dark grey in the row tile, the chip's text colour in a filter chip.
+ * Chat bubble: a thin-outlined oval with a small tail at the bottom-right,
+ * drawn with Canvas (the app has no avatar for a chat session, so this
+ * stands in for one). The outline colour follows its context: dark grey
+ * in a row, the chip's text colour in a filter chip. No fill, no dots.
+ * Shared with the Backup screen's archived list, so it is not private.
  */
 @Composable
-private fun ChatBubbleIcon(
+internal fun ChatBubbleIcon(
     modifier: Modifier = Modifier,
     bubbleColor: Color = Color(0xFF4B5563),
 ) {
     Canvas(modifier) {
         val w = size.width
         val h = size.height
-        // Bubble body: most of the box, with a small tail at the bottom-left.
-        val bodyHeight = h * 0.78f
-        drawRoundRect(
+        val stroke = size.minDimension * 0.075f
+        // Bubble body: a wide oval taking up the top of the box.
+        val bodyHeight = h * 0.80f
+        drawOval(
             color = bubbleColor,
-            topLeft = Offset.Zero,
-            size = Size(w, bodyHeight),
-            cornerRadius = CornerRadius(w * 0.18f, w * 0.18f),
+            topLeft = Offset(stroke / 2f, stroke / 2f),
+            size = Size(w - stroke, bodyHeight - stroke),
+            style = Stroke(width = stroke),
         )
+        // Small tail at the bottom-right: two strokes from the oval's lower
+        // edge out to a point and back.
         val tail = Path().apply {
-            moveTo(w * 0.20f, bodyHeight - 1f)
-            lineTo(w * 0.34f, bodyHeight - 1f)
-            lineTo(w * 0.16f, h)
-            close()
+            moveTo(w * 0.60f, bodyHeight - stroke * 0.6f)
+            lineTo(w * 0.88f, h - stroke / 2f)
+            lineTo(w * 0.78f, bodyHeight - stroke * 1.4f)
         }
-        drawPath(tail, bubbleColor)
-        // Three white dots, horizontally centred in the body.
-        val dotRadius = w * 0.075f
-        val centreY = bodyHeight / 2f
-        val gap = w * 0.22f
-        drawCircle(Color.White, radius = dotRadius, center = Offset(w / 2f - gap, centreY))
-        drawCircle(Color.White, radius = dotRadius, center = Offset(w / 2f, centreY))
-        drawCircle(Color.White, radius = dotRadius, center = Offset(w / 2f + gap, centreY))
+        drawPath(tail, bubbleColor, style = Stroke(width = stroke, join = StrokeJoin.Round, cap = StrokeCap.Round))
     }
 }
 
-/** One filter chip above the conversation list ("All chats 12", "Pinned 3", "Archived"). */
+/**
+ * Pushpin, tilted, drawn with the same thin outline as the chat bubble:
+ * a small round head at the top, a tapered shaft, and a point at the
+ * bottom-left. No fill, no disc behind it.
+ */
+@Composable
+private fun PinIcon(
+    modifier: Modifier = Modifier,
+    pinColor: Color = Color(0xFF4B5563),
+) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = size.minDimension * 0.075f
+        // Round head at the top.
+        drawCircle(
+            color = pinColor,
+            radius = w * 0.17f,
+            center = Offset(w * 0.62f, h * 0.22f),
+            style = Stroke(width = stroke),
+        )
+        // Tapered shaft: two strokes from the head down to one point.
+        val shaft = Path().apply {
+            moveTo(w * 0.50f, h * 0.34f)
+            lineTo(w * 0.28f, h * 0.86f)
+            moveTo(w * 0.72f, h * 0.32f)
+            lineTo(w * 0.40f, h * 0.86f)
+        }
+        drawPath(shaft, pinColor, style = Stroke(width = stroke, cap = StrokeCap.Round))
+    }
+}
+
+/** One filter chip above the conversation list ("All chats 12", "Pinned 3"). */
 @Composable
 private fun FilterChip(
     label: String,
@@ -535,7 +561,7 @@ private fun FilterChip(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ConversationRow(
     title: String,
@@ -550,96 +576,71 @@ private fun ConversationRow(
     onRename: () -> Unit,
     onTogglePin: () -> Unit,
     onStartSelecting: () -> Unit,
+    onArchive: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var menu by remember { mutableStateOf(false) }
-    // Swipe to the right deletes (with Undo). Swiping left is left alone because that closes the drawer.
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.StartToEnd) {
-                onDelete()
-                true
-            } else false
-        },
-    )
-    SwipeToDismissBox(
-        state = dismissState,
-        modifier = modifier,
-        enableDismissFromStartToEnd = !selecting,
-        enableDismissFromEndToStart = false,
-        backgroundContent = {
-            Box(
-                Modifier.fillMaxSize().background(MaterialTheme.colorScheme.errorContainer).padding(start = 20.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
-            }
-        },
-    ) {
-        // A plain Row, not ListItem: ListItem enforces a 72dp minimum height for
-        // two-line rows, but the spec wants 11dp of padding around the 40dp tile (62dp).
-        Box(
-            Modifier
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (isCurrent || checked) Color(0xFFFFF1E6) else Color.White)
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = {
-                        if (!selecting) {
-                            onLongClick()
-                            menu = true
-                        }
-                    },
-                ),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 11.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (selecting) {
-                    Checkbox(checked = checked, onCheckedChange = null)
-                } else {
-                    Box(
-                        Modifier.size(40.dp).clip(CircleShape).background(Color(0xFFF2F2F5)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        ChatBubbleIcon(Modifier.size(24.dp))
+    // A flat row: no rounded corners, no swipe-to-delete (deleting is only
+    // through the menu, with Undo). The open / selected row keeps the pale
+    // orange background, as a plain rectangle.
+    Box(
+        modifier
+            .background(if (isCurrent || checked) Color(0xFFFFF1E6) else Color.White)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    if (!selecting) {
+                        onLongClick()
+                        menu = true
                     }
-                }
-                Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
+                },
+            ),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (selecting) {
+                Checkbox(checked = checked, onCheckedChange = null)
+            } else if (pinned) {
+                PinIcon(Modifier.size(24.dp))
+            } else {
+                ChatBubbleIcon(Modifier.size(24.dp))
+            }
+            Column(Modifier.weight(1f).padding(start = 12.dp, end = 8.dp)) {
+                Text(
+                    title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF191C20),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!preview.isNullOrEmpty()) {
                     Text(
-                        title,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF191C20),
+                        preview,
+                        fontSize = 14.sp,
+                        color = Color(0xFF6B7280),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    if (!preview.isNullOrEmpty()) {
-                        Text(
-                            preview,
-                            fontSize = 14.sp,
-                            color = Color(0xFF6B7280),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (working) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    if (!selecting) {
-                        // The menu must live inside a Box around its button: DropdownMenu
-                        // anchors to its parent layout, and the row is full-width, so a menu
-                        // placed at row level opens at the left edge instead of the button.
-                        Box {
-                            IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Options") }
-                            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                                DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
-                                DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = { menu = false; onTogglePin() })
-                                DropdownMenuItem(text = { Text("Select") }, onClick = { menu = false; onStartSelecting() })
-                                DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
-                            }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (working) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                if (!selecting) {
+                    // The menu must live inside a Box around its button: DropdownMenu
+                    // anchors to its parent layout, and the row is full-width, so a menu
+                    // placed at row level opens at the left edge instead of the button.
+                    Box {
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, contentDescription = "Options") }
+                        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Color.White) {
+                            DropdownMenuItem(text = { Text("Rename") }, onClick = { menu = false; onRename() })
+                            DropdownMenuItem(text = { Text(if (pinned) "Unpin" else "Pin") }, onClick = { menu = false; onTogglePin() })
+                            DropdownMenuItem(text = { Text("Select") }, onClick = { menu = false; onStartSelecting() })
+                            DropdownMenuItem(text = { Text("Archive") }, onClick = { menu = false; onArchive() })
+                            DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; onDelete() })
                         }
                     }
                 }

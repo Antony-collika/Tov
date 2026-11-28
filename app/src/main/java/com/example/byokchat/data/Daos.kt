@@ -13,8 +13,12 @@ interface ConversationDao {
     fun observeAll(): Flow<List<ConversationEntity>>
 
     /** Conversations that have at least one message (empty drafts are never listed). */
-    @Query("SELECT * FROM conversations WHERE id IN (SELECT DISTINCT conversationId FROM messages) ORDER BY pinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM conversations WHERE id IN (SELECT DISTINCT conversationId FROM messages) ORDER BY updatedAt DESC")
     fun observeNonEmpty(): Flow<List<ConversationEntity>>
+
+    /** Archived conversations that have at least one message, newest first (Backup screen). */
+    @Query("SELECT * FROM conversations WHERE archived = 1 AND id IN (SELECT DISTINCT conversationId FROM messages) ORDER BY updatedAt DESC")
+    fun observeArchived(): Flow<List<ConversationEntity>>
 
     /** Removes conversations that never received a message. */
     @Query("DELETE FROM conversations WHERE id NOT IN (SELECT DISTINCT conversationId FROM messages)")
@@ -44,6 +48,9 @@ interface ConversationDao {
 
     @Query("UPDATE conversations SET pinned = :pinned WHERE id = :id")
     suspend fun setPinned(id: String, pinned: Boolean)
+
+    @Query("UPDATE conversations SET archived = :archived WHERE id = :id")
+    suspend fun setArchived(id: String, archived: Boolean)
 
     /** Chuyển con trỏ sang nhánh history khác (fork khi regenerate). */
     @Query("UPDATE conversations SET historyBranch = :branch WHERE id = :id")

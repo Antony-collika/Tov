@@ -27,15 +27,21 @@ fun dateBucket(updatedAt: Long, now: Long, zone: ZoneId = ZoneId.systemDefault()
 }
 
 /**
- * Splits the list into sections: pinned first, then by date. The order inside a section is kept as given
+ * Splits the list into sections by date. The order inside a section is kept as given
  * (the list is already sorted newest first), and empty sections are left out.
+ * With [pinnedSection] (the Pinned filter) the whole list goes into one "Pinned"
+ * section, still in the given order (newest first = LIFO).
  */
 fun groupConversations(
     list: List<ConversationEntity>,
     now: Long,
     zone: ZoneId = ZoneId.systemDefault(),
+    pinnedSection: Boolean = false,
 ): List<Pair<DateBucket, List<ConversationEntity>>> {
-    val byBucket = list.groupBy { if (it.pinned) DateBucket.PINNED else dateBucket(it.updatedAt, now, zone) }
+    if (pinnedSection) {
+        return if (list.isEmpty()) emptyList() else listOf(DateBucket.PINNED to list)
+    }
+    val byBucket = list.groupBy { dateBucket(it.updatedAt, now, zone) }
     return DateBucket.entries.mapNotNull { b -> byBucket[b]?.takeIf { it.isNotEmpty() }?.let { b to it } }
 }
 
