@@ -268,9 +268,9 @@ fun ConversationDrawerContent(
                 // Header, option B: a persistent slim search field + a small
                 // gear button opening Settings. No "Conversations" title, no
                 // New chat button up here — New chat lives in the split
-                // bottom row. The field is slim: 28dp high, matching the
-                // mockup's field, hugging the text with minimal vertical
-                // padding. A plain Box + clickable carries the ×
+                // bottom row. The field is 32dp high: taller than the 28dp
+                // mockup (too small on device), slimmer than the 36dp
+                // original. A plain Box + clickable carries the ×
                 // instead of an IconButton, because IconButton forces a
                 // 48dp touch target and would stretch the slim field.
                 Row(
@@ -278,7 +278,7 @@ fun ConversationDrawerContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
-                        Modifier.weight(1f).height(28.dp)
+                        Modifier.weight(1f).height(32.dp)
                             .clip(RoundedCornerShape(20.dp))
                             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
                             .padding(horizontal = 12.dp),
@@ -314,7 +314,7 @@ fun ConversationDrawerContent(
                         )
                         if (query.isNotEmpty()) {
                             Box(
-                                Modifier.size(28.dp).clickable { vm.setQuery("") },
+                                Modifier.size(32.dp).clickable { vm.setQuery("") },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
