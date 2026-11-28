@@ -15,18 +15,20 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -41,9 +43,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -191,8 +191,6 @@ fun ConversationDrawerContent(
     var renameTarget by remember { mutableStateOf<ConversationEntity?>(null) }
     var selecting by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Set<String>>(emptySet()) }
-    /** The search field is hidden behind the search icon until the user opens it. */
-    var searchOpen by remember { mutableStateOf(false) }
     /** Which filter chip is active; only filters the list in memory, never the data. */
     var filter by remember { mutableStateOf(ConversationFilter.ALL) }
 
@@ -215,15 +213,12 @@ fun ConversationDrawerContent(
         vm.setDrawerOpen(isOpen)
         if (!isOpen) {
             exitSelection()
-            // The drawer is a transient panel: reopening starts fresh (search closed, filter reset).
-            searchOpen = false
+            // The drawer is a transient panel: reopening starts fresh (search cleared, filter reset).
             filter = ConversationFilter.ALL
             vm.setQuery("")
         }
     }
     BackHandler(enabled = selecting) { exitSelection() }
-    // Back with an empty search field collapses the field instead of closing the drawer.
-    BackHandler(enabled = searchOpen && !selecting && query.isBlank()) { searchOpen = false }
 
     /** Hides the conversations at once and deletes them for good when the "Undo" bar goes away. */
     fun deleteWithUndo(ids: List<String>) {
@@ -270,66 +265,70 @@ fun ConversationDrawerContent(
                     ) { Icon(Icons.Default.Delete, contentDescription = "Delete selected") }
                 }
             } else {
-                // Title row, one row only: "Conversations" + search icon + compact
-                // "+ New chat" pill at the far right. Width budget at 360dp: the
-                // drawer is 90% = 324dp, minus 20dp margins each side leaves
-                // ~284dp for title + search + pill, so the title is 18sp (not 22sp)
-                // and the pill is kept tight — the button never drops to a second row.
+                // Header, option B: a persistent slim search field + a small
+                // gear button opening Settings. No "Conversations" title, no
+                // New chat button up here — New chat lives in the split
+                // bottom row. The field is slim: 28dp high, matching the
+                // mockup's field, hugging the text with minimal vertical
+                // padding. A plain Box + clickable carries the ×
+                // instead of an IconButton, because IconButton forces a
+                // 48dp touch target and would stretch the slim field.
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 12.dp),
+                    Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        "Conversations",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color(0xFF191C20),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(onClick = { searchOpen = true }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search chats")
-                    }
-                    if (!searchOpen) {
-                        Row(
-                            Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xFFEA580C))
-                                .clickable(onClick = onNewChat)
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                            Text(
-                                "New chat",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color.White,
-                                maxLines = 1,
-                                modifier = Modifier.padding(start = 4.dp),
-                            )
+                    Row(
+                        Modifier.weight(1f).height(28.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        BasicTextField(
+                            value = query,
+                            onValueChange = { vm.setQuery(it) },
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 15.sp,
+                                color = Color(0xFF191C20),
+                            ),
+                            modifier = Modifier.weight(1f).padding(start = 8.dp),
+                            decorationBox = { innerTextField ->
+                                Box(Modifier.fillMaxWidth()) {
+                                    if (query.isEmpty()) {
+                                        Text(
+                                            "Search chats",
+                                            fontSize = 15.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            },
+                        )
+                        if (query.isNotEmpty()) {
+                            Box(
+                                Modifier.size(28.dp).clickable { vm.setQuery("") },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Clear,
+                                    contentDescription = "Clear search",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                     }
-                }
-                if (searchOpen) {
-                    // The search field appears where the New chat pill was while it is open.
-                    OutlinedTextField(
-                        value = query,
-                        onValueChange = { vm.setQuery(it) },
-                        singleLine = true,
-                        shape = CircleShape,
-                        placeholder = { Text("Search chats") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        trailingIcon = {
-                            if (query.isNotEmpty()) {
-                                IconButton(onClick = { vm.setQuery("") }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
-                            } else {
-                                IconButton(onClick = { searchOpen = false }) { Icon(Icons.Default.Close, contentDescription = "Close search") }
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
-                    )
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
                 }
                 // Filter chips, horizontally scrollable. Only two chips now: Archived
                 // lives on the Backup screen instead. Hidden while searching: the
@@ -374,7 +373,6 @@ fun ConversationDrawerContent(
                                     // A title-only match opens the chat plainly; a message match also opens the in-chat search.
                                     onOpenResult(g.conversationId, messageId, if (messageId == null) null else query)
                                     vm.setQuery("")
-                                    searchOpen = false
                                 }
                             }
                         }
@@ -438,14 +436,42 @@ fun ConversationDrawerContent(
                 }
             }
             // Fixed footer: always visible at the bottom of the drawer, never
-            // scrolls with the conversation list. This is now the only way into Settings.
+            // scrolls with the conversation list. Split in two halves —
+            // Setting on the left, New Chat on the right — with a thin
+            // vertical divider between them, on a white background.
             HorizontalDivider(color = Color(0xFFE8E8EC))
-            ListItem(
-                modifier = Modifier.clickable { onSettings() },
-                colors = ListItemDefaults.colors(containerColor = Color.White),
-                headlineContent = { Text("Settings", fontSize = 15.sp) },
-                leadingContent = { Icon(Icons.Default.Settings, contentDescription = null) },
-            )
+            Row(
+                Modifier.fillMaxWidth().background(Color.White),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier.weight(1f).clickable { onSettings() }.padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Text(
+                        "Setting",
+                        fontSize = 15.sp,
+                        color = Color(0xFF191C20),
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+                Box(Modifier.width(1.dp).height(24.dp).background(Color(0xFFE8E8EC)))
+                Row(
+                    Modifier.weight(1f).clickable { onNewChat() }.padding(vertical = 12.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Text(
+                        "New Chat",
+                        fontSize = 15.sp,
+                        color = Color(0xFF191C20),
+                        modifier = Modifier.padding(start = 8.dp),
+                    )
+                }
+            }
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
@@ -530,7 +556,7 @@ private fun PinIcon(
     }
 }
 
-/** One filter chip above the conversation list ("All chats 12", "Pinned 3"). */
+/** One filter chip above the conversation list ("All chats 12", "Pinned 3"): text only, no border, no background. The touch area (padding + clickable) is kept exactly as the old chip — only the visible frame is gone. */
 @Composable
 private fun FilterChip(
     label: String,
@@ -538,16 +564,9 @@ private fun FilterChip(
     onClick: () -> Unit,
     icon: @Composable (tint: Color) -> Unit,
 ) {
-    val borderColor = if (selected) Color(0xFFFDBA74) else Color(0xFFE3E1E8)
-    val backgroundColor = if (selected) Color(0xFFFFF1E6) else Color.White
     val contentColor = if (selected) Color(0xFFC2410C) else Color(0xFF33353A)
     Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(backgroundColor)
-            .border(1.dp, borderColor, RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+        modifier = Modifier.clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         icon(contentColor)
@@ -555,7 +574,7 @@ private fun FilterChip(
             text = label,
             color = contentColor,
             fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
             modifier = Modifier.padding(start = 6.dp),
         )
     }

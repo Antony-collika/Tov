@@ -39,6 +39,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -80,7 +84,9 @@ import com.example.byokchat.backup.isBackupFile
 import com.example.byokchat.backup.needsReview
 import com.example.byokchat.backup.openBackupFile
 import com.example.byokchat.container
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -106,7 +112,7 @@ import java.util.Locale
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BackupScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
+fun BackupScreen(onBack: () -> Unit, onOpenArchived: () -> Unit) {
     val context = LocalContext.current
     val container = context.container
     val scope = rememberCoroutineScope()
@@ -131,24 +137,9 @@ fun BackupScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
     var done by remember { mutableStateOf<ApplyResult?>(null) }
     // Image bytes of the opened backup, kept until the restore is applied.
     var pendingImages by remember { mutableStateOf<Map<String, ByteArray>>(emptyMap()) }
-    // Archived chats (hidden from the drawer), with the same last-message preview as the drawer.
-    val archived by container.db.conversations().observeArchived().collectAsState(initial = emptyList())
-    val lastMessages by container.db.messages().observeLastMessages().collectAsState(initial = emptyList())
-    val archivedPreviews = remember(lastMessages) { lastMessages.associate { it.conversationId to previewOf(it.text) } }
 
     fun toast(text: String) {
         Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
-    }
-
-    /** Deletes archived chats for good (no Undo on this screen). */
-    fun deleteArchived(ids: List<String>) {
-        if (ids.isEmpty()) return
-        scope.launch(Dispatchers.IO) {
-            ids.forEach { container.engine.stop(it); container.conversations.delete(it) }
-            withContext(Dispatchers.Main) {
-                toast(if (ids.size == 1) "Conversation deleted" else "${ids.size} conversations deleted")
-            }
-        }
     }
 
     fun backupFileName(): String {
@@ -353,40 +344,27 @@ fun BackupScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
                     )
                 }
                 else -> {
-                    if (archived.isNotEmpty()) {
-                        ArchivedSection(
-                            archived = archived,
-                            previews = archivedPreviews,
-                            onOpenConversation = onOpenConversation,
-                            onRename = { id, title -> scope.launch { container.conversations.rename(id, title) } },
-                            onTogglePin = { id, pinned -> scope.launch { container.db.conversations().setPinned(id, pinned) } },
-                            onUnarchive = { id -> scope.launch { container.db.conversations().setArchived(id, false) } },
-                            onDelete = { ids -> deleteArchived(ids) },
-                        )
-                    }
                     Text(
                         "One encrypted file: providers and keys, sub-agents, chats, notes, tool edits and the default system prompt. Not included: Request panel, theme, limits, request log, playground files.",
                         style = MaterialTheme.typography.bodyMedium,
                     )
+                    // Archived chats live on their own sub-screen now (drawer
+                    // fix round 2, 28/11/2026): this card is always visible,
+                    // even with no archived chats. All three cards are
+                    // titles only, with no subtitle.
+                    Card(onClick = onOpenArchived, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("Archived chat", style = MaterialTheme.typography.titleSmall)
+                        }
+                    }
                     Card(onClick = { showExportPassword = true }, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
                             Text("Backup data", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "Save an encrypted backup file. You set any password you like — " +
-                                    "there are no rules; you decide.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
                         }
                     }
                     Card(onClick = { openLauncher.launch(arrayOf("*/*")) }, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("Restore backup", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                "Nothing is replaced. Where the backup differs, you choose keep current or use backup.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Text("Restore data", style = MaterialTheme.typography.titleSmall)
                         }
                     }
                 }
@@ -630,12 +608,104 @@ private fun BackupPasswordDialog(
 }
 
 /**
- * Archived chats at the top of the Backup screen (drawer fix, 28/11/2026).
- * Only shown when there is at least one archived chat. A row opens its chat
- * on tap; its ⋮ menu is Rename / Pin / Select / Unarchive / Delete, with a
+ * Archived chats, as its own screen off Backup (drawer fix round 2,
+ * 28/11/2026). The "Archived chat" card on the Backup screen is always
+ * visible, even with no archived chats; this list opens from it. Rows
+ * and their ⋮ menu (Rename / Pin / Select / Unarchive / Delete) are the
+ * same as the drawer's, and deleting here has Undo through a snackbar,
+ * like the drawer.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ArchivedChatsScreen(onBack: () -> Unit, onOpenConversation: (String) -> Unit) {
+    val context = LocalContext.current
+    val container = context.container
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    // Archived chats (hidden from the drawer), with the same last-message preview as the drawer.
+    val archived by container.db.conversations().observeArchived().collectAsState(initial = emptyList())
+    val lastMessages by container.db.messages().observeLastMessages().collectAsState(initial = emptyList())
+    val previews = remember(lastMessages) { lastMessages.associate { it.conversationId to previewOf(it.text) } }
+    /** Conversations waiting for their "Undo" time to run out: hidden from the list, deleted for good afterwards. */
+    var hidden by remember { mutableStateOf<Set<String>>(emptySet()) }
+    /** Deleting must finish even if this screen goes away, so it does not use the screen's scope. */
+    val commitScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    val visible = remember(archived, hidden) { archived.filter { it.id !in hidden } }
+
+    /** Hides the conversations at once and deletes them for good when the "Undo" bar goes away. */
+    fun deleteWithUndo(ids: List<String>) {
+        if (ids.isEmpty()) return
+        ids.forEach { container.engine.stop(it) }
+        hidden = hidden + ids
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            var undone = false
+            try {
+                val result = snackbar.showSnackbar(
+                    message = if (ids.size == 1) "Conversation deleted" else "${ids.size} conversations deleted",
+                    actionLabel = "Undo",
+                    duration = SnackbarDuration.Short,
+                )
+                undone = result == SnackbarResult.ActionPerformed
+            } finally {
+                // Also runs if this screen disappears first, so nothing stays hidden forever.
+                if (undone) {
+                    hidden = hidden - ids.toSet()
+                } else {
+                    commitScope.launch {
+                        ids.forEach { container.conversations.delete(it) }
+                        withContext(Dispatchers.Main) { hidden = hidden - ids.toSet() }
+                    }
+                }
+            }
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Archived chat") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbar) },
+    ) { padding ->
+        Column(
+            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)
+                .verticalScroll(rememberScrollState()),
+        ) {
+            if (visible.isEmpty()) {
+                Text(
+                    "No archived chats yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+            } else {
+                ArchivedSection(
+                    archived = visible,
+                    previews = previews,
+                    onOpenConversation = onOpenConversation,
+                    onRename = { id, title -> scope.launch { container.conversations.rename(id, title) } },
+                    onTogglePin = { id, pinned -> scope.launch { container.db.conversations().setPinned(id, pinned) } },
+                    onUnarchive = { id -> scope.launch { container.db.conversations().setArchived(id, false) } },
+                    onDelete = { ids -> deleteWithUndo(ids) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Archived chats list (drawer fix round 2, 28/11/2026): shown on the
+ * Archived chat sub-screen off Backup; the screen's top bar carries the
+ * title, so there is no section header here. A row opens its chat on
+ * tap; its ⋮ menu is Rename / Pin / Select / Unarchive / Delete, with a
  * white background like the drawer's menu. "Select" starts multi-select
- * inside this list (checkboxes + a delete bar); deleting here is immediate,
- * with a toast — there is no Undo snackbar on this screen, unlike the drawer.
+ * inside this list (checkboxes + a delete bar); deleting goes through
+ * the caller's [onDelete], which shows Undo in a snackbar like the drawer.
  */
 @Composable
 private fun ArchivedSection(
@@ -657,7 +727,6 @@ private fun ArchivedSection(
     }
 
     Column(Modifier.fillMaxWidth()) {
-        Text("Archived", style = MaterialTheme.typography.titleMedium)
         if (selecting) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(

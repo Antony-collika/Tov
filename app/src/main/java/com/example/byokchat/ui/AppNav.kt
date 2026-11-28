@@ -159,6 +159,12 @@ fun AppNav() {
             composable("backup") {
                 BackupScreen(
                     onBack = { nav.popBackStack() },
+                    onOpenArchived = { nav.navigate("backup-archived") },
+                )
+            }
+            composable("backup-archived") {
+                ArchivedChatsScreen(
+                    onBack = { nav.popBackStack() },
                     // Opens the chat on top of the Settings → Backup stack, so
                     // Back from the chat returns to the Backup screen.
                     onOpenConversation = { id ->
