@@ -291,9 +291,11 @@ internal fun AssistantMessage(
     // Opens a created file with the app's shared opener; a missing file
     // only shows a toast, never a crash.
     val openFile: (String) -> Unit = { path ->
-        openFileAt(context, context.container.fs, path) { msg ->
+        // onError must be named: the last parameter of openFileAt is the
+        // Boolean inSessionStorage, so a trailing lambda cannot bind to it.
+        openFileAt(context, context.container.fs, path, onError = { msg ->
             Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-        }
+        })
     }
     // Snapshot of the text taken when "Select text" is chosen, so it does not change under your finger while the AI is still typing.
     var selectText by remember { mutableStateOf<String?>(null) }
