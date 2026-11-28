@@ -1,6 +1,5 @@
 package com.example.byokchat.ui
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,25 +11,21 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Error
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -171,7 +166,25 @@ internal fun WorkStream(
         if (isLive) {
             segment.steps.forEach { step ->
                 val (status, label) = stepLine(step)
-                WorkStepLine(status, label, agentColor) { detailStep = step }
+                WorkStepLine(step, status, label, agentColor) { detailStep = step }
+            }
+            // Waiting for approval (was the old pill's "Chờ bạn duyệt…"):
+            // the approval itself is asked by the ConfirmationHost dialog,
+            // but the chat must still say so in the stream.
+            if (segmentStatus == StepStatus.WAITING) {
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        "Chờ bạn duyệt…",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = agentColor,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         } else {
             Row(
@@ -192,7 +205,7 @@ internal fun WorkStream(
                 Text(
                     buildAnnotatedString {
                         withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = agentColor)) { append(agentName) }
-                        append(" $collapsedLabel")
+                        withStyle(SpanStyle(color = MaterialTheme.colorScheme.onSurfaceVariant)) { append(" $collapsedLabel") }
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
@@ -209,7 +222,7 @@ internal fun WorkStream(
             if (userExpanded) {
                 segment.steps.forEach { step ->
                     val (status, label) = stepLine(step)
-                    WorkStepLine(status, label, agentColor) { detailStep = step }
+                    WorkStepLine(step, status, label, agentColor) { detailStep = step }
                 }
             }
         }
@@ -232,11 +245,15 @@ internal fun WorkStream(
  */
 @Composable
 private fun WorkStepLine(
+    step: WorkStep,
     status: StepStatus,
     label: String,
     agentColor: Color,
     onClick: () -> Unit,
 ) {
+    // A finished web step keeps the mockup's globe; every other finished
+    // step keeps the check — both in the agent's colour.
+    val isWeb = step is WorkStep.Tool && (step.call.uid == "web.search" || step.call.uid == "web.fetch")
     Row(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -250,7 +267,11 @@ private fun WorkStepLine(
             StepStatus.INTERRUPTED ->
                 Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
             StepStatus.DONE ->
-                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                if (isWeb) {
+                    Icon(Icons.Default.Public, contentDescription = null, tint = agentColor, modifier = Modifier.size(16.dp))
+                } else {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = agentColor, modifier = Modifier.size(16.dp))
+                }
         }
         Text(
             label,
@@ -266,97 +287,6 @@ private fun WorkStepLine(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(16.dp),
         )
-    }
-}
-
-/**
- * Second level: the table of steps, expanded INLINE at the pill's
- * position in the chat (18/11/2026, "Luồng pill nở tại chỗ") — no
- * bottom sheet for the list anymore. Max height is 8x the pill's
- * height (~384dp, ~6-7 rows): shorter lists wrap to content, longer
- * ones scroll inside the table, with a hint that more rows remain.
- * Tap a step to open its detail in a bottom sheet.
- */
-@Composable
-private fun WorkStepTable(
-    segment: WorkSegment,
-    agentName: String,
-    agentNameFor: (String) -> String,
-    statusOf: (WorkStep.Tool) -> StepStatus,
-    progressLabel: (WorkStep.Tool) -> String?,
-    onStepClick: (WorkStep) -> Unit,
-) {
-    // Rows are ~48dp and the header ~50dp, so 384dp shows the header
-    // plus ~6-7 rows; more than 7 steps means the table scrolls.
-    val visibleRows = 7
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = RoundedCornerShape(16.dp),
-    ) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 384.dp).verticalScroll(rememberScrollState())) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("$agentName — các bước đã làm", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "Theo thứ tự thời gian · chạm vào một việc để xem chi tiết",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            segment.steps.forEach { s ->
-                when (s) {
-                    is WorkStep.Reasoning -> StepRow(
-                        icon = { Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) },
-                        title = stepPhrase(s, agentNameFor),
-                        meta = "Xong",
-                        metaColor = MaterialTheme.colorScheme.primary,
-                        onClick = { onStepClick(s) },
-                    )
-                    is WorkStep.Tool -> {
-                        val status = statusOf(s)
-                        val progress = progressLabel(s)
-                        val (meta, metaColor) = when (status) {
-                            StepStatus.WAITING -> "Chờ duyệt…" to MaterialTheme.colorScheme.tertiary
-                            StepStatus.RUNNING -> (progress ?: "Đang chạy…") to MaterialTheme.colorScheme.onSurfaceVariant
-                            StepStatus.FAILED -> "Lỗi" to MaterialTheme.colorScheme.error
-                            StepStatus.INTERRUPTED -> "Đã dừng" to MaterialTheme.colorScheme.onSurfaceVariant
-                            StepStatus.DONE -> "Xong" to MaterialTheme.colorScheme.primary
-                        }
-                        StepRow(
-                            icon = {
-                                when (status) {
-                                    StepStatus.RUNNING, StepStatus.WAITING ->
-                                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                                    StepStatus.FAILED ->
-                                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                                    StepStatus.INTERRUPTED ->
-                                        Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                                    StepStatus.DONE ->
-                                        if (s.result == null) {
-                                            Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        } else {
-                                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
-                                        }
-                                }
-                            },
-                            title = stepPhrase(s, agentNameFor),
-                            meta = meta,
-                            metaColor = metaColor,
-                            onClick = { onStepClick(s) },
-                        )
-                    }
-                }
-                HorizontalDivider()
-            }
-            if (segment.steps.size > visibleRows) {
-                Text(
-                    "Còn ${segment.steps.size - visibleRows} việc nữa — cuộn xuống để xem",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-        }
     }
 }
 
@@ -397,30 +327,6 @@ private fun WorkDetailSheet(
                 onBack = onDismiss,
             )
         }
-    }
-}
-
-@Composable
-private fun StepRow(
-    icon: @Composable () -> Unit,
-    title: String,
-    meta: String,
-    metaColor: androidx.compose.ui.graphics.Color,
-    onClick: () -> Unit,
-) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        icon()
-        Text(
-            title,
-            style = MaterialTheme.typography.bodyLarge,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(start = 12.dp).weight(1f),
-        )
-        Text(meta, style = MaterialTheme.typography.labelSmall, color = metaColor)
     }
 }
 
