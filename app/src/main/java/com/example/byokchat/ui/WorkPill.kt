@@ -34,7 +34,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -42,48 +41,57 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.example.byokchat.ai.AiToolCall
 import com.example.byokchat.chat.ModelFacingText
 import com.example.byokchat.container
-import kotlinx.coroutines.delay
 
 /** Status of one work step, derived exactly like the old per-tool cards did. */
 private enum class StepStatus { RUNNING, WAITING, DONE, FAILED, INTERRUPTED }
 
 /**
- * One pill for one stretch of work by one agent (17/11/2026, mockup
- * "Pill mockup v2"): a single-line pill at the top of its turn — the
- * agent's name and the latest step in short Vietnamese ("Đang đọc file
- * abc.md…", "Đã xem thời tiết Hà Nội hôm nay"), never file contents or
- * tool results. Tap it and the table of steps expands INLINE at the
- * pill's position in the chat (18/11/2026, "Luồng pill nở tại chỗ"):
- * max 8x the pill's height (~384dp, ~6-7 rows); shorter lists wrap to
- * content, longer ones scroll inside the expanded table. Tap a step
- * to open its detail in a bottom sheet that always opens at a fixed
- * 50% height (even when the detail is short — the empty space below
- * is accepted, like Claude) and can always be dragged to 100%.
- * Reasoning appears only when the provider really returned readable
- * text — never invented. The pill only renders when the turn has tool
- * calls or readable reasoning (a plain answer has no pill); the
- * grouping lives in WorkSegments and is unchanged.
+ * One stretch of work by one agent as inline text lines (chat redesign
+ * 28/11/2026): no pill, no bubble — each reasoning passage or tool call
+ * is one line in the same flow as the message, in the agent's colour.
+ * While the agent works, the lines are open: one row per step, the
+ * running step in the present tense, finished steps in the past tense
+ * (via [pillLabel]), each row tappable to open its detail in the bottom
+ * sheet (always 50% height, draggable to 100%). Once the work is done
+ * the lines collapse into ONE line — the agent's name plus "Worked for
+ * …" (tools) or "Thought for …" (reasoning only), with the elapsed time
+ * frozen at the last activity; tapping it (or its chevron) re-opens the
+ * step rows inline below it. A finished sub waiting for its turn to
+ * speak, a failed run and a stopped run keep their old one-line labels
+ * ("Đã xong · đang chờ X nói xong" / "Lỗi khi …" / "Đã dừng") with a
+ * chevron to open the rows. Reasoning appears only when the provider
+ * really returned readable text — never invented. The stream only
+ * renders when the turn has tool calls or readable reasoning (a plain
+ * answer has no segment, so no line); the grouping lives in
+ * WorkSegments and is unchanged.
  */
 @Composable
-internal fun WorkPill(
+internal fun WorkStream(
     segment: WorkSegment,
     generating: Boolean,
     /** Phase 4: a finished sub waiting for its turn to speak — the name of the agent currently speaking (null = not waiting). */
     waitingForName: String? = null,
+    /** The sender's member (for the agent colour); null falls back to the colour derived from the segment's sender id. */
+    senderMember: GroupMember? = null,
 ) {
     val container = LocalContext.current.container
     val pending by container.confirmations.pending.collectAsState()
-    val progressMap by container.toolProgress.progress.collectAsState()
     val agentName = if (segment.sender == null) "Main" else subAgentMember(segment.sender).name
+    val agentColor = senderMember?.let { memberColor(it) }
+        ?: memberColor(subAgentMember(segment.sender ?: "main"))
     // Display name for a sub-agent id (the id itself when the agent is gone).
     val agentNameFor: (String) -> String = { id -> subAgentMember(id).name }
 
@@ -115,102 +123,96 @@ internal fun WorkPill(
         toolStatuses.contains(StepStatus.INTERRUPTED) -> StepStatus.INTERRUPTED
         else -> StepStatus.DONE
     }
-    // The step the pill streams while the agent works: the latest one with
-    // no result yet. A running download reports live progress in the
-    // sheet; the pill itself stays one short sentence.
+    // The step the stream follows while the agent works: the latest one with
+    // no result yet.
     val runningStep = segment.toolSteps.lastOrNull { statusOf(it) == StepStatus.RUNNING }
     val latestStep = segment.steps.lastOrNull()
-    // A finished sub waiting for its turn to speak (Phase 4): its work is
-    // done, but its brief is queued behind the speaker — the pill says so
-    // instead of the done check, until the brief is delivered.
-    val label = when {
-        waitingForName != null -> "Đã xong · đang chờ $waitingForName nói xong"
-        segmentStatus == StepStatus.WAITING -> "Chờ bạn duyệt…"
-        segmentStatus == StepStatus.RUNNING -> when {
-            runningStep != null -> pillLabel(runningStep, running = true, done = false, agentNameFor)
-            latestStep is WorkStep.Reasoning -> "Đang suy nghĩ…"
-            else -> "Đang chạy…"
+    // Live = still working (running, or waiting for approval). A finished
+    // sub waiting for its turn to speak is NOT live: it shows the single
+    // collapsed line instead of the open rows.
+    val isLive = segmentStatus == StepStatus.RUNNING || segmentStatus == StepStatus.WAITING
+
+    // One step's row: its display status and its label (present tense
+    // while it runs, past tense once done, plain phrase while it has not
+    // started yet / failed / stopped).
+    fun stepLine(step: WorkStep): Pair<StepStatus, String> {
+        if (step is WorkStep.Reasoning) {
+            val running = segmentStatus == StepStatus.RUNNING && step == latestStep && runningStep == null
+            return if (running) StepStatus.RUNNING to pillLabel(step, running = true, done = false, agentNameFor)
+            else StepStatus.DONE to pillLabel(step, running = false, done = true, agentNameFor)
         }
+        step as WorkStep.Tool
+        return when (val st = statusOf(step)) {
+            StepStatus.RUNNING -> st to pillLabel(step, running = true, done = false, agentNameFor)
+            StepStatus.DONE -> st to pillLabel(step, running = false, done = true, agentNameFor)
+            else -> st to pillLabel(step, running = false, done = false, agentNameFor)
+        }
+    }
+
+    // The collapsed line's sentence. Done: "Worked for …" when the
+    // segment called tools, "Thought for …" for reasoning only — the
+    // seconds are lastActivityAt - startedAt, frozen once done (no
+    // ticking). Waiting / failed / stopped keep the old pill labels.
+    val collapsedLabel = when {
+        waitingForName != null -> "Đã xong · đang chờ $waitingForName nói xong"
         segmentStatus == StepStatus.FAILED -> latestStep?.let {
             "Lỗi khi " + stepPhrase(it, agentNameFor).replaceFirstChar { c -> c.lowercaseChar() }
         } ?: "Lỗi"
         segmentStatus == StepStatus.INTERRUPTED -> "Đã dừng"
-        else -> latestStep?.let { pillLabel(it, running = false, done = true, agentNameFor) } ?: "Xong"
-    }
-    // Elapsed time (Phase 4): only elapsed time is real — a run's total
-    // time is unknowable, so there is no % progress bar. Ticks every
-    // second while the agent is live; frozen at the last activity once done.
-    val isLive = waitingForName != null || segmentStatus == StepStatus.RUNNING || segmentStatus == StepStatus.WAITING
-    var nowMs by remember(segment.anchorId) { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(isLive) {
-        while (isLive) {
-            delay(1000)
-            nowMs = System.currentTimeMillis()
+        else -> {
+            val elapsedMs = (segment.lastActivityAt - segment.startedAt).coerceAtLeast(0)
+            (if (segment.hasTools) "Worked for " else "Thought for ") + formatElapsedEn(elapsedMs)
         }
-    }
-    val elapsedText = if (segment.startedAt > 0) {
-        val elapsedMs = if (isLive) nowMs - segment.startedAt else segment.lastActivityAt - segment.startedAt
-        " · " + formatPillElapsed(elapsedMs)
-    } else {
-        ""
     }
 
-    var expanded by remember(segment.anchorId) { mutableStateOf(false) }
+    var userExpanded by remember(segment.anchorId) { mutableStateOf(false) }
     var detailStep by remember(segment.anchorId) { mutableStateOf<WorkStep?>(null) }
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shape = RoundedCornerShape(50),
-        modifier = Modifier.clickable { expanded = !expanded },
-    ) {
-        Row(
-            Modifier.padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            when {
-                waitingForName != null || segmentStatus == StepStatus.RUNNING || segmentStatus == StepStatus.WAITING ->
-                    CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
-                segmentStatus == StepStatus.FAILED ->
-                    Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
-                segmentStatus == StepStatus.INTERRUPTED ->
-                    Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                else ->
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (isLive) {
+            segment.steps.forEach { step ->
+                val (status, label) = stepLine(step)
+                WorkStepLine(status, label, agentColor) { detailStep = step }
             }
-            Text(
-                agentName,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-            )
-            Text(
-                label + elapsedText,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.widthIn(max = 220.dp),
-            )
-            Icon(
-                if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                contentDescription = if (expanded) "Thu lại các bước làm việc của $agentName" else "Xem các bước làm việc của $agentName",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp),
-            )
+        } else {
+            Row(
+                Modifier.fillMaxWidth().clickable { userExpanded = !userExpanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                when {
+                    waitingForName != null ->
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    segmentStatus == StepStatus.FAILED ->
+                        Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                    segmentStatus == StepStatus.INTERRUPTED ->
+                        Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    else ->
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = agentColor, modifier = Modifier.size(16.dp))
+                }
+                Text(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = agentColor)) { append(agentName) }
+                        append(" $collapsedLabel")
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    if (userExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (userExpanded) "Thu lại các bước làm việc của $agentName" else "Xem các bước làm việc của $agentName",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            if (userExpanded) {
+                segment.steps.forEach { step ->
+                    val (status, label) = stepLine(step)
+                    WorkStepLine(status, label, agentColor) { detailStep = step }
+                }
+            }
         }
-    }
-    if (expanded) {
-        WorkStepTable(
-            segment = segment,
-            agentName = agentName,
-            agentNameFor = agentNameFor,
-            statusOf = ::statusOf,
-            progressLabel = { step -> progressMap[step.call.id]?.label() },
-            onStepClick = { detailStep = it },
-        )
-    }
     }
     detailStep?.let { step ->
         WorkDetailSheet(
@@ -219,6 +221,50 @@ internal fun WorkPill(
             displayName = ::displayName,
             statusOf = ::statusOf,
             onDismiss = { detailStep = null },
+        )
+    }
+}
+
+/**
+ * One inline work row: a 16dp status icon, the step's label in the
+ * agent's colour, and a grey chevron at the end. Tapping the row opens
+ * the step's detail in the bottom sheet.
+ */
+@Composable
+private fun WorkStepLine(
+    status: StepStatus,
+    label: String,
+    agentColor: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        when (status) {
+            StepStatus.RUNNING, StepStatus.WAITING ->
+                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            StepStatus.FAILED ->
+                Icon(Icons.Default.Error, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+            StepStatus.INTERRUPTED ->
+                Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+            StepStatus.DONE ->
+                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = agentColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp),
         )
     }
 }

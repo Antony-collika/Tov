@@ -172,6 +172,25 @@ internal fun formatPillElapsed(ms: Long): String {
 }
 
 /**
+ * Elapsed time for the collapsed work line, in English ("8 seconds",
+ * "1 second", "1 minute 5 seconds", "2 minutes"): parts that are zero
+ * are dropped. [ms] is lastActivityAt - startedAt of the segment,
+ * frozen once the work is done — no ticking.
+ */
+internal fun formatElapsedEn(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    val hours = s / 3600
+    val minutes = s % 3600 / 60
+    val seconds = s % 60
+    val parts = buildList {
+        if (hours > 0) add(if (hours == 1L) "1 hour" else "$hours hours")
+        if (minutes > 0) add(if (minutes == 1L) "1 minute" else "$minutes minutes")
+        if (seconds > 0 || isEmpty()) add(if (seconds == 1L) "1 second" else "$seconds seconds")
+    }
+    return parts.joinToString(" ")
+}
+
+/**
  * The concrete object a step acts on (file, folder, keyword, place,
  * agent), for the step detail page's "Nhắm vào" row. Null when the
  * step has no single object (reasoning, "check the time").

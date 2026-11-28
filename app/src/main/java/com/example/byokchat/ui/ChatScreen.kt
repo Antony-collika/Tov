@@ -297,8 +297,30 @@ fun ChatScreen(
     // renders on the segment's first row. The pill only groups rows
     // already in the DB — it never adds anything to Main's request
     // (the 400 fix still holds).
-    val segmentsByAnchor = remember(chrono, toolResults) {
-        groupWorkSegments(chrono, toolResults).associateBy { it.anchorId }
+    val segments = remember(chrono, toolResults) {
+        groupWorkSegments(chrono, toolResults)
+    }
+    val segmentsByAnchor = remember(segments) {
+        segments.associateBy { it.anchorId }
+    }
+    // File cards (chat redesign 28/11/2026): files an agent created in a
+    // turn (txt.create / txt.write) show as cards under the turn's last
+    // text message — or under the segment's anchor message when the turn
+    // has no text at all. Paths are deduplicated, in call order.
+    val fileCardsByMessageId = remember(chrono, segments) {
+        buildMap<String, List<String>> {
+            for (segment in segments) {
+                val paths = segment.toolSteps
+                    .filter { it.call.uid == "txt.create" || it.call.uid == "txt.write" }
+                    .mapNotNull { stepTarget(it) }
+                    .distinct()
+                if (paths.isEmpty()) continue
+                val targetId = chrono.lastOrNull { m ->
+                    m.role == "assistant" && m.turnId == segment.turnId && m.sender == segment.sender && m.text.isNotBlank()
+                }?.id ?: segment.anchorId
+                put(targetId, paths)
+            }
+        }
     }
     // A tool/reasoning row that is not a segment anchor renders nothing
     // (no pill, no bubble) — drop it from the visible list so it leaves
@@ -602,6 +624,7 @@ fun ChatScreen(
                                 m, generating, hl, edit, actions,
                                 workSegment = segmentsByAnchor[m.id],
                                 pillWaitingForName = segmentsByAnchor[m.id]?.sender?.let { waitingDeliveries[it] },
+                                fileCards = fileCardsByMessageId[m.id].orEmpty(),
                                 senderMember = senderMember,
                                 onAvatarClick = avatarClick,
                                 showActions = m.id == lastAnswerId,

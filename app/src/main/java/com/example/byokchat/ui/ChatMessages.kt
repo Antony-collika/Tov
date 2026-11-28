@@ -1,6 +1,9 @@
 package com.example.byokchat.ui
 
+import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -21,10 +24,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.CallSplit
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
@@ -55,6 +61,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
@@ -64,7 +71,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.byokchat.container
 import com.example.byokchat.data.MessageEntity
 import com.example.byokchat.data.images
 import com.example.byokchat.util.TextUtil
@@ -214,6 +223,12 @@ internal fun UserMessage(
                     if (m.text.isNotEmpty()) {
                         Text(annotated, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
+                    Text(
+                        formatClock(m.createdAt),
+                        fontSize = 11.sp,
+                        color = Color(0xFF7A6A9E),
+                        modifier = Modifier.align(Alignment.End),
+                    )
                 }
             }
             if (m.edited) EditedLabel()
@@ -238,10 +253,12 @@ internal fun AssistantMessage(
     hl: Highlight?,
     edit: EditState?,
     actions: Actions,
-    /** The work segment whose pill renders on this message (null except on the segment's first row). */
+    /** The work segment whose stream renders on this message (null except on the segment's first row). */
     workSegment: WorkSegment? = null,
-    /** Phase 4: the name of the agent this segment's sub is waiting for (null = not waiting) — the pill shows "đang chờ [tên] nói xong". */
+    /** Phase 4: the name of the agent this segment's sub is waiting for (null = not waiting) — the collapsed line says "đang chờ [tên] nói xong". */
     pillWaitingForName: String? = null,
+    /** Files this turn created (txt.create / txt.write paths): one card per file, under the turn's last text message. */
+    fileCards: List<String> = emptyList(),
     /** Who sent this message (Main when null sender, else the sub-agent). Null = unknown, no name/avatar. */
     senderMember: GroupMember? = null,
     /** Tapping a sub-agent's avatar opens its Main↔sub conversation; null = avatar does nothing (Main). */
@@ -266,6 +283,18 @@ internal fun AssistantMessage(
     onNewChat: (() -> Unit)? = null,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
+    // Dismissing the error card only hides it for this view (remember,
+    // keyed by message id): reopening the chat shows it again. Nothing is
+    // deleted or retried.
+    var errorDismissed by remember(m.id) { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Opens a created file with the app's shared opener; a missing file
+    // only shows a toast, never a crash.
+    val openFile: (String) -> Unit = { path ->
+        openFileAt(context, context.container.fs, path) { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+    }
     // Snapshot of the text taken when "Select text" is chosen, so it does not change under your finger while the AI is still typing.
     var selectText by remember { mutableStateOf<String?>(null) }
     val haptic = LocalHapticFeedback.current
@@ -325,81 +354,101 @@ internal fun AssistantMessage(
                 MessageEditor(edit, "Save", onEditChange, onEditSave, onEditCancel)
                 return@Column
             }
-            // Work pill (17/11/2026, mockup v2): one line at the TOP of
-            // the turn, above the answer bubble — the old per-tool cards
-            // and the separate "Suy luận" block are gone. Reasoning only
-            // appears when the provider really returned readable text
-            // (never invented). A turn with no tools and no reasoning
-            // has no segment, so no pill.
-            if (workSegment != null) WorkPill(workSegment, generating, waitingForName = pillWaitingForName)
+            // Work stream (chat redesign 28/11/2026): the agent's work as
+            // inline text lines at the TOP of the turn, above the answer —
+            // the old pill is gone. Reasoning only appears when the
+            // provider really returned readable text (never invented). A
+            // turn with no tools and no reasoning has no segment, so no
+            // line at all.
+            if (workSegment != null) WorkStream(workSegment, generating, waitingForName = pillWaitingForName, senderMember = senderMember)
             if (shownText.isNotEmpty()) {
-                // Telegram-style bubble (18/11/2026): every text bubble
-                // is a complete unit — the sender's name on the first
-                // line INSIDE the bubble, coloured per agent, and the
-                // avatar at the bubble's LEFT corner. Name + avatar only
-                // appear with a text bubble: a pill-only or empty row
+                // No bubble (chat redesign 28/11/2026): the header row
+                // (avatar + agent name + time) sits above the answer, and
+                // the text runs full width below it. Name + avatar only
+                // appear with a text message: a work-only or empty row
                 // (a tool call with no words) shows neither, so the
                 // avatar never appears on its own looking broken.
                 Row(
-                    verticalAlignment = Alignment.Bottom,
+                    verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (senderMember != null) {
-                        MemberAvatar(senderMember, size = 28.dp, onClick = onAvatarClick)
+                        MemberAvatar(senderMember, size = 32.dp, onClick = onAvatarClick)
                     }
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp),
-                        modifier = Modifier.widthIn(max = 300.dp),
-                    ) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            // Late result of a sub-agent (Phase 4): the
-                            // task title as an anchor, so a message that
-                            // arrives after the conversation moved on still
-                            // says which task it belongs to.
-                            if (!m.taskTitle.isNullOrBlank()) {
-                                Text(
-                                    "↩ ${m.taskTitle}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            if (senderMember != null) {
-                                Text(
-                                    senderMember.name,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    color = memberColor(senderMember),
-                                )
-                            }
-                            MarkdownBody(
-                                shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl,
-                                onLongPress = openMenu, anchorCoordinates = boxCoords,
-                                streaming = m.status == "streaming",
-                            )
-                        }
+                    if (senderMember != null) {
+                        Text(
+                            senderMember.name,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = memberColor(senderMember),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    } else {
+                        Spacer(Modifier.weight(1f))
                     }
+                    Text(
+                        formatClock(m.createdAt),
+                        fontSize = 12.sp,
+                        color = Color(0xFF8A8D94),
+                    )
                 }
+                // Late result of a sub-agent (Phase 4): the task title as
+                // an anchor, so a message that arrives after the
+                // conversation moved on still says which task it belongs to.
+                if (!m.taskTitle.isNullOrBlank()) {
+                    Text(
+                        "↩ ${m.taskTitle}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                MarkdownBody(
+                    shownText, color = MaterialTheme.colorScheme.onSurface, highlight = hl,
+                    onLongPress = openMenu, anchorCoordinates = boxCoords,
+                    streaming = m.status == "streaming",
+                )
             } else if (m.status == "streaming") {
                 CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
             }
-            if (m.status == "error") {
+            // Files this turn created: one card per file, right under the
+            // answer (or under the work lines when there is no text), and
+            // above the actions row.
+            if (fileCards.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    fileCards.forEach { path ->
+                        FileCard(path, onOpen = { openFile(path) })
+                    }
+                }
+            }
+            if (m.status == "error" && !errorDismissed) {
                 Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(12.dp)) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // The error text has two parts: a friendly sentence, then (after the first line break) a details line.
-                        val err = m.error ?: "Something went wrong."
-                        val nl = err.indexOf('\n')
-                        if (nl < 0) {
-                            Text(err, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
-                        } else {
-                            Text(err.substring(0, nl), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                err.substring(nl + 1).trim(),
-                                color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
-                                style = MaterialTheme.typography.bodySmall,
-                            )
+                        Row(verticalAlignment = Alignment.Top) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                // The error text has two parts: a friendly sentence, then (after the first line break) a details line.
+                                val err = m.error ?: "Something went wrong."
+                                val nl = err.indexOf('\n')
+                                if (nl < 0) {
+                                    Text(err, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
+                                } else {
+                                    Text(err.substring(0, nl), color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        err.substring(nl + 1).trim(),
+                                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                            // Dismiss (chat redesign 28/11/2026): hides
+                            // this card for this view only — no retry,
+                            // nothing deleted, the message itself is untouched.
+                            IconButton(onClick = { errorDismissed = true }, modifier = Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss error", modifier = Modifier.size(20.dp))
+                            }
                         }
                         if (errorExplanation != null) {
                             Text(
@@ -469,6 +518,66 @@ internal fun AssistantMessage(
         }
     }
     selectText?.let { snap -> SelectTextSheet(snap, onCopyAll = { actions.copy(snap) }, onDismiss = { selectText = null }) }
+}
+
+/**
+ * One card for a file an agent created in this turn (chat redesign
+ * 28/11/2026): a blue document tile, the file name and its type from the
+ * extension, and a chevron. Tapping it opens the file with the app's
+ * shared opener.
+ */
+@Composable
+private fun FileCard(path: String, onOpen: () -> Unit) {
+    val name = path.substringAfterLast('/')
+    val ext = name.substringAfterLast('.', "").lowercase()
+    val typeLabel = when (ext) {
+        "md" -> "Markdown"
+        "txt" -> "Text"
+        "csv" -> "CSV"
+        "json" -> "JSON"
+        "" -> "File"
+        else -> ext.uppercase()
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+    ) {
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFFEAF2FF)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Description,
+                    contentDescription = null,
+                    tint = Color(0xFF2B7FFF),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                Text(
+                    name,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    typeLabel,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
 }
 
 // ============ Editing ============
