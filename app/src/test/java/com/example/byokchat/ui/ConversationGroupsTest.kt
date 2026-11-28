@@ -47,7 +47,7 @@ class ConversationGroupsTest {
         val groups = groupConversations(list, now, zone, pinnedSection = true)
         assertEquals(listOf(DateBucket.PINNED), groups.map { it.first })
         assertEquals(listOf("a", "b"), groups[0].second.map { it.id })
-        assertEquals(emptyList(), groupConversations(emptyList(), now, zone, pinnedSection = true))
+        assertEquals(emptyList<Pair<DateBucket, List<ConversationEntity>>>(), groupConversations(emptyList(), now, zone, pinnedSection = true))
     }
 
     @Test fun previewCollapsesWhitespace() {
