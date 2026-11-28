@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -265,22 +264,23 @@ fun ConversationDrawerContent(
                     ) { Icon(Icons.Default.Delete, contentDescription = "Delete selected") }
                 }
             } else {
-                // Header, option B: a persistent slim search field + a small
+                // Header, option B: a persistent search field + a small
                 // gear button opening Settings. No "Conversations" title, no
                 // New chat button up here — New chat lives in the split
-                // bottom row. The field is 32dp high: taller than the 28dp
-                // mockup (too small on device), slimmer than the 36dp
-                // original. A plain Box + clickable carries the ×
-                // instead of an IconButton, because IconButton forces a
-                // 48dp touch target and would stretch the slim field.
+                // bottom row. The field matches the 9:30 sample Duy picked:
+                // 36dp high, light-gray fill (#F2F2F5, same gray as the row
+                // tiles), no outline border. A plain Box + clickable
+                // carries the × instead of an IconButton, because
+                // IconButton forces a 48dp touch target and would stretch
+                // the field.
                 Row(
                     Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Row(
-                        Modifier.weight(1f).height(32.dp)
+                        Modifier.weight(1f).height(36.dp)
                             .clip(RoundedCornerShape(20.dp))
-                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(20.dp))
+                            .background(Color(0xFFF2F2F5), RoundedCornerShape(20.dp))
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -314,7 +314,7 @@ fun ConversationDrawerContent(
                         )
                         if (query.isNotEmpty()) {
                             Box(
-                                Modifier.size(32.dp).clickable { vm.setQuery("") },
+                                Modifier.size(36.dp).clickable { vm.setQuery("") },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
